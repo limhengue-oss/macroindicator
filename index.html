@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Macro</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg:#0f0f0f; --bg2:#181818; --bg3:#222;
+  --border:rgba(255,255,255,0.08); --border2:rgba(255,255,255,0.14);
+  --text:#e8e8e8; --text2:#888; --text3:#555;
+  --up:#22c97a; --dn:#f05252; --neu:#888;
+  --blue:#4d9fff; --red:#f05252; --amber:#f5a623; --green:#22c97a; --purple:#a78bfa;
+}
+body { background:var(--bg); color:var(--text); font-family:'SF Mono','JetBrains Mono','Fira Code',monospace; font-size:17px; line-height:1.4; }
+
+#topbar { display:flex; align-items:center; justify-content:space-between; padding:10px 20px; border-bottom:1px solid var(--border); position:sticky; top:0; background:var(--bg); z-index:10; }
+.brand { font-size:15px; font-weight:700; letter-spacing:0.12em; text-transform:uppercase; }
+.patch { font-size:11px; font-weight:400; color:var(--text3); margin-left:8px; }
+.meta { font-size:14px; color:var(--text3); display:flex; align-items:center; gap:14px; }
+.sdot { width:7px; height:7px; border-radius:50%; background:var(--text3); display:inline-block; }
+.sdot.ok{background:var(--up)} .sdot.err{background:var(--dn)} .sdot.load{background:var(--amber)}
+#rbtn { background:none; border:1px solid var(--border2); color:var(--text2); padding:4px 12px; border-radius:3px; cursor:pointer; font-size:14px; font-family:inherit; }
+#rbtn:hover{border-color:var(--text2);color:var(--text)}
+
+#nav { display:flex; padding:0 20px; border-bottom:1px solid var(--border); }
+.nb { padding:10px 20px; font-size:14px; letter-spacing:0.08em; text-transform:uppercase; color:var(--text3); background:none; border:none; border-bottom:2px solid transparent; cursor:pointer; font-family:inherit; }
+.nb:hover{color:var(--text2)} .nb.active{color:var(--text);border-bottom-color:var(--blue)}
+
+.page { display:none; padding:18px 20px; }
+.page.active { display:block; }
+
+.kpi-strip { display:flex; border:1px solid var(--border); border-radius:4px; margin-bottom:16px; overflow-x:auto; }
+.kpi { padding:12px 18px; flex:1; min-width:120px; border-right:1px solid var(--border); }
+.kpi:last-child{border-right:none}
+.kl { font-size:13px; color:var(--text3); text-transform:uppercase; letter-spacing:0.06em; margin-bottom:6px; }
+.kv { font-size:20px; font-weight:700; letter-spacing:-0.02em; }
+.ks { font-size:12px; margin-top:3px; color:var(--text3); }
+.up{color:var(--up)} .dn{color:var(--dn)} .neu{color:var(--neu)}
+
+.grid { display:grid; gap:12px; }
+.g2{grid-template-columns:1fr 1fr} .g3{grid-template-columns:repeat(3,1fr)} .g21{grid-template-columns:2fr 1fr}
+
+.card { border:1px solid var(--border); border-radius:4px; overflow:hidden; background:var(--bg2); }
+.ch { padding:12px 14px 6px; display:flex; align-items:flex-start; justify-content:space-between; }
+.ct { font-size:14px; font-weight:700; text-transform:uppercase; letter-spacing:0.04em; }
+.cs { font-size:13px; color:var(--text3); margin-top:2px; }
+.cb { padding:4px 12px 12px; }
+.tfs { display:flex; gap:2px; }
+.tf { font-size:13px; padding:2px 7px; border-radius:2px; color:var(--text3); cursor:pointer; background:none; border:none; font-family:inherit; }
+.tf:hover{color:var(--text2)} .tf.on{background:var(--bg3);color:var(--text)}
+.legend { display:flex; gap:14px; padding:2px 14px 10px; flex-wrap:wrap; }
+.li { display:flex; align-items:center; gap:5px; font-size:13px; color:var(--text2); }
+.ls { width:14px; height:2px; border-radius:1px; }
+.ld { font-size:13px; padding:28px; text-align:center; color:var(--text3); }
+.er { color:var(--dn); font-size:13px; padding:4px 14px 10px; }
+
+@media(max-width:700px){.g2,.g3,.g21{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+
+<div id="topbar">
+  <div class="brand">Macro<span class="patch">v2.0</span></div>
+  <div class="meta">
+    <span class="sdot" id="sdot"></span>
+    <span id="stxt">connecting…</span>
+    <button id="rbtn" onclick="loadAll()">↻</button>
+  </div>
+</div>
+
+<div id="nav">
+  <button class="nb active" onclick="go('us',this)">US</button>
+  <button class="nb" onclick="go('asia',this)">Asia</button>
+  <button class="nb" onclick="go('commodity',this)">Commodities</button>
+  <button class="nb" onclick="go('eu',this)">EU</button>
+</div>
+
+<!-- US -->
+<div id="page-us" class="page active">
+  <div class="kpi-strip">
+    <div class="kpi"><div class="kl">S&amp;P 500</div><div class="kv" id="k-SPX">—</div><div class="ks" id="ks-SPX"></div></div>
+    <div class="kpi"><div class="kl">NASDAQ</div><div class="kv" id="k-NASDAQ">—</div><div class="ks" id="ks-NASDAQ"></div></div>
+    <div class="kpi"><div class="kl">VIX</div><div class="kv" id="k-VIX">—</div><div class="ks" id="ks-VIX"></div></div>
+    <div class="kpi"><div class="kl">Fed Rate</div><div class="kv" id="k-FEDFUNDS">—</div><div class="ks" id="ks-FEDFUNDS"></div></div>
+    <div class="kpi"><div class="kl">10Y</div><div class="kv" id="k-DGS10">—</div><div class="ks" id="ks-DGS10"></div></div>
+    <div class="kpi"><div class="kl">Unemployment</div><div class="kv" id="k-UNRATE">—</div><div class="ks" id="ks-UNRATE"></div></div>
+  </div>
+  <div class="grid g2">
+    <div class="card">
+      <div class="ch"><div><div class="ct">S&amp;P 500</div><div class="cs">weekly close</div></div>
+        <div class="tfs"><button class="tf" onclick="setYears('spx',1,this)">1Y</button><button class="tf on" onclick="setYears('spx',3,this)">3Y</button><button class="tf" onclick="setYears('spx',5,this)">5Y</button></div>
+      </div>
+      <div class="cb"><div style="position:relative;height:160px"><div class="ld" id="ld-spx">—</div><canvas id="c-spx" style="display:none"></canvas></div></div>
+      <div class="er" id="er-spx"></div>
+    </div>
+    <div class="card">
+      <div class="ch"><div><div class="ct">Fed Rate vs CPI</div><div class="cs">monthly</div></div></div>
+      <div class="cb"><div style="position:relative;height:160px"><div class="ld" id="ld-macro">—</div><canvas id="c-macro" style="display:none"></canvas></div></div>
+      <div class="legend"><div class="li"><span class="ls" style="background:var(--blue)"></span>Fed Rate</div><div class="li"><span class="ls" style="background:var(--red)"></span>CPI YoY</div></div>
+      <div class="er" id="er-macro"></div>
+    </div>
+  </div>
+  <div class="grid g3" style="margin-top:12px">
+    <div class="card"><div class="ch"><div><div class="ct">Yield Curve</div><div class="cs">2Y−10Y bps</div></div></div>
+      <div class="cb"><div style="position:relative;height:130px"><div class="ld" id="ld-yc">—</div><canvas id="c-yc" style="display:none"></canvas></div></div><div class="er" id="er-yc"></div></div>
+    <div class="card"><div class="ch"><div><div class="ct">VIX</div><div class="cs">weekly</div></div></div>
+      <div class="cb"><div style="position:relative;height:130px"><div class="ld" id="ld-vix">—</div><canvas id="c-vix" style="display:none"></canvas></div></div><div class="er" id="er-vix"></div></div>
+    <div class="card"><div class="ch"><div><div class="ct">Unemployment</div><div class="cs">%, monthly</div></div></div>
+      <div class="cb"><div style="position:relative;height:130px"><div class="ld" id="ld-unrate">—</div><canvas id="c-unrate" style="display:none"></canvas></div></div><div class="er" id="er-unrate"></div></div>
+  </div>
+</div>
+
+<!-- ASIA -->
+<div id="page-asia" class="page">
+  <div class="kpi-strip">
+    <div class="kpi"><div class="kl">SET</div><div class="kv" id="k-SET">—</div><div class="ks" id="ks-SET"></div></div>
+    <div class="kpi"><div class="kl">Nikkei</div><div class="kv" id="k-NIKKEI">—</div><div class="ks" id="ks-NIKKEI"></div></div>
+    <div class="kpi"><div class="kl">Hang Seng</div><div class="kv" id="k-HSI">—</div><div class="ks" id="ks-HSI"></div></div>
+    <div class="kpi"><div class="kl">KOSPI</div><div class="kv" id="k-KOSPI">—</div><div class="ks" id="ks-KOSPI"></div></div>
+    <div class="kpi"><div class="kl">USD/THB</div><div class="kv" id="k-USDTHB">—</div><div class="ks" id="ks-USDTHB"></div></div>
+    <div class="kpi"><div class="kl">USD/JPY</div><div class="kv" id="k-USDJPY">—</div><div class="ks" id="ks-USDJPY"></div></div>
+  </div>
+  <div class="grid g21">
+    <div class="card"><div class="ch"><div><div class="ct">Asia Indices — normalized</div><div class="cs">base 100, 1Y</div></div></div>
+      <div class="cb"><div style="position:relative;height:200px"><div class="ld" id="ld-asia-idx">—</div><canvas id="c-asia-idx" style="display:none"></canvas></div></div>
+      <div class="legend"><div class="li"><span class="ls" style="background:var(--blue)"></span>SET</div><div class="li"><span class="ls" style="background:var(--red)"></span>Nikkei</div><div class="li"><span class="ls" style="background:var(--amber)"></span>Hang Seng</div><div class="li"><span class="ls" style="background:var(--green)"></span>KOSPI</div><div class="li"><span class="ls" style="background:var(--purple)"></span>Nifty</div></div>
+      <div class="er" id="er-asia-idx"></div></div>
+    <div class="card"><div class="ch"><div><div class="ct">Asia FX</div><div class="cs">normalized, 1Y</div></div></div>
+      <div class="cb"><div style="position:relative;height:200px"><div class="ld" id="ld-asia-fx">—</div><canvas id="c-asia-fx" style="display:none"></canvas></div></div>
+      <div class="legend"><div class="li"><span class="ls" style="background:var(--blue)"></span>THB</div><div class="li"><span class="ls" style="background:var(--red)"></span>JPY</div><div class="li"><span class="ls" style="background:var(--amber)"></span>KRW</div></div>
+      <div class="er" id="er-asia-fx"></div></div>
+  </div>
+</div>
+
+<!-- COMMODITY -->
+<div id="page-commodity" class="page">
+  <div class="kpi-strip">
+    <div class="kpi"><div class="kl">WTI</div><div class="kv" id="k-WTI">—</div><div class="ks" id="ks-WTI"></div></div>
+    <div class="kpi"><div class="kl">Brent</div><div class="kv" id="k-BRENT">—</div><div class="ks" id="ks-BRENT"></div></div>
+    <div class="kpi"><div class="kl">Gold</div><div class="kv" id="k-GOLD">—</div><div class="ks" id="ks-GOLD"></div></div>
+    <div class="kpi"><div class="kl">Copper</div><div class="kv" id="k-COPPER">—</div><div class="ks" id="ks-COPPER"></div></div>
+    <div class="kpi"><div class="kl">CPO</div><div class="kv" id="k-CPO">—</div><div class="ks" id="ks-CPO"></div></div>
+  </div>
+  <div class="grid g21">
+    <div class="card"><div class="ch"><div><div class="ct">Crude Oil</div><div class="cs">$/bbl, 1Y</div></div></div>
+      <div class="cb"><div style="position:relative;height:180px"><div class="ld" id="ld-oil">—</div><canvas id="c-oil" style="display:none"></canvas></div></div>
+      <div class="legend"><div class="li"><span class="ls" style="background:var(--blue)"></span>WTI</div><div class="li"><span class="ls" style="background:var(--red)"></span>Brent</div></div>
+      <div class="er" id="er-oil"></div></div>
+    <div class="card"><div class="ch"><div><div class="ct">Gold</div><div class="cs">$/oz, 1Y</div></div></div>
+      <div class="cb"><div style="position:relative;height:180px"><div class="ld" id="ld-gold">—</div><canvas id="c-gold" style="display:none"></canvas></div></div>
+      <div class="er" id="er-gold"></div></div>
+  </div>
+  <div class="grid g3" style="margin-top:12px">
+    <div class="card"><div class="ch"><div><div class="ct">SGP Gasoil</div><div class="cs">$/bbl</div></div></div>
+      <div class="cb"><div style="position:relative;height:130px"><div class="ld" id="ld-sgo">—</div><canvas id="c-sgo" style="display:none"></canvas></div></div><div class="er" id="er-sgo"></div></div>
+    <div class="card"><div class="ch"><div><div class="ct">Palm Oil</div><div class="cs">MYR/mt</div></div></div>
+      <div class="cb"><div style="position:relative;height:130px"><div class="ld" id="ld-cpo">—</div><canvas id="c-cpo" style="display:none"></canvas></div></div><div class="er" id="er-cpo"></div></div>
+    <div class="card"><div class="ch"><div><div class="ct">Copper</div><div class="cs">$/lb</div></div></div>
+      <div class="cb"><div style="position:relative;height:130px"><div class="ld" id="ld-copper">—</div><canvas id="c-copper" style="display:none"></canvas></div></div><div class="er" id="er-copper"></div></div>
+  </div>
+</div>
+
+<!-- EU -->
+<div id="page-eu" class="page">
+  <div class="kpi-strip">
+    <div class="kpi"><div class="kl">Euro Stoxx</div><div class="kv" id="k-STOXX50">—</div><div class="ks" id="ks-STOXX50"></div></div>
+    <div class="kpi"><div class="kl">DAX</div><div class="kv" id="k-DAX">—</div><div class="ks" id="ks-DAX"></div></div>
+    <div class="kpi"><div class="kl">FTSE 100</div><div class="kv" id="k-FTSE">—</div><div class="ks" id="ks-FTSE"></div></div>
+    <div class="kpi"><div class="kl">EUR/USD</div><div class="kv" id="k-EURUSD">—</div><div class="ks" id="ks-EURUSD"></div></div>
+    <div class="kpi"><div class="kl">ECB Rate</div><div class="kv" id="k-ECBRATE">—</div><div class="ks" id="ks-ECBRATE"></div></div>
+  </div>
+  <div class="grid g21">
+    <div class="card"><div class="ch"><div><div class="ct">EU Indices — normalized</div><div class="cs">base 100, 1Y</div></div></div>
+      <div class="cb"><div style="position:relative;height:180px"><div class="ld" id="ld-eu-idx">—</div><canvas id="c-eu-idx" style="display:none"></canvas></div></div>
+      <div class="legend"><div class="li"><span class="ls" style="background:var(--blue)"></span>Euro Stoxx</div><div class="li"><span class="ls" style="background:var(--red)"></span>DAX</div><div class="li"><span class="ls" style="background:var(--amber)"></span>FTSE</div></div>
+      <div class="er" id="er-eu-idx"></div></div>
+    <div class="card"><div class="ch"><div><div class="ct">ECB Rate vs EU CPI</div><div class="cs">monthly</div></div></div>
+      <div class="cb"><div style="position:relative;height:180px"><div class="ld" id="ld-ecb">—</div><canvas id="c-ecb" style="display:none"></canvas></div></div>
+      <div class="legend"><div class="li"><span class="ls" style="background:var(--blue)"></span>ECB</div><div class="li"><span class="ls" style="background:var(--red)"></span>EU CPI</div></div>
+      <div class="er" id="er-ecb"></div></div>
+  </div>
+</div>
+
+<script type="module">
+import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
+import { getFirestore, collection, getDocs } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
+
+const firebaseConfig = {
+  apiKey: "AIzaSyCggg5oZZl2dUNrncisVlJuugsT2XUtls8",
+  authDomain: "macroindicator-6b265.firebaseapp.com",
+  projectId: "macroindicator-6b265",
+  storageBucket: "macroindicator-6b265.firebasestorage.app",
+  messagingSenderId: "871039169298",
+  appId: "1:871039169298:web:50f0f04ad17f1123a3b9cb"
+};
+
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+
+// ── global state ───────────────────────────────────────────────────
+const SERIES = {};   // doc_id → { name, updated, data:[{x,y}] }
+const charts = {};
+let years = { spx: 3 };
+
+// ── load all series from Firestore (1 read) ────────────────────────
+async function fetchAll() {
+  const snap = await getDocs(collection(db, 'series'));
+  snap.forEach(doc => {
+    const d = doc.data();
+    SERIES[doc.id] = {
+      name: d.name,
+      updated: d.updated,
+      data: (d.data || []).map(p => ({ x: p.d, y: p.v }))
+    };
+  });
+}
+
+// ── helpers ────────────────────────────────────────────────────────
+window.go = function(id, btn) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nb').forEach(b => b.classList.remove('active'));
+  document.getElementById('page-'+id).classList.add('active');
+  btn.classList.add('active');
+};
+
+window.setYears = function(key, y, btn) {
+  years[key] = y;
+  btn.closest('.tfs').querySelectorAll('.tf').forEach(b => b.classList.remove('on'));
+  btn.classList.add('on');
+  if (key === 'spx') drawSimple('spx', 'SPX', '#4d9fff', years.spx);
+};
+
+function setStatus(state, txt) {
+  document.getElementById('sdot').className = 'sdot ' + state;
+  document.getElementById('stxt').textContent = txt;
+}
+
+function showErr(id, msg) {
+  const el = document.getElementById('er-'+id); if (el) el.textContent = msg;
+  const ld = document.getElementById('ld-'+id); if (ld) ld.style.display='none';
+}
+
+function cutByYears(data, y) {
+  if (!y) return data;
+  const cutoff = new Date(); cutoff.setFullYear(cutoff.getFullYear() - y);
+  const cs = cutoff.toISOString().slice(0,10);
+  return data.filter(p => p.x >= cs);
+}
+
+function mkChart(id, datasets, yExtra={}) {
+  const canvas = document.getElementById('c-'+id);
+  const ld = document.getElementById('ld-'+id);
+  if (ld) ld.style.display='none';
+  canvas.style.display='block';
+  if (charts[id]) charts[id].destroy();
+  charts[id] = new Chart(canvas, {
+    type:'line', data:{datasets},
+    options:{
+      responsive:true, maintainAspectRatio:false, animation:false, parsing:false,
+      interaction:{mode:'index',intersect:false},
+      plugins:{ legend:{display:false}, tooltip:{ backgroundColor:'#111', borderColor:'rgba(255,255,255,0.12)', borderWidth:1, titleColor:'#888', bodyColor:'#e8e8e8', titleFont:{family:'monospace',size:12}, bodyFont:{family:'monospace',size:13} } },
+      scales:{
+        x:{ type:'category', ticks:{color:'#555',font:{family:'monospace',size:11},maxTicksLimit:7,maxRotation:0}, grid:{color:'rgba(255,255,255,0.04)'}, border:{color:'rgba(255,255,255,0.08)'} },
+        y:Object.assign({ ticks:{color:'#555',font:{family:'monospace',size:11},maxTicksLimit:5}, grid:{color:'rgba(255,255,255,0.04)'}, border:{color:'rgba(255,255,255,0.08)'} }, yExtra)
+      }
+    }
+  });
+}
+
+function ds(label, data, color, dash=[]) {
+  return { label, data, borderColor:color, borderWidth:1.8, borderDash:dash, pointRadius:0, pointHoverRadius:3, tension:0.3, fill:false, parsing:false };
+}
+function norm(data){ if(!data.length)return data; const b=data[0].y; return data.map(d=>({x:d.x,y:+(d.y/b*100).toFixed(2)})); }
+function setKPI(id, val, sub, cls){ const v=document.getElementById('k-'+id),s=document.getElementById('ks-'+id); if(v){v.textContent=val;v.className='kv '+(cls||'')} if(s)s.textContent=sub; }
+function fmtPct(p){ return (p>=0?'+':'')+p.toFixed(2)+'%'; }
+function pctCls(p){ return p>0.05?'up':p<-0.05?'dn':'neu'; }
+
+function kpiFrom(id, dec=2) {
+  const s = SERIES[id];
+  if (!s || s.data.length < 2) { setKPI(id, '—', '', ''); return; }
+  const last = s.data[s.data.length-1].y;
+  const prev = s.data[s.data.length-2].y;
+  const pct = (last-prev)/prev*100;
+  setKPI(id, last.toLocaleString('en-US',{maximumFractionDigits:dec}), fmtPct(pct), pctCls(pct));
+}
+
+// CPI YoY computed from CPI index
+function yoyFromIndex(id) {
+  const s = SERIES[id];
+  if (!s || s.data.length < 13) return [];
+  const d = s.data;
+  return d.slice(12).map((p, i) => ({ x: p.x, y: +((p.y/d[i].y - 1)*100).toFixed(2) }));
+}
+function diffFromIndex(id) {
+  const s = SERIES[id];
+  if (!s || s.data.length < 13) return [];
+  const d = s.data;
+  return d.slice(12).map((p, i) => ({ x: p.x, y: +(p.y - d[i].y).toFixed(2) }));
+}
+
+// ── draw functions ─────────────────────────────────────────────────
+function drawSimple(chartId, seriesId, color, y, fill=false) {
+  const s = SERIES[seriesId];
+  if (!s) { showErr(chartId, 'no data'); return; }
+  const data = cutByYears(s.data, y);
+  const d = ds(s.name, data, color);
+  if (fill) { d.fill = true; d.backgroundColor = color + '10'; }
+  mkChart(chartId, [d]);
+}
+
+function drawMulti(chartId, defs, y, normalize=true) {
+  const datasets = [];
+  for (const def of defs) {
+    const s = SERIES[def.id];
+    if (!s) continue;
+    const data = cutByYears(s.data, y);
+    datasets.push(ds(def.label, normalize ? norm(data) : data, def.color, def.dash||[]));
+  }
+  if (datasets.length) mkChart(chartId, datasets);
+  else showErr(chartId, 'no data');
+}
+
+function drawMacroChart() {
+  const fed = SERIES['FEDFUNDS'];
+  const cpiYoY = yoyFromIndex('CPI');
+  if (!fed) { showErr('macro', 'no data'); return; }
+  const fedData = cutByYears(fed.data, 5);
+  const cpiData = cutByYears({data:cpiYoY}.data || cpiYoY, 5);
+  mkChart('macro', [ds('Fed Rate', fedData, '#4d9fff'), ds('CPI YoY', cpiData, '#f05252', [5,3])]);
+  // KPI
+  const lc = cpiYoY[cpiYoY.length-1];
+  if (lc) setKPI('CPI', lc.y.toFixed(2)+'%', '', lc.y>3?'dn':'up');
+}
+
+function drawYC() {
+  const y2 = SERIES['DGS2'], y10 = SERIES['DGS10'];
+  if (!y2 || !y10) { showErr('yc', 'no data'); return; }
+  const m2 = Object.fromEntries(y2.data.map(p=>[p.x,p.y]));
+  const spread = y10.data.filter(p=>m2[p.x]!==undefined).map(p=>({x:p.x,y:+((p.y-m2[p.x])*100).toFixed(0)}));
+  mkChart('yc', [ds('2Y−10Y', cutByYears(spread,5), '#f5a623')], { ticks:{color:'#555',font:{family:'monospace',size:11},callback:v=>v+'bps'} });
+}
+
+function drawECB() {
+  const ecb = SERIES['ECBRATE'];
+  const cpiYoY = diffFromIndex('EUCPI');
+  if (!ecb) { showErr('ecb', 'no data'); return; }
+  mkChart('ecb', [ds('ECB Rate', cutByYears(ecb.data,5), '#4d9fff'), ds('EU CPI', cutByYears(cpiYoY,5), '#f05252', [5,3])]);
+}
+
+// ── orchestrate ────────────────────────────────────────────────────
+window.loadAll = async function() {
+  setStatus('load', 'loading…');
+  document.querySelectorAll('.ld').forEach(el=>{el.style.display='block';el.textContent='loading…'});
+  document.querySelectorAll('canvas').forEach(el=>el.style.display='none');
+  document.querySelectorAll('.er').forEach(el=>el.textContent='');
+
+  try {
+    await fetchAll();
+  } catch(e) {
+    setStatus('err', 'Firestore error: ' + e.message);
+    console.error(e);
+    return;
+  }
+
+  // KPIs
+  ['SPX','NASDAQ','VIX','SET','NIKKEI','HSI','KOSPI','USDTHB','USDJPY',
+   'WTI','BRENT','GOLD','COPPER','CPO','STOXX50','DAX','FTSE','EURUSD','DGS10'].forEach(id => kpiFrom(id, 2));
+  // FRED rate KPIs (show latest value, not % change)
+  ['FEDFUNDS','UNRATE','ECBRATE'].forEach(id => {
+    const s = SERIES[id];
+    if (s && s.data.length) { const last = s.data[s.data.length-1]; setKPI(id, last.y.toFixed(2)+'%', '', ''); }
+  });
+
+  // US
+  drawSimple('spx', 'SPX', '#4d9fff', years.spx);
+  drawSimple('vix', 'VIX', '#a78bfa', 1);
+  drawMacroChart();
+  drawYC();
+  drawSimple('unrate', 'UNRATE', '#888', 5, false);
+
+  // Asia
+  drawMulti('asia-idx', [
+    {id:'SET',label:'SET',color:'#4d9fff'},
+    {id:'NIKKEI',label:'Nikkei',color:'#f05252',dash:[5,3]},
+    {id:'HSI',label:'Hang Seng',color:'#f5a623',dash:[2,3]},
+    {id:'KOSPI',label:'KOSPI',color:'#22c97a'},
+    {id:'NIFTY',label:'Nifty',color:'#a78bfa',dash:[5,3]},
+  ], 1);
+  drawMulti('asia-fx', [
+    {id:'USDTHB',label:'THB',color:'#4d9fff'},
+    {id:'USDJPY',label:'JPY',color:'#f05252',dash:[5,3]},
+    {id:'USDKRW',label:'KRW',color:'#f5a623',dash:[2,3]},
+  ], 1);
+
+  // Commodity
+  drawMulti('oil', [
+    {id:'WTI',label:'WTI',color:'#4d9fff'},
+    {id:'BRENT',label:'Brent',color:'#f05252',dash:[5,3]},
+  ], 1, false);
+  drawSimple('gold', 'GOLD', '#f5a623', 1, true);
+  drawSimple('sgo', 'SGPGASOIL', '#a78bfa', 1);
+  drawSimple('cpo', 'CPO', '#22c97a', 1);
+  drawSimple('copper', 'COPPER', '#f5a623', 1);
+
+  // EU
+  drawMulti('eu-idx', [
+    {id:'STOXX50',label:'Euro Stoxx',color:'#4d9fff'},
+    {id:'DAX',label:'DAX',color:'#f05252',dash:[5,3]},
+    {id:'FTSE',label:'FTSE',color:'#f5a623',dash:[2,3]},
+  ], 1);
+  drawECB();
+
+  // status
+  const meta = SERIES['SPX'];
+  const upd = meta ? meta.updated : '';
+  setStatus('ok', upd ? ('data: ' + upd.slice(0,16).replace('T',' ') + ' UTC') : 'loaded');
+};
+
+loadAll();
+</script>
+</body>
+</html>
