@@ -28,9 +28,11 @@ jobs:
       - name: Install R packages
         run: |
           install.packages(c(
-            "tidyquant", "fredr", "tidyverse",
-            "jsonlite", "httr2", "jose"
-          ), repos = "https://cloud.r-project.org")
+            "curl", "httr", "httr2", "jsonlite", "jose",
+            "quantmod", "TTR", "timetk", "xts", "zoo",
+            "tidyquant", "fredr",
+            "dplyr", "tidyr", "purrr", "readr", "tibble", "stringr", "lubridate"
+          ), repos = "https://cloud.r-project.org", dependencies = TRUE)
         shell: Rscript {0}
 
       - name: Fetch data and push to Firestore
