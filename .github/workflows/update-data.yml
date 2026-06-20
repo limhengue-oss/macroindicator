@@ -2,13 +2,13 @@ name: Update Macro Data
 
 on:
   schedule:
-    # ทุก 6 ชั่วโมง (UTC) — 00:00, 06:00, 12:00, 18:00
     - cron: '0 */6 * * *'
-  workflow_dispatch:   # ให้กดรันเองได้จากหน้า Actions
+  workflow_dispatch:
 
 jobs:
   fetch-and-push:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -17,26 +17,26 @@ jobs:
         uses: r-lib/actions/setup-r@v2
         with:
           r-version: 'release'
+          use-public-rspm: true
 
-      - name: Cache R packages
-        uses: actions/cache@v4
-        with:
-          path: ${{ env.R_LIBS_USER }}
-          key: ${{ runner.os }}-r-${{ hashFiles('**/fetch_and_push.R') }}
-          restore-keys: ${{ runner.os }}-r-
-
-      - name: Install R packages
-        run: |
-          install.packages(c(
-            "curl", "httr", "httr2", "jsonlite", "jose",
-            "quantmod", "TTR", "timetk", "xts", "zoo",
-            "tidyquant", "fredr",
-            "dplyr", "tidyr", "purrr", "readr", "tibble", "stringr", "lubridate"
-          ), repos = "https://cloud.r-project.org", dependencies = TRUE)
-        shell: Rscript {0}
-
-      - name: Fetch data and push to Firestore
+      - name: Install packages and run
         env:
           FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
           GCP_SA_KEY:   ${{ secrets.GCP_SA_KEY }}
-        run: Rscript fetch_and_push.R
+        run: |
+          Rscript - <<'REOF'
+          options(repos = c(CRAN = "https://packagemanager.posit.co/cran/__linux__/noble/latest"))
+
+          pkgs <- c("curl","httr","httr2","jsonlite","jose",
+                    "quantmod","TTR","timetk","xts","zoo",
+                    "tidyquant","fredr",
+                    "dplyr","tidyr","purrr","tibble","stringr","lubridate")
+
+          missing <- pkgs[!pkgs %in% installed.packages()[,"Package"]]
+          if (length(missing) > 0) {
+            message("Installing: ", paste(missing, collapse=", "))
+            install.packages(missing, dependencies = TRUE)
+          }
+
+          source("fetch_and_push.R")
+          REOF
