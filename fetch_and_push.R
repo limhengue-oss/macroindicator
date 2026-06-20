@@ -15,10 +15,15 @@
 suppressPackageStartupMessages({
   library(tidyquant)
   library(fredr)
-  library(tidyverse)
+  library(dplyr)
+  library(tidyr)
+  library(purrr)
+  library(tibble)
+  library(stringr)
+  library(lubridate)
   library(jsonlite)
   library(httr2)
-  library(jose)     # สำหรับ sign JWT ด้วย service account
+  library(jose)
 })
 
 PROJECT_ID <- "macroindicator-6b265"
