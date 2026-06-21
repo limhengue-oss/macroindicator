@@ -1,0 +1,778 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Macro</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg:#0f0f0f; --bg2:#181818; --bg3:#222; --bg4:#2a2a2a;
+  --border:rgba(255,255,255,0.08); --border2:rgba(255,255,255,0.14);
+  --text:#e8e8e8; --text2:#888; --text3:#555;
+  --up:#22c97a; --dn:#f05252; --neu:#888;
+  --blue:#4d9fff; --red:#f05252; --amber:#f5a623; --green:#22c97a; --purple:#a78bfa;
+}
+body { background:var(--bg); color:var(--text); font-family:'SF Mono','JetBrains Mono','Fira Code',monospace; font-size:15px; line-height:1.4; }
+
+#topbar { display:flex; align-items:center; justify-content:space-between; padding:10px 18px; border-bottom:1px solid var(--border); position:sticky; top:0; background:var(--bg); z-index:20; }
+.brand { font-size:14px; font-weight:700; letter-spacing:0.12em; text-transform:uppercase; }
+.patch { font-size:10px; font-weight:400; color:var(--text3); margin-left:8px; }
+.meta { font-size:13px; color:var(--text3); display:flex; align-items:center; gap:12px; }
+.sdot { width:7px; height:7px; border-radius:50%; background:var(--text3); display:inline-block; }
+.sdot.ok{background:var(--up)} .sdot.err{background:var(--dn)} .sdot.load{background:var(--amber)}
+.btn { background:none; border:1px solid var(--border2); color:var(--text2); padding:4px 10px; border-radius:3px; cursor:pointer; font-size:13px; font-family:inherit; }
+.btn:hover{border-color:var(--text2);color:var(--text)}
+.btn-primary { background:var(--blue); color:#000; border-color:var(--blue); font-weight:700; }
+.btn-primary:hover{opacity:0.85;color:#000}
+.btn-danger:hover{border-color:var(--dn);color:var(--dn)}
+
+#nav { display:flex; padding:0 18px; border-bottom:1px solid var(--border); align-items:center; gap:2px; overflow-x:auto; }
+.nb { padding:9px 16px; font-size:13px; letter-spacing:0.06em; text-transform:uppercase; color:var(--text3); background:none; border:none; border-bottom:2px solid transparent; cursor:pointer; font-family:inherit; white-space:nowrap; }
+.nb:hover{color:var(--text2)} .nb.active{color:var(--text);border-bottom-color:var(--blue)}
+.nb-add { color:var(--text3); font-size:16px; padding:9px 12px; }
+.nb-add:hover{color:var(--blue)}
+
+.page { display:none; padding:16px 18px; }
+.page.active { display:block; }
+.page-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:14px; }
+.page-title-row { display:flex; align-items:center; gap:10px; }
+.page-actions { display:flex; gap:6px; }
+
+.chart-grid { display:grid; gap:12px; grid-template-columns:repeat(auto-fill, minmax(380px, 1fr)); }
+.chart-grid.cols-1 { grid-template-columns:1fr; }
+.chart-grid.cols-2 { grid-template-columns:repeat(2,1fr); }
+.chart-grid.cols-3 { grid-template-columns:repeat(3,1fr); }
+
+.card { border:1px solid var(--border); border-radius:4px; overflow:hidden; background:var(--bg2); }
+.ch { padding:10px 12px 4px; display:flex; align-items:flex-start; justify-content:space-between; gap:8px; }
+.ct { font-size:13px; font-weight:700; text-transform:uppercase; letter-spacing:0.03em; }
+.cs { font-size:11px; color:var(--text3); margin-top:2px; }
+.ch-actions { display:flex; gap:4px; flex-shrink:0; }
+.icon-btn { background:none; border:none; color:var(--text3); cursor:pointer; font-size:13px; padding:2px 4px; font-family:inherit; }
+.icon-btn:hover{color:var(--text)}
+.cb { padding:4px 12px 10px; }
+.tfs { display:flex; gap:1px; padding:0 12px 6px; flex-wrap:wrap; }
+.tf { font-size:11px; padding:2px 6px; border-radius:2px; color:var(--text3); cursor:pointer; background:none; border:none; font-family:inherit; }
+.tf:hover{color:var(--text2)} .tf.on{background:var(--bg3);color:var(--text)}
+.legend { display:flex; gap:12px; padding:0 12px 8px; flex-wrap:wrap; }
+.li { display:flex; align-items:center; gap:5px; font-size:11px; color:var(--text2); }
+.ls { width:14px; height:2px; border-radius:1px; }
+.ld { font-size:12px; padding:24px; text-align:center; color:var(--text3); }
+.er { color:var(--dn); font-size:12px; padding:4px 12px 8px; }
+
+.empty { padding:40px; text-align:center; color:var(--text3); font-size:13px; }
+.empty .btn { margin-top:12px; }
+
+/* Modal */
+.modal-bg { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:100; align-items:flex-start; justify-content:center; padding:40px 20px; overflow-y:auto; }
+.modal-bg.show { display:flex; }
+.modal { background:var(--bg2); border:1px solid var(--border2); border-radius:6px; width:100%; max-width:520px; padding:20px; }
+.modal h3 { font-size:14px; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:16px; }
+.field { margin-bottom:14px; }
+.field label { display:block; font-size:11px; color:var(--text3); text-transform:uppercase; letter-spacing:0.05em; margin-bottom:5px; }
+.field input[type=text], .field select { width:100%; background:var(--bg3); border:1px solid var(--border2); color:var(--text); padding:7px 10px; border-radius:3px; font-family:inherit; font-size:13px; }
+.field input:focus, .field select:focus { outline:none; border-color:var(--blue); }
+.series-row { display:grid; grid-template-columns:1fr 90px 70px 28px; gap:6px; margin-bottom:6px; align-items:center; }
+.series-row select { width:100%; background:var(--bg3); border:1px solid var(--border2); color:var(--text); padding:5px 7px; border-radius:3px; font-family:inherit; font-size:12px; }
+.series-row .rm { background:none; border:none; color:var(--text3); cursor:pointer; font-size:14px; }
+.series-row .rm:hover{color:var(--dn)}
+.add-series-btn { font-size:12px; color:var(--blue); background:none; border:1px dashed var(--border2); border-radius:3px; padding:5px; width:100%; cursor:pointer; font-family:inherit; margin-top:4px; }
+.add-series-btn:hover{border-color:var(--blue)}
+.modal-actions { display:flex; gap:8px; justify-content:flex-end; margin-top:20px; }
+.swatch-row { display:flex; gap:4px; }
+.swatch { width:22px; height:22px; border-radius:3px; cursor:pointer; border:2px solid transparent; }
+.swatch.on { border-color:#fff; }
+.hint { font-size:11px; color:var(--text3); margin-top:4px; }
+</style>
+</head>
+<body>
+
+<div id="topbar">
+  <div class="brand">Macro<span class="patch">v3.0</span></div>
+  <div class="meta">
+    <span class="sdot" id="sdot"></span>
+    <span id="stxt">loading…</span>
+    <button class="btn" onclick="exportConfig()">Export</button>
+    <button class="btn" onclick="importConfig()">Import</button>
+    <button class="btn" onclick="loadData()">↻</button>
+  </div>
+</div>
+
+<div id="nav"></div>
+
+<div id="pages"></div>
+
+<!-- Chart Modal -->
+<div class="modal-bg" id="chart-modal">
+  <div class="modal">
+    <h3 id="chart-modal-title">Add Chart</h3>
+    <div class="field">
+      <label>Title</label>
+      <input type="text" id="cm-title" placeholder="เช่น Crude Oil">
+    </div>
+    <div class="field">
+      <label>Series (1–3)</label>
+      <div id="cm-series"></div>
+      <button class="add-series-btn" id="cm-add-series" onclick="addSeriesRow()">+ add series</button>
+      <div class="hint">L/R = แกนซ้าย/ขวา · เลือกสีได้</div>
+    </div>
+    <div class="field">
+      <label>Apply function</label>
+      <select id="cm-fn">
+        <option value="raw">Raw — ค่าดิบ</option>
+        <option value="norm">Normalize — base 100</option>
+        <option value="cumret">Cumulative return %</option>
+        <option value="yoy">YoY %</option>
+        <option value="mom">MoM %</option>
+        <option value="ma20">MA20 — moving avg 20</option>
+        <option value="ma50">MA50 — moving avg 50</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>Default period</label>
+      <select id="cm-period">
+        <option value="3m">3M</option>
+        <option value="6m">6M</option>
+        <option value="1y" selected>1Y</option>
+        <option value="3y">3Y</option>
+        <option value="10y">10Y</option>
+        <option value="max">Max</option>
+      </select>
+    </div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeChartModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveChart()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Page Modal -->
+<div class="modal-bg" id="page-modal">
+  <div class="modal" style="max-width:380px">
+    <h3 id="page-modal-title">Add Page</h3>
+    <div class="field">
+      <label>Page name</label>
+      <input type="text" id="pm-name" placeholder="เช่น US, Asia, My Watchlist">
+    </div>
+    <div class="field">
+      <label>Columns</label>
+      <select id="pm-cols">
+        <option value="0">Auto</option>
+        <option value="1">1 column</option>
+        <option value="2" selected>2 columns</option>
+        <option value="3">3 columns</option>
+      </select>
+    </div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closePageModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="savePage()">Save</button>
+    </div>
+  </div>
+</div>
+
+<script type="module">
+import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
+import { getFirestore, collection, getDocs } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
+
+const firebaseConfig = {
+  apiKey: "AIzaSyCggg5oZZl2dUNrncisVlJuugsT2XUtls8",
+  authDomain: "macroindicator-6b265.firebaseapp.com",
+  projectId: "macroindicator-6b265",
+  storageBucket: "macroindicator-6b265.firebasestorage.app",
+  messagingSenderId: "871039169298",
+  appId: "1:871039169298:web:50f0f04ad17f1123a3b9cb"
+};
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+
+// ════════════════════════════════════════════════════════════════════
+//  STATE
+// ════════════════════════════════════════════════════════════════════
+const SERIES = {};      // doc_id → { name, updated, data:[{x,y}] }
+const charts = {};      // chartId → Chart instance
+const COLORS = ['#4d9fff','#f05252','#f5a623','#22c97a','#a78bfa','#888888'];
+
+// grouping สำหรับ dropdown
+const SERIES_GROUPS = {
+  'US Equity':    ['SPX','NASDAQ','VIX'],
+  'Mag 7':        ['AAPL','MSFT','GOOGL','AMZN','NVDA','META','TSLA'],
+  'Crypto':       ['BTC'],
+  'EU Indices':   ['STOXX50','DAX','FTSE'],
+  'Asia Indices': ['SET','NIKKEI','HSI','KOSPI','NIFTY','IDX'],
+  'FX':           ['USDTHB','USDJPY','USDKRW','USDINR','USDIDR','EURUSD'],
+  'Commodities':  ['WTI','BRENT','GOLD','SILVER','COPPER','NATGAS'],
+  'US Macro':     ['FEDFUNDS','CPI','CORECPI','DGS2','DGS10','UNRATE'],
+  'EU Macro':     ['ECBRATE','EUCPI'],
+};
+const PERIODS = { '3m':0.25, '6m':0.5, '1y':1, '3y':3, '10y':10, 'max':999 };
+const FN_LABEL = { raw:'raw', norm:'base 100', cumret:'cum return %', yoy:'YoY %', mom:'MoM %', ma20:'MA20', ma50:'MA50' };
+
+let config = loadConfig();
+let activePageId = config.pages[0]?.id || null;
+let editingChart = null;  // { pageId, chartId } when editing
+
+// ── default config ───────────────────────────────────────────────────
+function defaultConfig() {
+  return {
+    pages: [
+      { id: uid(), name: 'US', cols: 2, charts: [
+        { id: uid(), title: 'S&P 500', series:[{id:'SPX',axis:'L',color:'#4d9fff'}], fn:'raw', period:'1y' },
+        { id: uid(), title: 'Fed Rate vs CPI', series:[{id:'FEDFUNDS',axis:'L',color:'#4d9fff'},{id:'CPI',axis:'L',color:'#f05252'}], fn:'raw', period:'3y' },
+        { id: uid(), title: 'VIX', series:[{id:'VIX',axis:'L',color:'#a78bfa'}], fn:'raw', period:'6m' },
+        { id: uid(), title: 'Unemployment', series:[{id:'UNRATE',axis:'L',color:'#888888'}], fn:'raw', period:'3y' },
+      ]},
+      { id: uid(), name: 'Mag 7', cols: 2, charts: [
+        { id: uid(), title: 'Mag7 — normalized', series:[{id:'AAPL',axis:'L',color:'#4d9fff'},{id:'NVDA',axis:'L',color:'#f05252'},{id:'MSFT',axis:'L',color:'#f5a623'}], fn:'norm', period:'1y' },
+        { id: uid(), title: 'Bitcoin', series:[{id:'BTC',axis:'L',color:'#f5a623'}], fn:'raw', period:'1y' },
+      ]},
+    ]
+  };
+}
+
+function loadConfig() {
+  try {
+    const raw = localStorage.getItem('macro:config');
+    if (raw) return JSON.parse(raw);
+  } catch {}
+  return defaultConfig();
+}
+function saveConfig() {
+  localStorage.setItem('macro:config', JSON.stringify(config));
+}
+function uid() { return Math.random().toString(36).slice(2, 9); }
+
+// ════════════════════════════════════════════════════════════════════
+//  DATA LOAD
+// ════════════════════════════════════════════════════════════════════
+async function fetchAll() {
+  const snap = await getDocs(collection(db, 'series'));
+  snap.forEach(doc => {
+    const d = doc.data();
+    SERIES[doc.id] = {
+      name: d.name || doc.id,
+      updated: d.updated || '',
+      data: (d.data || []).map(p => ({ x: p.d, y: p.v })).sort((a,b)=>a.x<b.x?-1:1)
+    };
+  });
+}
+
+window.loadData = async function() {
+  setStatus('load', 'loading…');
+  try {
+    await fetchAll();
+    render();
+    const anyUpd = Object.values(SERIES)[0]?.updated || '';
+    setStatus('ok', anyUpd ? ('data: ' + anyUpd.slice(0,16).replace('T',' ') + ' UTC') : 'loaded');
+  } catch(e) {
+    setStatus('err', 'Firestore error');
+    console.error(e);
+  }
+};
+
+function setStatus(state, txt) {
+  document.getElementById('sdot').className = 'sdot ' + state;
+  document.getElementById('stxt').textContent = txt;
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  TRANSFORMS
+// ════════════════════════════════════════════════════════════════════
+function cutByPeriod(data, period) {
+  if (period === 'max' || !data.length) return data;
+  const now = new Date();
+  const monthsMap = { '3m':3, '6m':6, '1y':12, '3y':36, '10y':120 };
+  const months = monthsMap[period] ?? 12;
+  const cutoff = new Date(now);
+  cutoff.setMonth(cutoff.getMonth() - months);
+  const cs = cutoff.toISOString().slice(0,10);
+  return data.filter(p => p.x >= cs);
+}
+
+function applyFn(data, fn) {
+  if (!data.length) return data;
+  switch(fn) {
+    case 'raw': return data;
+    case 'norm': {
+      const b = data[0].y;
+      return data.map(d => ({ x:d.x, y:+(d.y/b*100).toFixed(2) }));
+    }
+    case 'cumret': {
+      const b = data[0].y;
+      return data.map(d => ({ x:d.x, y:+((d.y/b-1)*100).toFixed(2) }));
+    }
+    case 'yoy': {
+      // ต้องหา point ~365 วันก่อน — ใช้ index lookback แบบ approximate
+      return yoyTransform(data, 365);
+    }
+    case 'mom': {
+      return yoyTransform(data, 30);
+    }
+    case 'ma20': return movingAvg(data, 20);
+    case 'ma50': return movingAvg(data, 50);
+    default: return data;
+  }
+}
+
+function yoyTransform(data, days) {
+  const out = [];
+  for (let i = 0; i < data.length; i++) {
+    const targetDate = new Date(new Date(data[i].x) - days*86400000).toISOString().slice(0,10);
+    // หา point ที่ใกล้ targetDate ที่สุด (ก่อนหน้า)
+    let ref = null;
+    for (let j = i-1; j >= 0; j--) {
+      if (data[j].x <= targetDate) { ref = data[j]; break; }
+    }
+    if (ref && ref.y !== 0) {
+      out.push({ x: data[i].x, y: +((data[i].y/ref.y - 1)*100).toFixed(2) });
+    }
+  }
+  return out;
+}
+
+function movingAvg(data, n) {
+  const out = [];
+  for (let i = n-1; i < data.length; i++) {
+    let sum = 0;
+    for (let j = i-n+1; j <= i; j++) sum += data[j].y;
+    out.push({ x: data[i].x, y: +(sum/n).toFixed(2) });
+  }
+  return out;
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  RENDER
+// ════════════════════════════════════════════════════════════════════
+function render() {
+  renderNav();
+  renderPages();
+}
+
+function renderNav() {
+  const nav = document.getElementById('nav');
+  nav.innerHTML = '';
+  config.pages.forEach(page => {
+    const btn = document.createElement('button');
+    btn.className = 'nb' + (page.id === activePageId ? ' active' : '');
+    btn.textContent = page.name;
+    btn.onclick = () => { activePageId = page.id; render(); };
+    nav.appendChild(btn);
+  });
+  const add = document.createElement('button');
+  add.className = 'nb nb-add';
+  add.textContent = '+';
+  add.title = 'Add page';
+  add.onclick = openPageModal;
+  nav.appendChild(add);
+}
+
+function renderPages() {
+  const container = document.getElementById('pages');
+  container.innerHTML = '';
+  Object.values(charts).forEach(c => c.destroy());
+
+  const page = config.pages.find(p => p.id === activePageId);
+  if (!page) {
+    container.innerHTML = '<div class="empty">ยังไม่มี page — กด + เพื่อสร้าง</div>';
+    return;
+  }
+
+  const pageEl = document.createElement('div');
+  pageEl.className = 'page active';
+
+  // page head
+  const head = document.createElement('div');
+  head.className = 'page-head';
+  head.innerHTML = `
+    <div class="page-title-row">
+      <span style="font-size:13px;color:var(--text2);text-transform:uppercase;letter-spacing:0.06em">${page.name}</span>
+    </div>
+    <div class="page-actions">
+      <button class="btn" onclick="openChartModal('${page.id}')">+ Chart</button>
+      <button class="btn" onclick="editPage('${page.id}')">Edit page</button>
+      <button class="btn btn-danger" onclick="deletePage('${page.id}')">Delete page</button>
+    </div>`;
+  pageEl.appendChild(head);
+
+  if (!page.charts.length) {
+    const empty = document.createElement('div');
+    empty.className = 'empty';
+    empty.innerHTML = 'ยังไม่มี chart ในหน้านี้<br><button class="btn btn-primary" onclick="openChartModal(\''+page.id+'\')">+ Add Chart</button>';
+    pageEl.appendChild(empty);
+  } else {
+    const grid = document.createElement('div');
+    grid.className = 'chart-grid' + (page.cols ? ' cols-'+page.cols : '');
+    page.charts.forEach(chart => grid.appendChild(renderChartCard(page, chart)));
+    pageEl.appendChild(grid);
+  }
+
+  container.appendChild(pageEl);
+
+  // draw charts after DOM insert
+  page.charts.forEach(chart => drawChart(page, chart));
+}
+
+function renderChartCard(page, chart) {
+  const card = document.createElement('div');
+  card.className = 'card';
+  const seriesNames = chart.series.map(s => SERIES[s.id]?.name || s.id).join(' · ');
+
+  card.innerHTML = `
+    <div class="ch">
+      <div><div class="ct">${chart.title}</div><div class="cs">${seriesNames} · ${FN_LABEL[chart.fn]}</div></div>
+      <div class="ch-actions">
+        <button class="icon-btn" onclick="openChartModal('${page.id}','${chart.id}')" title="Edit">✎</button>
+        <button class="icon-btn" onclick="deleteChart('${page.id}','${chart.id}')" title="Delete">✕</button>
+      </div>
+    </div>
+    <div class="tfs" id="tfs-${chart.id}"></div>
+    <div class="cb"><div style="position:relative;height:180px"><div class="ld" id="ld-${chart.id}">loading…</div><canvas id="cv-${chart.id}" style="display:none"></canvas></div></div>
+    <div class="legend" id="lg-${chart.id}"></div>
+    <div class="er" id="er-${chart.id}"></div>`;
+
+  // period buttons
+  setTimeout(() => {
+    const tfs = card.querySelector('#tfs-'+chart.id);
+    ['3m','6m','1y','3y','10y','max'].forEach(p => {
+      const b = document.createElement('button');
+      b.className = 'tf' + (p === chart.period ? ' on' : '');
+      b.textContent = p.toUpperCase();
+      b.onclick = () => {
+        chart.period = p;
+        saveConfig();
+        tfs.querySelectorAll('.tf').forEach(x => x.classList.remove('on'));
+        b.classList.add('on');
+        drawChart(page, chart);
+      };
+      tfs.appendChild(b);
+    });
+  }, 0);
+
+  return card;
+}
+
+function drawChart(page, chart) {
+  const canvas = document.getElementById('cv-'+chart.id);
+  const ld = document.getElementById('ld-'+chart.id);
+  const er = document.getElementById('er-'+chart.id);
+  const lg = document.getElementById('lg-'+chart.id);
+  if (!canvas) return;
+  if (er) er.textContent = '';
+  if (lg) lg.innerHTML = '';
+
+  const datasets = [];
+  let hasRight = false;
+
+  // align all series to common labels from first series
+  let commonLabels = null;
+
+  chart.series.forEach(s => {
+    const src = SERIES[s.id];
+    if (!src) return;
+    let pts = cutByPeriod(src.data, chart.period);
+    pts = applyFn(pts, chart.fn);
+    if (!pts.length) return;
+
+    if (!commonLabels) commonLabels = pts.map(p => p.x);
+
+    // map data to values array aligned to commonLabels
+    const labelSet = Object.fromEntries(pts.map(p => [p.x, p.y]));
+    const values = commonLabels.map(l => labelSet[l] ?? null);
+
+    datasets.push({
+      label: src.name,
+      data: values,
+      borderColor: s.color,
+      borderWidth: 1.8,
+      pointRadius: 0,
+      pointHoverRadius: 3,
+      tension: 0.3,
+      fill: false,
+      spanGaps: true,
+      yAxisID: s.axis === 'R' ? 'yR' : 'yL'
+    });
+    if (s.axis === 'R') hasRight = true;
+    if (lg) {
+      const li = document.createElement('div');
+      li.className = 'li';
+      li.innerHTML = `<span class="ls" style="background:${s.color}"></span>${src.name} <span style="color:var(--text3)">${s.axis}</span>`;
+      lg.appendChild(li);
+    }
+  });
+
+  if (ld) ld.style.display = 'none';
+  canvas.style.display = 'block';
+
+  if (!datasets.length || !commonLabels) {
+    if (er) er.textContent = 'no data';
+    return;
+  }
+
+  if (charts[chart.id]) charts[chart.id].destroy();
+
+  const scales = {
+    x: {
+      type: 'category',
+      labels: commonLabels,
+      ticks: { color:'#555', font:{family:'monospace',size:10}, maxTicksLimit:7, maxRotation:0 },
+      grid: { color:'rgba(255,255,255,0.04)' },
+      border: { color:'rgba(255,255,255,0.08)' }
+    },
+    yL: { position:'left', ticks:{color:'#666',font:{family:'monospace',size:10},maxTicksLimit:5}, grid:{color:'rgba(255,255,255,0.04)'}, border:{color:'rgba(255,255,255,0.08)'} }
+  };
+  if (hasRight) {
+    scales.yR = { position:'right', ticks:{color:'#666',font:{family:'monospace',size:10},maxTicksLimit:5}, grid:{drawOnChartArea:false}, border:{color:'rgba(255,255,255,0.08)'} };
+  }
+
+  charts[chart.id] = new Chart(canvas, {
+    type: 'line',
+    data: { labels: commonLabels, datasets },
+    options: {
+      responsive: true, maintainAspectRatio: false, animation: false,
+      interaction: { mode:'index', intersect:false },
+      plugins: {
+        legend: { display:false },
+        tooltip: { backgroundColor:'#111', borderColor:'rgba(255,255,255,0.12)', borderWidth:1, titleColor:'#888', bodyColor:'#e8e8e8', titleFont:{family:'monospace',size:11}, bodyFont:{family:'monospace',size:12} }
+      },
+      scales
+    }
+  });
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  CHART MODAL
+// ════════════════════════════════════════════════════════════════════
+window.openChartModal = function(pageId, chartId) {
+  editingChart = { pageId, chartId: chartId || null };
+  const modal = document.getElementById('chart-modal');
+  document.getElementById('chart-modal-title').textContent = chartId ? 'Edit Chart' : 'Add Chart';
+
+  let chart = null;
+  if (chartId) {
+    const page = config.pages.find(p => p.id === pageId);
+    chart = page.charts.find(c => c.id === chartId);
+  }
+
+  document.getElementById('cm-title').value = chart?.title || '';
+  document.getElementById('cm-fn').value = chart?.fn || 'raw';
+  document.getElementById('cm-period').value = chart?.period || '1y';
+
+  // series rows
+  const wrap = document.getElementById('cm-series');
+  wrap.innerHTML = '';
+  const sList = chart?.series || [{ id:Object.keys(SERIES)[0], axis:'L', color:COLORS[0] }];
+  sList.forEach((s, i) => wrap.appendChild(makeSeriesRow(s, i)));
+  updateAddSeriesBtn();
+
+  modal.classList.add('show');
+};
+
+function makeSeriesRow(s, idx) {
+  const row = document.createElement('div');
+  row.className = 'series-row';
+
+  // series select with grouping
+  const sel = document.createElement('select');
+  const grouped = new Set();
+  Object.entries(SERIES_GROUPS).forEach(([grp, ids]) => {
+    const og = document.createElement('optgroup');
+    og.label = grp;
+    ids.forEach(id => {
+      if (!SERIES[id]) return;
+      grouped.add(id);
+      const opt = document.createElement('option');
+      opt.value = id;
+      opt.textContent = SERIES[id].name;
+      if (id === s.id) opt.selected = true;
+      og.appendChild(opt);
+    });
+    if (og.children.length) sel.appendChild(og);
+  });
+  // series ที่ไม่อยู่ใน group ใด
+  const other = document.createElement('optgroup');
+  other.label = 'Other';
+  Object.keys(SERIES).sort().forEach(id => {
+    if (grouped.has(id)) return;
+    const opt = document.createElement('option');
+    opt.value = id;
+    opt.textContent = SERIES[id].name;
+    if (id === s.id) opt.selected = true;
+    other.appendChild(opt);
+  });
+  if (other.children.length) sel.appendChild(other);
+
+  // axis select
+  const axis = document.createElement('select');
+  ['L','R'].forEach(a => {
+    const opt = document.createElement('option');
+    opt.value = a; opt.textContent = a;
+    if (a === s.axis) opt.selected = true;
+    axis.appendChild(opt);
+  });
+
+  // color
+  const colorSel = document.createElement('select');
+  COLORS.forEach((c, i) => {
+    const opt = document.createElement('option');
+    opt.value = c; opt.textContent = ['blue','red','amber','green','purple','gray'][i];
+    if (c === s.color) opt.selected = true;
+    colorSel.appendChild(opt);
+  });
+
+  // remove
+  const rm = document.createElement('button');
+  rm.className = 'rm'; rm.textContent = '✕';
+  rm.onclick = () => { row.remove(); updateAddSeriesBtn(); };
+
+  row.appendChild(sel);
+  row.appendChild(axis);
+  row.appendChild(colorSel);
+  row.appendChild(rm);
+  return row;
+}
+
+window.addSeriesRow = function() {
+  const wrap = document.getElementById('cm-series');
+  if (wrap.children.length >= 3) return;
+  const used = wrap.children.length;
+  wrap.appendChild(makeSeriesRow({ id:Object.keys(SERIES)[0], axis:'L', color:COLORS[used] || COLORS[0] }, used));
+  updateAddSeriesBtn();
+};
+
+function updateAddSeriesBtn() {
+  const n = document.getElementById('cm-series').children.length;
+  document.getElementById('cm-add-series').style.display = n >= 3 ? 'none' : 'block';
+}
+
+window.saveChart = function() {
+  const title = document.getElementById('cm-title').value.trim() || 'Chart';
+  const fn = document.getElementById('cm-fn').value;
+  const period = document.getElementById('cm-period').value;
+  const series = [...document.getElementById('cm-series').children].map(row => {
+    const sels = row.querySelectorAll('select');
+    return { id: sels[0].value, axis: sels[1].value, color: sels[2].value };
+  });
+  if (!series.length) return;
+
+  const page = config.pages.find(p => p.id === editingChart.pageId);
+  if (editingChart.chartId) {
+    const chart = page.charts.find(c => c.id === editingChart.chartId);
+    Object.assign(chart, { title, fn, period, series });
+  } else {
+    page.charts.push({ id: uid(), title, fn, period, series });
+  }
+  saveConfig();
+  closeChartModal();
+  render();
+};
+
+window.closeChartModal = function() {
+  document.getElementById('chart-modal').classList.remove('show');
+};
+
+window.deleteChart = function(pageId, chartId) {
+  if (!confirm('ลบ chart นี้?')) return;
+  const page = config.pages.find(p => p.id === pageId);
+  page.charts = page.charts.filter(c => c.id !== chartId);
+  saveConfig();
+  render();
+};
+
+// ════════════════════════════════════════════════════════════════════
+//  PAGE MODAL
+// ════════════════════════════════════════════════════════════════════
+let editingPageId = null;
+
+window.openPageModal = function() {
+  editingPageId = null;
+  document.getElementById('page-modal-title').textContent = 'Add Page';
+  document.getElementById('pm-name').value = '';
+  document.getElementById('pm-cols').value = '2';
+  document.getElementById('page-modal').classList.add('show');
+};
+
+window.editPage = function(pageId) {
+  editingPageId = pageId;
+  const page = config.pages.find(p => p.id === pageId);
+  document.getElementById('page-modal-title').textContent = 'Edit Page';
+  document.getElementById('pm-name').value = page.name;
+  document.getElementById('pm-cols').value = String(page.cols || 0);
+  document.getElementById('page-modal').classList.add('show');
+};
+
+window.savePage = function() {
+  const name = document.getElementById('pm-name').value.trim() || 'Page';
+  const cols = parseInt(document.getElementById('pm-cols').value);
+  if (editingPageId) {
+    const page = config.pages.find(p => p.id === editingPageId);
+    page.name = name; page.cols = cols;
+  } else {
+    const np = { id: uid(), name, cols, charts: [] };
+    config.pages.push(np);
+    activePageId = np.id;
+  }
+  saveConfig();
+  closePageModal();
+  render();
+};
+
+window.closePageModal = function() {
+  document.getElementById('page-modal').classList.remove('show');
+};
+
+window.deletePage = function(pageId) {
+  if (!confirm('ลบ page นี้ทั้งหมด?')) return;
+  config.pages = config.pages.filter(p => p.id !== pageId);
+  if (activePageId === pageId) activePageId = config.pages[0]?.id || null;
+  saveConfig();
+  render();
+};
+
+// ════════════════════════════════════════════════════════════════════
+//  IMPORT / EXPORT
+// ════════════════════════════════════════════════════════════════════
+window.exportConfig = function() {
+  const blob = new Blob([JSON.stringify(config, null, 2)], { type:'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'macro-config.json'; a.click();
+  URL.revokeObjectURL(url);
+};
+
+window.importConfig = function() {
+  const inp = document.createElement('input');
+  inp.type = 'file'; inp.accept = '.json';
+  inp.onchange = e => {
+    const file = e.target.files[0];
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        config = JSON.parse(reader.result);
+        activePageId = config.pages[0]?.id || null;
+        saveConfig();
+        render();
+      } catch(err) { alert('Import failed: ' + err.message); }
+    };
+    reader.readAsText(file);
+  };
+  inp.click();
+};
+
+// close modal on bg click
+document.querySelectorAll('.modal-bg').forEach(bg => {
+  bg.onclick = e => { if (e.target === bg) bg.classList.remove('show'); };
+});
+
+// ── debug helpers (window scope) ───────────────────────────────────
+window._SERIES = SERIES;
+window._dbg = () => Object.entries(SERIES).slice(0,3).map(([k,v])=>({
+  id:k, name:v.name, rows:v.data.length,
+  first:v.data[0]?.x, last:v.data[v.data.length-1]?.x
+}));
+
+// ── init ─────────────────────────────────────────────────────────────
+loadData();
+</script>
+</body>
+</html>
