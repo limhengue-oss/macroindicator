@@ -117,10 +117,13 @@ fetch_yf <- function(ticker) {
   tryCatch({
     df <- tq_get(ticker, from = DATE_FROM, to = DATE_TO)
     if (is.null(df) || !is.data.frame(df)) stop("no data returned")
-    df |>
+    result <- df |>
       select(date, value = close) |>
-      drop_na(value) |>        # drop rows where close is NA (e.g. SET.BK weekends)
+      drop_na(value) |>
       filter(is.finite(value))
+    # ถ้าได้แค่ 1 row (current price only — เช่น SET sectors) ก็ยังเก็บได้
+    if (nrow(result) == 0) stop("no valid rows")
+    result
   }, error = function(e) {
     warning(sprintf("  yf SKIP %s: %s", ticker, e$message))
     tibble(date = as.Date(character()), value = numeric())
@@ -171,6 +174,41 @@ CATALOG <- tribble(
   "SILVER",       "yf",    "SI=F",                  "Silver",
   "COPPER",       "yf",    "HG=F",                  "Copper",
   "NATGAS",       "yf",    "NG=F",                  "Natural Gas",
+  # SET Industry Group Indices (current price — accumulates daily)
+  "SET_AGRO",     "yf",    "^AGRO.BK",              "SET Agro & Food",
+  "SET_CONSUMP",  "yf",    "^CONSUMP.BK",            "SET Consumer Products",
+  "SET_FINCIAL",  "yf",    "^FINCIAL.BK",            "SET Financials",
+  "SET_INDUS",    "yf",    "^INDUS.BK",              "SET Industrials",
+  "SET_PROPCON",  "yf",    "^PROPCON.BK",            "SET Property & Construction",
+  "SET_RESOURC",  "yf",    "^RESOURC.BK",            "SET Resources",
+  "SET_SERVICE",  "yf",    "^SERVICE.BK",            "SET Services",
+  "SET_TECH",     "yf",    "^TECH.BK",               "SET Technology",
+  # SET Sector Indices
+  "SET_BANK",     "yf",    "^BANK.BK",               "SET Banking",
+  "SET_ENERG",    "yf",    "^ENERG.BK",              "SET Energy & Utilities",
+  "SET_FOOD",     "yf",    "^FOOD.BK",               "SET Food & Beverage",
+  "SET_HELTH",    "yf",    "^HELTH.BK",              "SET Health Care",
+  "SET_ICT",      "yf",    "^ICT.BK",                "SET ICT",
+  "SET_INSUR",    "yf",    "^INSUR.BK",              "SET Insurance",
+  "SET_PETRO",    "yf",    "^PETRO.BK",              "SET Petrochemicals",
+  "SET_PROP",     "yf",    "^PROP.BK",               "SET Property Development",
+  "SET_TRANS",    "yf",    "^TRANS.BK",              "SET Transportation",
+  "SET_TOURISM",  "yf",    "^TOURISM.BK",            "SET Tourism & Leisure",
+  "SET_COMM",     "yf",    "^COMM.BK",               "SET Commerce",
+  "SET_CONMAT",   "yf",    "^CONMAT.BK",             "SET Construction Materials",
+  "SET_STEEL",    "yf",    "^STEEL.BK",              "SET Steel & Metal",
+  "SET_FIN",      "yf",    "^FIN.BK",                "SET Finance & Securities",
+  "SET_AGRI",     "yf",    "^AGRI.BK",               "SET Agribusiness",
+  # Magnificent 7
+  "AAPL",         "yf",    "AAPL",                  "Apple",
+  "MSFT",         "yf",    "MSFT",                  "Microsoft",
+  "GOOGL",        "yf",    "GOOGL",                 "Alphabet",
+  "AMZN",         "yf",    "AMZN",                  "Amazon",
+  "NVDA",         "yf",    "NVDA",                  "NVIDIA",
+  "META",         "yf",    "META",                  "Meta",
+  "TSLA",         "yf",    "TSLA",                  "Tesla",
+  # Crypto
+  "BTC",          "yf",    "BTC-USD",               "Bitcoin",
   # FRED macro
   "FEDFUNDS",     "fred",  "FEDFUNDS",              "Fed Funds Rate",
   "CPI",          "fred",  "CPIAUCSL",              "US CPI (index)",
