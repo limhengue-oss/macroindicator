@@ -20,7 +20,11 @@ jobs:
         run: |
           install.packages(c("httr2", "xml2", "jsonlite", "dplyr"), repos = "https://cloud.r-project.org")
         shell: Rscript {0}
-
+      - uses: google-github-actions/auth@v2
+        id: auth
+        with:
+          credentials_json: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
+    
       - name: Run news pipeline
         env:
           GEMINI_API_KEY:  ${{ secrets.GEMINI_API_KEY }}
