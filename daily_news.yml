@@ -1,0 +1,31 @@
+name: Daily News Pipeline
+
+on:
+  schedule:
+    - cron: '0 0 * * *'   # 00:00 UTC = 07:00 ICT
+  workflow_dispatch:        # run manually for testing
+
+jobs:
+  fetch-news:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: '4.4'
+
+      - name: Install R packages
+        run: |
+          install.packages(c("httr2", "xml2", "jsonlite", "dplyr"), repos = "https://cloud.r-project.org")
+        shell: Rscript {0}
+
+      - name: Run news pipeline
+        env:
+          GEMINI_API_KEY:  ${{ secrets.GEMINI_API_KEY }}
+          FIREBASE_URL:    ${{ secrets.FIREBASE_URL }}
+          FIREBASE_TOKEN:  ${{ secrets.FIREBASE_TOKEN }}
+          FT_COOKIE:       ${{ secrets.FT_COOKIE }}
+        run: Rscript fetch_news.R
+        working-directory: ./news-pipeline
