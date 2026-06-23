@@ -28,7 +28,7 @@ suppressPackageStartupMessages({
 
 PROJECT_ID <- "macroindicator-6b265"
 COLLECTION <- "series"
-DATE_FROM  <- Sys.Date() - 365 * 5
+DATE_FROM  <- as.Date("1990-01-01")
 DATE_TO    <- Sys.Date()
 
 # ── 0. อ่าน credentials จาก env ────────────────────────────────────
