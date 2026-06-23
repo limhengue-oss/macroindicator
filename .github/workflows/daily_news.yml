@@ -12,6 +12,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: google-github-actions/auth@v2
+        id: auth
+        with:
+          credentials_json: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
+
       - uses: r-lib/actions/setup-r@v2
         with:
           r-version: '4.4'
@@ -20,16 +25,12 @@ jobs:
         run: |
           install.packages(c("httr2", "xml2", "jsonlite", "dplyr"), repos = "https://cloud.r-project.org")
         shell: Rscript {0}
-      - uses: google-github-actions/auth@v2
-        id: auth
-        with:
-          credentials_json: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
-    
+
       - name: Run news pipeline
         env:
           GEMINI_API_KEY:  ${{ secrets.GEMINI_API_KEY }}
           FIREBASE_URL:    ${{ secrets.FIREBASE_URL }}
-          FIREBASE_TOKEN:  ${{ secrets.FIREBASE_TOKEN }}
+          FIREBASE_TOKEN:  ${{ steps.auth.outputs.access_token }}
           FT_COOKIE:       ${{ secrets.FT_COOKIE }}
         run: Rscript fetch_news.R
         working-directory: ./news-pipeline
