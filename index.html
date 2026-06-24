@@ -110,7 +110,7 @@ input[type=range] { width:80px; accent-color:var(--blue); }
 <body>
 
 <div id="topbar">
-  <div class="brand">Macro<span class="patch">v3.4</span></div>
+  <div class="brand">Macro<span class="patch">v3.5</span></div>
   <div class="topbar-right">
     <span class="sdot" id="sdot"></span>
     <span id="stxt">loading…</span>
@@ -239,6 +239,7 @@ const SERIES_GROUPS = {
   'Commodities':  ['WTI','BRENT','GOLD','SILVER','COPPER','NATGAS'],
   'US Macro':     ['FEDFUNDS','CPI','CORECPI','DGS2','DGS10','UNRATE'],
   'EU Macro':     ['ECBRATE','EUCPI'],
+  'PTT OR Oil':   ['PTTOR_PREMIUM_DIESEL','PTTOR_SUPER_POWER_GSH95','PTTOR_GASOHOL_91','PTTOR_GASOHOL_E20','PTTOR_GASOHOL_E85','PTTOR_BENZENE_95'],
 };
 
 // ════════════════════════════════════════════════════
@@ -800,7 +801,12 @@ window.setGlobalPeriod = function(pageId, period, btn) {
   saveConfig();
 };
 
-loadData();
+// รอให้ Firebase SDK โหลดเสร็จก่อน init
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', () => setTimeout(loadData, 500));
+} else {
+  setTimeout(loadData, 500);
+}
 </script>
 </body>
 </html>
