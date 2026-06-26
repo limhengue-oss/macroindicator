@@ -99,7 +99,7 @@ call_gemini <- function(prompt) {
     contents = list(list(parts = list(list(text = prompt))))
   )
 
-  resp <- request("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent") |>
+  resp <- request("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent") |>
     req_url_query(key = GEMINI_API_KEY) |>
     req_headers("Content-Type" = "application/json") |>
     req_body_json(body) |>
