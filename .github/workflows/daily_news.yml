@@ -21,9 +21,12 @@ jobs:
       - uses: r-lib/actions/setup-r@v2
         with:
           r-version: '4.4'
+          use-public-rspm: true
 
       - name: Install R packages
-        run: Rscript -e 'install.packages(c("httr2", "xml2", "jsonlite", "dplyr"), repos = "https://cloud.r-project.org")'
+        run: |
+          install.packages(c("httr2", "xml2", "jsonlite", "dplyr"))
+        shell: Rscript {0}
 
       - name: Run news pipeline
         env:
