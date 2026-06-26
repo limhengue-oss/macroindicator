@@ -9,7 +9,7 @@ FIREBASE_URL    <- Sys.getenv("FIREBASE_URL")
 FIREBASE_TOKEN  <- Sys.getenv("FIREBASE_TOKEN")
 FT_COOKIE       <- Sys.getenv("FT_COOKIE")
 
-MAX_PER_FEED <- 8  # จำกัดข่าวต่อ feed ไม่ให้เกิน token limit
+MAX_PER_FEED <- 5  # จำกัดข่าวต่อ feed ไม่ให้เกิน token limit
 
 RSS_FEEDS <- list(
   list(name = "Economist Finance",  url = "https://www.economist.com/finance-and-economics/rss.xml"),
@@ -72,7 +72,7 @@ build_prompt <- function(items) {
     seq_along(items),
     sapply(items, function(x) paste0(
       "[", x$source, "] ", x$title, "\n",
-      substr(x$body, 1, 200), "\n",
+      substr(x$body, 1, 80), "\n",
       "URL: ", x$url
     )),
     sep = ". ",
