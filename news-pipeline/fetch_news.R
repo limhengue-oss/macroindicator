@@ -5,21 +5,25 @@ library(dplyr)
 
 # ─── Config ───────────────────────────────────────────────────────────────────
 GEMINI_API_KEY  <- Sys.getenv("GEMINI_API_KEY")
-FIREBASE_URL    <- Sys.getenv("FIREBASE_URL")   # https://firestore.googleapis.com/v1/projects/macroindicator-6b265/databases/(default)/documents
-FIREBASE_TOKEN  <- Sys.getenv("FIREBASE_TOKEN") # service account token
-FT_COOKIE       <- Sys.getenv("FT_COOKIE")      # optional
+FIREBASE_URL    <- Sys.getenv("FIREBASE_URL")
+FIREBASE_TOKEN  <- Sys.getenv("FIREBASE_TOKEN")
+FT_COOKIE       <- Sys.getenv("FT_COOKIE")
+
+MAX_PER_FEED <- 8  # จำกัดข่าวต่อ feed ไม่ให้เกิน token limit
 
 RSS_FEEDS <- list(
-  # Global macro
-  list(name = "Reuters World",      url = "https://feeds.reuters.com/reuters/worldNews"),
-  list(name = "Reuters Business",   url = "https://feeds.reuters.com/reuters/businessNews"),
   list(name = "Economist Finance",  url = "https://www.economist.com/finance-and-economics/rss.xml"),
   list(name = "Economist Business", url = "https://www.economist.com/business/rss.xml"),
-  # Thailand / SEA
   list(name = "Bangkok Post",       url = "https://www.bangkokpost.com/rss/data/topstories.xml"),
   list(name = "Bangkok Post Biz",   url = "https://www.bangkokpost.com/rss/data/business.xml"),
   list(name = "Prachachat",         url = "https://www.prachachat.net/feed")
 )
+
+# Reuters ใช้ feedburner แทน (GitHub Actions IP ถูก block โดยตรง)
+RSS_FEEDS <- c(RSS_FEEDS, list(
+  list(name = "Reuters World",    url = "https://feeds.feedburner.com/reuters/worldNews"),
+  list(name = "Reuters Business", url = "https://feeds.feedburner.com/reuters/businessNews")
+))
 
 # FT เพิ่มเฉพาะถ้ามี cookie
 if (nchar(FT_COOKIE) > 0) {
@@ -38,16 +42,19 @@ fetch_rss <- function(feed) {
       ) |>
       req_timeout(15)
 
-    resp <- req_perform(req)
-    xml  <- read_xml(resp_body_string(resp))
-
+    resp  <- req_perform(req)
+    xml   <- read_xml(resp_body_string(resp))
     items <- xml_find_all(xml, ".//item")
+
+    # จำกัด MAX_PER_FEED ต่อ feed
+    items <- head(items, MAX_PER_FEED)
+
     lapply(items, function(item) {
       list(
-        source  = feed$name,
-        title   = xml_text(xml_find_first(item, "title")),
-        url     = xml_text(xml_find_first(item, "link")),
-        body    = xml_text(xml_find_first(item, "description"))
+        source = feed$name,
+        title  = xml_text(xml_find_first(item, "title")),
+        url    = xml_text(xml_find_first(item, "link")),
+        body   = xml_text(xml_find_first(item, "description"))
       )
     })
   }, error = function(e) {
@@ -65,7 +72,7 @@ build_prompt <- function(items) {
     seq_along(items),
     sapply(items, function(x) paste0(
       "[", x$source, "] ", x$title, "\n",
-      substr(x$body, 1, 300), "\n",
+      substr(x$body, 1, 200), "\n",
       "URL: ", x$url
     )),
     sep = ". ",
@@ -101,9 +108,7 @@ call_gemini <- function(prompt) {
 
   result <- resp_body_json(resp)
   raw    <- result$candidates[[1]]$content$parts[[1]]$text
-
-  # strip markdown fences if present
-  raw <- gsub("```json|```", "", raw)
+  raw    <- gsub("```json|```", "", raw)
   fromJSON(trimws(raw))
 }
 
@@ -132,9 +137,9 @@ news_array <- lapply(seq_len(nrow(news_list)), function(i) {
 })
 
 doc <- list(fields = list(
-  date      = list(stringValue = today),
+  date       = list(stringValue = today),
   fetched_at = list(stringValue = format(Sys.time(), "%Y-%m-%dT%H:%M:%SZ", tz = "UTC")),
-  news      = list(arrayValue = list(values = news_array))
+  news       = list(arrayValue = list(values = news_array))
 ))
 
 request(paste0(FIREBASE_URL, "/daily_news/", today)) |>
