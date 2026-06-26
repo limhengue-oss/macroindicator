@@ -769,8 +769,8 @@ function drawChart(page,chart) {
   chart.series.forEach(s=>{
     const src=SERIES[s.id];
     if (!src) return;
-    let pts=cutByPeriod(src.data, chart.period);
-    pts=applyFn(pts, s.fn||'raw');
+     let pts=applyFn(src.data, s.fn||'raw');
+    pts=cutByPeriod(pts, chart.period);
     if (!pts.length) return;
     if (!commonLabels) commonLabels=pts.map(p=>p.x);
     const map=Object.fromEntries(pts.map(p=>[p.x,p.y]));
