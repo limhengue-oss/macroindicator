@@ -136,10 +136,20 @@ news_array <- lapply(seq_len(nrow(news_list)), function(i) {
   )))
 })
 
+all_news_array <- lapply(all_items, function(x) {
+  list(mapValue = list(fields = list(
+    title  = to_firestore_value(x$title),
+    source = to_firestore_value(x$source),
+    url    = to_firestore_value(x$url),
+    body   = to_firestore_value(x$body)
+  )))
+})
+
 doc <- list(fields = list(
   date       = list(stringValue = today),
   fetched_at = list(stringValue = format(Sys.time(), "%Y-%m-%dT%H:%M:%SZ", tz = "UTC")),
-  news       = list(arrayValue = list(values = news_array))
+  news       = list(arrayValue = list(values = news_array)),
+  all_news   = list(arrayValue = list(values = all_news_array))
 ))
 
 request(paste0(FIREBASE_URL, "/daily_news/", today)) |>
