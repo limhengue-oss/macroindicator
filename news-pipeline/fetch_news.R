@@ -4,59 +4,56 @@ library(jsonlite)
 library(dplyr)
 
 # ─── Config ───────────────────────────────────────────────────────────────────
-GEMINI_API_KEY  <- Sys.getenv("GEMINI_API_KEY")
-FIREBASE_URL    <- Sys.getenv("FIREBASE_URL")
-FIREBASE_TOKEN  <- Sys.getenv("FIREBASE_TOKEN")
-FT_COOKIE       <- Sys.getenv("FT_COOKIE")
+GEMINI_API_KEY <- Sys.getenv("GEMINI_API_KEY")
+FIREBASE_URL   <- Sys.getenv("FIREBASE_URL")
+FIREBASE_TOKEN <- Sys.getenv("FIREBASE_TOKEN")
+FT_COOKIE      <- Sys.getenv("FT_COOKIE")
 
-MAX_PER_FEED <- 5  # จำกัดข่าวต่อ feed ไม่ให้เกิน token limit
+MAX_PER_FEED <- 10
 
+# ระบุ session: morning (00:00 UTC) หรือ afternoon (06:00 UTC)
+utc_hour <- as.integer(format(Sys.time(), "%H", tz = "UTC"))
+SESSION   <- if (utc_hour < 6) "morning" else "afternoon"
+TODAY     <- format(Sys.Date(), "%Y-%m-%d")
+DOC_ID    <- paste0(TODAY, "-", SESSION)
+
+message("Session: ", SESSION, " | Doc: ", DOC_ID)
+
+# ─── RSS Feeds ────────────────────────────────────────────────────────────────
 RSS_FEEDS <- list(
   list(name = "Economist Finance",  url = "https://www.economist.com/finance-and-economics/rss.xml"),
   list(name = "Economist Business", url = "https://www.economist.com/business/rss.xml"),
   list(name = "Bangkok Post",       url = "https://www.bangkokpost.com/rss/data/topstories.xml"),
   list(name = "Bangkok Post Biz",   url = "https://www.bangkokpost.com/rss/data/business.xml"),
-  list(name = "Prachachat",         url = "https://www.prachachat.net/feed")
+  list(name = "Prachachat",         url = "https://www.prachachat.net/feed"),
+  list(name = "Reuters World",      url = "https://feeds.feedburner.com/reuters/worldNews"),
+  list(name = "Reuters Business",   url = "https://feeds.feedburner.com/reuters/businessNews")
 )
 
-# Reuters ใช้ feedburner แทน (GitHub Actions IP ถูก block โดยตรง)
-RSS_FEEDS <- c(RSS_FEEDS, list(
-  list(name = "Reuters World",    url = "https://feeds.feedburner.com/reuters/worldNews"),
-  list(name = "Reuters Business", url = "https://feeds.feedburner.com/reuters/businessNews")
-))
-
-# FT เพิ่มเฉพาะถ้ามี cookie
 if (nchar(FT_COOKIE) > 0) {
-  RSS_FEEDS <- c(RSS_FEEDS, list(
-    list(name = "FT", url = "https://www.ft.com/rss/home")
-  ))
+  RSS_FEEDS <- c(RSS_FEEDS, list(list(name = "FT", url = "https://www.ft.com/rss/home")))
 }
 
 # ─── 1. ดึง RSS ───────────────────────────────────────────────────────────────
 fetch_rss <- function(feed) {
   tryCatch({
-    req <- request(feed$url) |>
+    resp  <- request(feed$url) |>
       req_headers(
         "User-Agent" = "Mozilla/5.0",
         "Cookie"     = if (grepl("ft.com", feed$url)) FT_COOKIE else ""
       ) |>
-      req_timeout(15)
+      req_timeout(15) |>
+      req_perform()
 
-    resp  <- req_perform(req)
-    xml   <- read_xml(resp_body_string(resp))
-    items <- xml_find_all(xml, ".//item")
-
-    # จำกัด MAX_PER_FEED ต่อ feed
+    items <- read_xml(resp_body_string(resp)) |> xml_find_all(".//item")
     items <- head(items, MAX_PER_FEED)
 
-    lapply(items, function(item) {
-      list(
-        source = feed$name,
-        title  = xml_text(xml_find_first(item, "title")),
-        url    = xml_text(xml_find_first(item, "link")),
-        body   = xml_text(xml_find_first(item, "description"))
-      )
-    })
+    lapply(items, function(item) list(
+      source = feed$name,
+      title  = xml_text(xml_find_first(item, "title")),
+      url    = xml_text(xml_find_first(item, "link")),
+      body   = xml_text(xml_find_first(item, "description"))
+    ))
   }, error = function(e) {
     message("Feed failed: ", feed$name, " — ", e$message)
     list()
@@ -66,7 +63,52 @@ fetch_rss <- function(feed) {
 all_items <- unlist(lapply(RSS_FEEDS, fetch_rss), recursive = FALSE)
 message("Fetched ", length(all_items), " articles")
 
-# ─── 2. เรียก Gemini ──────────────────────────────────────────────────────────
+# ─── 2. ดึง URL ที่เคยเก็บแล้ว (dedup) ──────────────────────────────────────
+fetch_existing_urls <- function() {
+  urls <- c()
+
+  # afternoon → เช็คกับ morning วันเดียวกัน
+  # morning   → เช็คกับ afternoon เมื่อวาน
+  yesterday  <- format(Sys.Date() - 1, "%Y-%m-%d")
+  check_docs <- if (SESSION == "afternoon") {
+    c(paste0(TODAY, "-morning"))
+  } else {
+    c(paste0(yesterday, "-morning"), paste0(yesterday, "-afternoon"))
+  }
+
+  for (doc_id in check_docs) {
+    tryCatch({
+      resp <- request(paste0(FIREBASE_URL, "/daily_news/", doc_id)) |>
+        req_headers("Authorization" = paste("Bearer", FIREBASE_TOKEN)) |>
+        req_timeout(15) |>
+        req_perform()
+
+      doc <- resp_body_json(resp)
+      items <- doc$fields$all_news$arrayValue$values
+      if (!is.null(items)) {
+        doc_urls <- sapply(items, function(x) x$mapValue$fields$url$stringValue)
+        urls <- c(urls, doc_urls)
+      }
+    }, error = function(e) {
+      message("No existing doc: ", doc_id)
+    })
+  }
+  unique(urls)
+}
+
+existing_urls <- fetch_existing_urls()
+message("Existing URLs to dedup: ", length(existing_urls))
+
+# กรองข่าวซ้ำออก
+all_items <- Filter(function(x) !x$url %in% existing_urls, all_items)
+message("After dedup: ", length(all_items), " articles")
+
+if (length(all_items) == 0) {
+  message("No new articles — skipping")
+  quit(status = 0)
+}
+
+# ─── 3. เรียก Gemini ──────────────────────────────────────────────────────────
 build_prompt <- function(items) {
   articles <- paste(
     seq_along(items),
@@ -95,20 +137,15 @@ build_prompt <- function(items) {
 }
 
 call_gemini <- function(prompt) {
-  body <- list(
-    contents = list(list(parts = list(list(text = prompt))))
-  )
-
   resp <- request("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent") |>
     req_url_query(key = GEMINI_API_KEY) |>
     req_headers("Content-Type" = "application/json") |>
-    req_body_json(body) |>
+    req_body_json(list(contents = list(list(parts = list(list(text = prompt)))))) |>
     req_timeout(60) |>
     req_perform()
 
-  result <- resp_body_json(resp)
-  raw    <- result$candidates[[1]]$content$parts[[1]]$text
-  raw    <- gsub("```json|```", "", raw)
+  raw <- resp_body_json(resp)$candidates[[1]]$content$parts[[1]]$text
+  raw <- gsub("```json|```", "", raw)
   fromJSON(trimws(raw))
 }
 
@@ -116,43 +153,41 @@ prompt    <- build_prompt(all_items)
 news_list <- call_gemini(prompt)
 message("Gemini selected ", nrow(news_list), " articles")
 
-# ─── 3. Push Firestore ────────────────────────────────────────────────────────
-today <- format(Sys.Date(), "%Y-%m-%d")
-
-to_firestore_value <- function(x) {
+# ─── 4. Push Firestore ────────────────────────────────────────────────────────
+to_fs <- function(x) {
   if (is.character(x)) list(stringValue = x)
-  else if (is.numeric(x)) list(doubleValue = x)
   else list(stringValue = as.character(x))
 }
 
 news_array <- lapply(seq_len(nrow(news_list)), function(i) {
-  row <- news_list[i, ]
+  r <- news_list[i, ]
   list(mapValue = list(fields = list(
-    title      = to_firestore_value(row$title),
-    summary_th = to_firestore_value(row$summary_th),
-    source     = to_firestore_value(row$source),
-    url        = to_firestore_value(row$url),
-    why_picked = to_firestore_value(row$why_picked)
+    title      = to_fs(r$title),
+    summary_th = to_fs(r$summary_th),
+    source     = to_fs(r$source),
+    url        = to_fs(r$url),
+    why_picked = to_fs(r$why_picked)
   )))
 })
 
 all_news_array <- lapply(all_items, function(x) {
   list(mapValue = list(fields = list(
-    title  = to_firestore_value(x$title),
-    source = to_firestore_value(x$source),
-    url    = to_firestore_value(x$url),
-    body   = to_firestore_value(x$body)
+    title  = to_fs(x$title),
+    source = to_fs(x$source),
+    url    = to_fs(x$url),
+    body   = to_fs(x$body)
   )))
 })
 
 doc <- list(fields = list(
-  date       = list(stringValue = today),
+  date       = list(stringValue = TODAY),
+  session    = list(stringValue = SESSION),
   fetched_at = list(stringValue = format(Sys.time(), "%Y-%m-%dT%H:%M:%SZ", tz = "UTC")),
   news       = list(arrayValue = list(values = news_array)),
   all_news   = list(arrayValue = list(values = all_news_array))
 ))
 
-request(paste0(FIREBASE_URL, "/daily_news/", today)) |>
+request(paste0(FIREBASE_URL, "/daily_news/", DOC_ID)) |>
   req_method("PATCH") |>
   req_headers(
     "Authorization" = paste("Bearer", FIREBASE_TOKEN),
@@ -162,4 +197,4 @@ request(paste0(FIREBASE_URL, "/daily_news/", today)) |>
   req_timeout(30) |>
   req_perform()
 
-message("Done — pushed daily_news/", today)
+message("Done — pushed daily_news/", DOC_ID)
