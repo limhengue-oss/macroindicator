@@ -131,7 +131,7 @@ input[type=range] { width:80px; accent-color:var(--blue); }
 <body>
 
 <div id="topbar">
-  <div class="brand">Macro<span class="patch">v4.3</span></div>
+  <div class="brand">Macro<span class="patch">v4.5</span></div>
   <div class="topbar-right">
     <span class="sdot" id="sdot"></span>
     <span id="stxt">loading…</span>
@@ -162,61 +162,12 @@ input[type=range] { width:80px; accent-color:var(--blue); }
 <div id="nav"></div>
 <div id="pages"></div>
 
-<!-- TH ENERGY PAGE (special static page) -->
+<!-- TH ENERGY PAGE -->
 <div id="page-th-energy" class="page" style="display:none">
-  <div class="page-head">
+  <div class="page-head" style="margin-bottom:14px">
     <span style="font-size:0.78em;color:var(--text2);text-transform:uppercase;letter-spacing:0.06em">TH Energy — ราคาพลังงานไทย</span>
-    <div class="page-actions">
-      <button class="btn" id="energy-cfg-btn" onclick="toggleEnergyCfg()">⚙ Config</button>
-    </div>
   </div>
-
-  <!-- Energy Config panel -->
-  <div id="energy-cfg-panel" style="display:none;background:var(--bg2);border:1px solid var(--border2);border-radius:4px;padding:14px;margin-bottom:14px">
-    <div style="font-size:0.78em;color:var(--text3);margin-bottom:10px;text-transform:uppercase;letter-spacing:0.04em">Product Mapping</div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:0.8em">
-      <div>
-        <label style="color:var(--text3);font-size:0.75em">Diesel series</label><br>
-        <select id="cfg-diesel" onchange="saveEnergyCfg()" style="width:100%;background:var(--bg3);border:1px solid var(--border2);color:var(--text);padding:5px 8px;border-radius:3px;font-family:inherit;font-size:0.9em;margin-top:3px">
-        </select>
-      </div>
-      <div>
-        <label style="color:var(--text3);font-size:0.75em">Gasoline series (หลัก)</label><br>
-        <select id="cfg-gasoline" onchange="saveEnergyCfg()" style="width:100%;background:var(--bg3);border:1px solid var(--border2);color:var(--text);padding:5px 8px;border-radius:3px;font-family:inherit;font-size:0.9em;margin-top:3px">
-        </select>
-      </div>
-    </div>
-  </div>
-
-  <!-- KPI Strip -->
-  <div class="energy-section">
-    <div class="energy-section-title">ราคาขายปลีกล่าสุด (บาท/ลิตร)</div>
-    <div class="energy-kpi-grid" id="energy-kpi-grid"></div>
-  </div>
-
-  <!-- Historical Charts -->
-  <div class="energy-section">
-    <div class="energy-section-title">ราคาย้อนหลัง</div>
-    <div class="tfs" id="energy-tfs" style="margin-bottom:10px"></div>
-    <div class="grid g2">
-      <div class="card">
-        <div class="ch"><div><div class="ct">Diesel</div><div class="cs" id="energy-diesel-sub"></div></div></div>
-        <div class="cb"><div style="position:relative;height:var(--chart-h,200px)">
-          <div class="ld" id="ld-energy-diesel">loading…</div>
-          <canvas id="c-energy-diesel" style="display:none"></canvas>
-        </div></div>
-        <div class="legend" id="lg-energy-diesel"></div>
-      </div>
-      <div class="card">
-        <div class="ch"><div><div class="ct">Gasoline</div><div class="cs" id="energy-gas-sub"></div></div></div>
-        <div class="cb"><div style="position:relative;height:var(--chart-h,200px)">
-          <div class="ld" id="ld-energy-gas">loading…</div>
-          <canvas id="c-energy-gas" style="display:none"></canvas>
-        </div></div>
-        <div class="legend" id="lg-energy-gas"></div>
-      </div>
-    </div>
-  </div>
+  <div id="energy-boxes" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:12px"></div>
 </div>
 
 <!-- Chart Modal -->
@@ -384,10 +335,6 @@ function defaultConfig() {
         { id:uid(), title:'Yield Curve 2Y-10Y', series:[{id:'DGS2',axis:'L',fn:'raw',color:'#4d9fff'},{id:'DGS10',axis:'L',fn:'raw',color:'#f05252'}], period:'5y' },
         { id:uid(), title:'Unemployment', series:[{id:'UNRATE',axis:'L',fn:'raw',color:'#888888'}], period:'3y' },
       ]},
-      { id:uid(), name:'TH Energy', cols:2, charts:[
-        { id:uid(), title:'Diesel Retail Price', series:[{id:'EPPO_H_DIESEL_RETAIL',axis:'L',fn:'raw',color:'#4d9fff'}], period:'10y' },
-        { id:uid(), title:'Gasoline Retail Price', series:[{id:'EPPO_ULG_95_RETAIL',axis:'L',fn:'raw',color:'#f5a623'},{id:'EPPO_GASOHOL_95_RETAIL',axis:'L',fn:'raw',color:'#f05252'},{id:'EPPO_GASOHOL_91_RETAIL',axis:'L',fn:'raw',color:'#22c97a'}], period:'10y' },
-      ]},
       { id:uid(), name:'Mag 7', cols:2, charts:[
         { id:uid(), title:'Mag7 normalized', series:[
           {id:'AAPL',axis:'L',fn:'norm',color:'#4d9fff'},
@@ -414,6 +361,8 @@ function loadConfig() {
           delete c.fn;
         }
       }));
+      // ลบ TH Energy page เก่าออก (ตอนนี้เป็น special page แยกต่างหาก)
+      if (cfg.pages) cfg.pages = cfg.pages.filter(p => p.name !== 'TH Energy');
       return cfg;
     }
   } catch {}
@@ -441,242 +390,212 @@ async function fetchAll() {
 //  TH ENERGY PAGE
 // ══════════════════════════════════════════════════════
 
-// products catalog — BASE_PRODUCT → [PRODUCT_CLEAN doc_ids]
-// doc_id = EPPO_{BASE_PRODUCT normalized}_RETAIL
-const EPPO_CATALOG = {
-  'DIESEL':        'EPPO_DIESEL',
-  'ULG 95':        'EPPO_ULG_95',
-  'GASOHOL 95':    'EPPO_GASOHOL_95',
-  'GASOHOL 91':    'EPPO_GASOHOL_91',
-  'GASOHOL95 E20': 'EPPO_GASOHOL95_E20',
-  'GASOHOL95 E85': 'EPPO_GASOHOL95_E85',
-  'LPG':           'EPPO_LPG',
-  'FO 1500':       'EPPO_FO_1500',
-  'FO 600':        'EPPO_FO_600',
-};
-// DIESEL และ ULG 95 ขึ้นก่อน
-const EPPO_ORDER = ['DIESEL','ULG 95','GASOHOL 95','GASOHOL 91','GASOHOL95 E20','GASOHOL95 E85','LPG','FO 1500','FO 600'];
-const FIELD_LABELS = {
-  EX_REFIN:'Ex-Refinery', EXCISE_TAX:'Excise Tax', M_TAX:'Municipal Tax',
-  OIL_FUND:'Oil Fund', CONSV_FUND:'Conservation Fund',
-  VAT_WS:'VAT(WS)', MARKETING_MARGIN:'Marketing Margin', VAT_MM:'VAT(MM)'
-};
-const STACK_COLORS = ['#4d9fff','#f05252','#f5a623','#22c97a','#a78bfa','#888888','#f0a500','#00c9a7'];
-const STACK_FIELDS = ['EX_REFIN','EXCISE_TAX','M_TAX','OIL_FUND','CONSV_FUND','VAT_WS','MARKETING_MARGIN','VAT_MM'];
+const EPPO_ORDER = [
+  { base:'DIESEL',       label:'Diesel',      color:'#4d9fff', unit:'บาท/ลิตร' },
+  { base:'ULG 95',       label:'ULG 95',      color:'#f5a623', unit:'บาท/ลิตร' },
+  { base:'LPG',          label:'LPG',         color:'#a78bfa', unit:'บาท/กก.' },
+  { base:'GASOHOL 95',   label:'Gasohol 95',  color:'#22c97a', unit:'บาท/ลิตร' },
+  { base:'GASOHOL 91',   label:'Gasohol 91',  color:'#00c9a7', unit:'บาท/ลิตร' },
+  { base:'GASOHOL95 E20',label:'E20',         color:'#f0a500', unit:'บาท/ลิตร' },
+  { base:'GASOHOL95 E85',label:'E85',         color:'#f05252', unit:'บาท/ลิตร' },
+  { base:'FO 1500',      label:'FO 1500',     color:'#888888', unit:'บาท/ลิตร' },
+  { base:'FO 600',       label:'FO 600',      color:'#555555', unit:'บาท/ลิตร' },
+];
 
-let energyPeriod = '10y';
-let energyCfg = {};
+// doc_id = EPPO_{BASE normalized}_RETAIL
+function eppoDocId(base, field) {
+  const p = base.replace(/[^A-Za-z0-9]+/g,'_').replace(/_+/g,'_').replace(/^_|_$/g,'').toUpperCase();
+  return 'EPPO_' + p + '_' + field;
+}
+
+function getEppoSeries(base, field) {
+  const key = eppoDocId(base, field);
+  return SERIES[key] || null;
+}
+
+// MTD average
+function calcMTD(data) {
+  const now = new Date();
+  const y = now.getFullYear(), m = String(now.getMonth()+1).padStart(2,'0');
+  const prefix = `${y}-${m}`;
+  const pts = data.filter(p => p.x.startsWith(prefix));
+  if (!pts.length) return null;
+  return pts.reduce((s,p) => s+p.y, 0) / pts.length;
+}
+
+// QTD average
+function calcQTD(data) {
+  const now = new Date();
+  const y = now.getFullYear();
+  const q = Math.floor(now.getMonth()/3);
+  const qStart = new Date(y, q*3, 1).toISOString().slice(0,10);
+  const pts = data.filter(p => p.x >= qStart);
+  if (!pts.length) return null;
+  return pts.reduce((s,p) => s+p.y, 0) / pts.length;
+}
+
+// สร้าง 365-day x-axis labels (Jan 1 → Dec 31)
+function makeYearLabels() {
+  const labels = [];
+  for (let m=0; m<12; m++) {
+    const days = new Date(2000, m+1, 0).getDate();
+    for (let d=1; d<=days; d++) {
+      labels.push(`${String(m+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`);
+    }
+  }
+  return labels; // ['01-01','01-02',...,'12-31']
+}
+
+// map data ปีใดปีหนึ่งลงบน 365-label axis
+function mapToYearAxis(data, year, yearLabels) {
+  const map = {};
+  data.forEach(p => {
+    if (p.x.startsWith(String(year))) {
+      const mmdd = p.x.slice(5).replace('-','').replace('-','');
+      // p.x = YYYY-MM-DD → slice(5) = MM-DD
+      map[p.x.slice(5)] = p.y;
+    }
+  });
+  return yearLabels.map(l => map[l] ?? null);
+}
+
 let energyCharts = {};
 
-function loadEnergyCfg() {
-  try { energyCfg = JSON.parse(localStorage.getItem('macro:energy_cfg') || '{}'); } catch {}
-  if (!energyCfg.diesel)   energyCfg.diesel   = 'EPPO_H_DIESEL';
-  if (!energyCfg.gasoline) energyCfg.gasoline = 'EPPO_GASOHOL_95';
-}
-
-function saveEnergyCfg() {
-  energyCfg.diesel   = document.getElementById('cfg-diesel')?.value   || energyCfg.diesel;
-  energyCfg.gasoline = document.getElementById('cfg-gasoline')?.value || energyCfg.gasoline;
-  localStorage.setItem('macro:energy_cfg', JSON.stringify(energyCfg));
-  renderEnergyCharts();
-}
-
-window.toggleEnergyCfg = function() {
-  const p = document.getElementById('energy-cfg-panel');
-  p.style.display = p.style.display === 'none' ? 'block' : 'none';
-};
-
-// helper: ดึง series ตาม BASE_PRODUCT + field
-function resolveEppo(baseId, field) {
-  const prefix = EPPO_CATALOG[baseId];
-  if (!prefix) return null;
-  const key = prefix + '_' + field;
-  return (SERIES[key] && SERIES[key].data.length > 0) ? SERIES[key] : null;
-}
-
-// หา latest value จาก series
-function latestVal(s) {
-  if (!s || !s.data.length) return null;
-  return s.data[s.data.length - 1];
-}
-
-// cut by period
-function cutEnergy(data, period) {
-  if (period === 'max' || !data.length) return data;
-  const months = {'3m':3,'6m':6,'1y':12,'3y':36,'10y':120}[period] || 120;
-  const cutoff = new Date(); cutoff.setMonth(cutoff.getMonth()-months);
-  const cs = cutoff.toISOString().slice(0,10);
-  return data.filter(p => p.x >= cs);
-}
-
 function renderEnergyPage() {
-  loadEnergyCfg();
-  renderEnergyKPI();
-  renderEnergyPeriodBtns();
-  populateEnergyCfgSelects();
-  renderEnergyCharts();
-}
+  const container = document.getElementById('energy-boxes');
+  if (!container) return;
+  container.innerHTML = '';
+  Object.values(energyCharts).forEach(c => c.destroy());
+  energyCharts = {};
 
-function renderEnergyKPI() {
-  const grid = document.getElementById('energy-kpi-grid');
-  if (!grid) return;
-  grid.innerHTML = '';
+  const thisYear = new Date().getFullYear();
+  const lastYear = thisYear - 1;
+  const yearLabels = makeYearLabels(); // 365 labels MM-DD
+  // x-axis display: แสดงเฉพาะวันที่ 1 ของแต่ละเดือน
+  const monthLabels = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const tickSet = new Set();
+  yearLabels.forEach((l,i) => { if (l.endsWith('-01')) tickSet.add(i); });
 
-  for (const base of EPPO_ORDER) {
-    const s = resolveEppo(base, 'RETAIL');
-    const last = latestVal(s);
-    const prev = s && s.data.length > 1 ? s.data[s.data.length-2] : null;
-
-    const chg = (last && prev) ? last.y - prev.y : null;
-    const chgCls = chg === null ? '' : chg > 0 ? 'up' : chg < 0 ? 'dn' : '';
-    const chgTxt = chg === null ? '' : (chg >= 0 ? '+' : '') + chg.toFixed(2);
-
-    const unit = base === 'LPG' ? 'บาท/กก.' : 'บาท/ลิตร';
-
-    const el = document.createElement('div');
-    el.className = 'ekpi';
-    el.innerHTML = `
-      <div class="ekpi-group">${base}</div>
-      <div class="ekpi-name">${s ? s.name.replace('EPPO ','').replace(' — RETAIL','') : '—'}</div>
-      <div>
-        <span class="ekpi-price">${last ? last.y.toFixed(2) : '—'}</span>
-        <span class="ekpi-unit">${unit}</span>
-        ${chg !== null ? `<span class="ekpi-chg ${chgCls}" style="font-size:0.75em;margin-left:6px">${chgTxt}</span>` : ''}
-      </div>
-      <div class="ekpi-date">${last ? last.x : ''}</div>`;
-    grid.appendChild(el);
-  }
-}
-
-function renderEnergyPeriodBtns() {
-  const tfs = document.getElementById('energy-tfs');
-  if (!tfs) return;
-  tfs.innerHTML = '';
-  ['3m','6m','1y','3y','10y','max'].forEach(p => {
-    const b = document.createElement('button');
-    b.className = 'tf' + (p === energyPeriod ? ' on' : '');
-    b.textContent = p.toUpperCase();
-    b.onclick = () => {
-      energyPeriod = p;
-      tfs.querySelectorAll('.tf').forEach(x => x.classList.remove('on'));
-      b.classList.add('on');
-      renderEnergyCharts();
-    };
-    tfs.appendChild(b);
-  });
-}
-
-function populateEnergyCfgSelects() {
-  ['cfg-diesel','cfg-gasoline'].forEach(id => {
-    const sel = document.getElementById(id);
-    if (!sel) return;
-    sel.innerHTML = '';
-    const isGas = id === 'cfg-gasoline';
-    const groups = isGas
-      ? ['ULG 95','GASOHOL 95','GASOHOL 91','GASOHOL95 E20','GASOHOL95 E85']
-      : ['DIESEL'];
-    for (const base of groups) {
-      for (const c of (EPPO_CATALOG[base]||[])) {
-        if (!SERIES[c+'_RETAIL']) continue;
-        const opt = document.createElement('option');
-        opt.value = c;
-        opt.textContent = c.replace('EPPO_','').replace(/_/g,' ');
-        if (c === (isGas ? energyCfg.gasoline : energyCfg.diesel)) opt.selected = true;
-        sel.appendChild(opt);
-      }
-    }
-  });
-}
-
-function mkEnergyChart(canvasId, datasets, labels) {
-  const canvas = document.getElementById(canvasId);
-  if (!canvas) return;
-  document.getElementById(canvasId.replace('c-','ld-')).style.display = 'none';
-  canvas.style.display = 'block';
-  if (energyCharts[canvasId]) energyCharts[canvasId].destroy();
   const tickColor = getComputedStyle(document.documentElement).getPropertyValue('--text3').trim() || '#555';
-  energyCharts[canvasId] = new Chart(canvas, {
-    type:'line', data:{labels, datasets},
-    options:{
-      responsive:true, maintainAspectRatio:false, animation:false,
-      interaction:{mode:'index',intersect:false},
-      plugins:{
-        legend:{display:false},
-        tooltip:{backgroundColor:'var(--bg)',borderColor:'var(--border2)',borderWidth:1,
-          titleColor:'var(--text2)',bodyColor:'var(--text)',
-          titleFont:{family:'monospace',size:11},bodyFont:{family:'monospace',size:12},
-          usePointStyle:false,
-          callbacks:{
-            title: items => { const d=labels[items[0]?.dataIndex]; return d ? new Date(d).toLocaleDateString('en-US',{day:'numeric',month:'short',year:'numeric',timeZone:'UTC'}) : ''; },
-            label: item => item.raw === null ? null : ' '+item.dataset.label+': '+Number(item.raw).toFixed(2)
+
+  for (const prod of EPPO_ORDER) {
+    const s = getEppoSeries(prod.base, 'RETAIL');
+    if (!s || !s.data.length) continue;
+
+    const data = s.data;
+    const last = data[data.length-1];
+    const mtd  = calcMTD(data);
+    const qtd  = calcQTD(data);
+
+    // สร้าง box
+    const boxId = 'ebox-' + prod.base.replace(/\s+/g,'_').replace(/[^A-Za-z0-9_]/g,'');
+    const canvasId = 'ec-' + boxId;
+
+    const box = document.createElement('div');
+    box.className = 'card';
+    box.innerHTML = `
+      <div class="ch" style="padding:10px 12px 6px">
+        <div>
+          <div class="ct" style="color:${prod.color}">${prod.label}</div>
+          <div class="cs">${prod.unit}</div>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:0;border-top:1px solid var(--border);border-bottom:1px solid var(--border)">
+        <div style="padding:8px 12px;border-right:1px solid var(--border)">
+          <div style="font-size:0.68em;color:var(--text3);margin-bottom:2px">ล่าสุด · ${last.x}</div>
+          <div style="font-size:1.4em;font-weight:700;color:${prod.color}">${last.y.toFixed(2)}</div>
+        </div>
+        <div style="padding:8px 12px;border-right:1px solid var(--border)">
+          <div style="font-size:0.68em;color:var(--text3);margin-bottom:2px">MTD avg</div>
+          <div style="font-size:1.1em;font-weight:600">${mtd !== null ? mtd.toFixed(2) : '—'}</div>
+        </div>
+        <div style="padding:8px 12px">
+          <div style="font-size:0.68em;color:var(--text3);margin-bottom:2px">QTD avg</div>
+          <div style="font-size:1.1em;font-weight:600">${qtd !== null ? qtd.toFixed(2) : '—'}</div>
+        </div>
+      </div>
+      <div style="padding:6px 12px 10px">
+        <div style="display:flex;gap:12px;margin-bottom:4px;flex-wrap:wrap">
+          <div class="li"><span class="ls" style="background:${prod.color}"></span>${thisYear}</div>
+          <div class="li"><span class="ls" style="background:var(--text3)"></span>${lastYear}</div>
+        </div>
+        <div style="position:relative;height:140px">
+          <canvas id="${canvasId}"></canvas>
+        </div>
+      </div>`;
+
+    container.appendChild(box);
+
+    // build datasets
+    const thisData = mapToYearAxis(data, thisYear, yearLabels);
+    const lastData = mapToYearAxis(data, lastYear, yearLabels);
+
+    // month tick labels
+    const xLabels = yearLabels.map((l,i) => tickSet.has(i) ? monthLabels[parseInt(l.slice(0,2))-1] : '');
+
+    const canvas = document.getElementById(canvasId);
+    if (!canvas) continue;
+
+    energyCharts[canvasId] = new Chart(canvas, {
+      type:'line',
+      data:{
+        labels: yearLabels,
+        datasets:[
+          {
+            label: String(lastYear),
+            data: lastData,
+            borderColor: 'rgba(128,128,128,0.4)',
+            borderWidth: 1.2,
+            pointRadius:0, tension:0.3, fill:false, spanGaps:true
+          },
+          {
+            label: String(thisYear),
+            data: thisData,
+            borderColor: prod.color,
+            borderWidth: 1.8,
+            pointRadius:0, tension:0.3, fill:false, spanGaps:true
+          }
+        ]
+      },
+      options:{
+        responsive:true, maintainAspectRatio:false, animation:false,
+        interaction:{mode:'index',intersect:false},
+        plugins:{
+          legend:{display:false},
+          tooltip:{
+            backgroundColor:'var(--bg)',borderColor:'var(--border2)',borderWidth:1,
+            titleColor:'var(--text2)',bodyColor:'var(--text)',
+            titleFont:{family:'monospace',size:11},bodyFont:{family:'monospace',size:12},
+            callbacks:{
+              title: items => {
+                const mmdd = yearLabels[items[0]?.dataIndex];
+                return mmdd ? mmdd : '';
+              },
+              label: item => item.raw === null ? null :
+                ' ' + item.dataset.label + ': ' + Number(item.raw).toFixed(2)
+            }
+          }
+        },
+        scales:{
+          x:{
+            type:'category',
+            ticks:{
+              color:tickColor, font:{family:'monospace',size:10},
+              maxRotation:0, autoSkip:false, maxTicksLimit:9999,
+              callback:(val,idx) => xLabels[idx] || ''
+            },
+            grid:{color: ctx => tickSet.has(ctx.index) ? 'rgba(128,128,128,0.1)' : 'transparent'},
+            border:{color:'rgba(128,128,128,0.15)'}
+          },
+          y:{
+            position:'left',
+            ticks:{color:tickColor,font:{family:'monospace',size:10},maxTicksLimit:5},
+            grid:{color:'rgba(128,128,128,0.08)'},
+            border:{color:'rgba(128,128,128,0.15)'}
           }
         }
-      },
-      scales:{
-        x:{type:'category',labels,ticks:{color:tickColor,font:{family:'monospace',size:10},maxRotation:0,
-          autoSkip:false,maxTicksLimit:9999,
-          callback:(val,idx) => {
-            const d=labels[idx]; if(!d) return '';
-            const dt=new Date(d);
-            const months={'3m':0.5,'6m':1,'1y':2,'3y':9,'10y':36,'max':36}[energyPeriod]||36;
-            // ตัดที่วันที่ 1 เท่านั้น
-            if(dt.getUTCDate()!==1) return '';
-            const prev = idx>0?new Date(labels[idx-1]):null;
-            if(!prev) return '';
-            const diffM=(dt.getFullYear()-prev.getFullYear())*12+(dt.getUTCMonth()-prev.getUTCMonth());
-            if(diffM<months) return '';
-            const mon=dt.toLocaleDateString('en-US',{month:'short',timeZone:'UTC'});
-            const yr=String(dt.getUTCFullYear()).slice(2);
-            return energyPeriod==='10y'||energyPeriod==='max' ? String(dt.getUTCFullYear()) : mon+yr;
-          }
-        },grid:{color:'rgba(128,128,128,0.08)'},border:{color:'rgba(128,128,128,0.15)'}},
-        y:{position:'left',ticks:{color:tickColor,font:{family:'monospace',size:10},maxTicksLimit:5},
-          grid:{color:'rgba(128,128,128,0.08)'},border:{color:'rgba(128,128,128,0.15)'}}
       }
-    }
-  });
-}
-
-function renderEnergyCharts() {
-  // Diesel chart
-  const dRetail = resolveEppo('DIESEL','RETAIL');
-  if (dRetail) {
-    const data = cutEnergy(dRetail.data.map(p=>({x:p.x,y:p.y})), energyPeriod);
-    const labels = data.map(p=>p.x);
-    const datasets = [{
-      label:'ดีเซล',data:data.map(p=>p.y),
-      borderColor:'#4d9fff',borderWidth:1.8,pointRadius:0,tension:0.3,fill:false,spanGaps:true
-    }];
-
-    mkEnergyChart('c-energy-diesel', datasets, labels);
-    const lg = document.getElementById('lg-energy-diesel');
-    if (lg) lg.innerHTML = datasets.map(d=>`<div class="li"><span class="ls" style="background:${d.borderColor}"></span>${d.label}</div>`).join('');
-    const sub = document.getElementById('energy-diesel-sub');
-    if (sub) sub.textContent = `บาท/ลิตร · ${energyPeriod.toUpperCase()}`;
-  }
-
-  // Gasoline chart — หลาย series
-  const gasKeys = [
-    {key:'EPPO_GASOHOL_95_RETAIL',    label:'Gasohol 95', color:'#f5a623'},
-    {key:'EPPO_GASOHOL_91_RETAIL',    label:'Gasohol 91', color:'#22c97a'},
-    {key:'EPPO_GASOHOL95_E20_RETAIL', label:'E20',        color:'#a78bfa'},
-    {key:'EPPO_GASOHOL95_E85_RETAIL', label:'E85',        color:'#f05252'},
-    {key:'EPPO_ULG_95_RETAIL',        label:'ULG 95',     color:'#4d9fff'},
-  ];
-  const gasSeries = gasKeys.map(g=>({...g, s:SERIES[g.key]})).filter(g=>g.s);
-  if (gasSeries.length) {
-    const base = gasSeries[0].s.data.map(p=>p.x);
-    const labels = cutEnergy(gasSeries[0].s.data, energyPeriod).map(p=>p.x);
-    const datasets = gasSeries.map(g => {
-      const cut = cutEnergy(g.s.data, energyPeriod);
-      const m = Object.fromEntries(cut.map(p=>[p.x,p.y]));
-      return {label:g.label,data:labels.map(l=>m[l]??null),borderColor:g.color,borderWidth:1.8,pointRadius:0,tension:0.3,fill:false,spanGaps:true};
     });
-    mkEnergyChart('c-energy-gas', datasets, labels);
-    const lg = document.getElementById('lg-energy-gas');
-    if (lg) lg.innerHTML = datasets.map(d=>`<div class="li"><span class="ls" style="background:${d.borderColor}"></span>${d.label}</div>`).join('');
-    const sub = document.getElementById('energy-gas-sub');
-    if (sub) sub.textContent = `บาท/ลิตร · ${energyPeriod.toUpperCase()}`;
   }
 }
 
