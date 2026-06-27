@@ -35,7 +35,6 @@ EXRATE_ROW   <- 18; EXRATE_COL <- 4  # D18
 
 FIELDS_COL <- list(
   EX_REFIN         = 3,
-  DISCOUNT         = 4,
   EXCISE_TAX       = 5,
   M_TAX            = 6,
   OIL_FUND         = 7,
@@ -49,7 +48,7 @@ FIELDS_COL <- list(
 )
 
 # schema เดิม — fields ที่ Firestore มี (backfill CSV)
-ALL_FIELDS <- c(names(FIELDS_COL), "EX_RATE", "OIL_FUND_2")
+ALL_FIELDS <- c(names(FIELDS_COL), "EX_RATE")
 
 # ── Credentials ───────────────────────────────────────────────────
 sa_json <- Sys.getenv("GCP_SA_KEY")
@@ -57,13 +56,42 @@ if (sa_json == "") stop("GCP_SA_KEY not set")
 sa <- fromJSON(sa_json)
 
 # ── Helpers ───────────────────────────────────────────────────────
-make_doc_id <- function(product, field) {
-  p <- product |>
+# map product name → BASE_PRODUCT (รองรับชื่อที่เปลี่ยนตามเวลา)
+PRODUCT_TO_BASE <- list(
+  "H-DIESEL"           = "DIESEL",
+  "H-DIESEL B7"        = "DIESEL",
+  "ULG 95"             = "ULG 95",
+  "ULG95R : UNL"       = "ULG 95",
+  "GASOHOL 95"         = "GASOHOL 95",
+  "GASOHOL95 E10"      = "GASOHOL 95",
+  "GASOHOL 91"         = "GASOHOL 91",
+  "GASOHOL95 E20"      = "GASOHOL95 E20",
+  "GASOHOL95 E85"      = "GASOHOL95 E85",
+  "LPG (BAHT/KILOGRAM)"= "LPG",
+  "LPG"                = "LPG",
+  "FO 1500 (2) 2%S"    = "FO 1500",
+  "FO 1500 2%S"        = "FO 1500",
+  "FO 600 (1) 2%S"     = "FO 600",
+  "FO 600 2%S"         = "FO 600"
+)
+
+make_doc_id <- function(base_product, field) {
+  p <- base_product |>
     str_replace_all("[^A-Za-z0-9]+", "_") |>
     str_replace_all("_+", "_") |>
     str_remove("^_|_$") |>
     toupper()
   paste0("EPPO_", p, "_", field)
+}
+
+resolve_base <- function(product_name) {
+  base <- PRODUCT_TO_BASE[[product_name]]
+  if (is.null(base)) {
+    # fallback: normalize product name เป็น base
+    warning(sprintf("  ⚠ Unknown product: '%s' — using as-is", product_name))
+    base <- product_name
+  }
+  base
 }
 
 # แปลงชื่อเดือนไทย → เลข
@@ -158,7 +186,7 @@ append_series <- function(token, doc_id, name, new_df) {
       if (!is.null(arr)) arr else list()
     } else list()
   }, error = function(e) list())
-
+  
   # new points
   new_pts <- pmap(new_df, function(date, value) {
     list(mapValue = list(fields = list(
@@ -166,22 +194,22 @@ append_series <- function(token, doc_id, name, new_df) {
       v = list(doubleValue  = value)
     )))
   })
-
+  
   all_pts <- c(existing_pts, new_pts)
-
+  
   body <- list(fields = list(
     name    = list(stringValue = name),
     updated = list(stringValue = format(Sys.time(), "%Y-%m-%dT%H:%M:%SZ", tz = "UTC")),
     data    = list(arrayValue = list(values = all_pts))
   ))
-
+  
   resp <- request(url) |>
     req_method("PATCH") |>
     req_auth_bearer_token(token) |>
     req_body_json(body, auto_unbox = TRUE) |>
     req_error(is_error = \(r) FALSE) |>
     req_perform()
-
+  
   status <- resp_status(resp)
   if (status >= 300) {
     warning(sprintf("  ✗ %s HTTP %d", doc_id, status))
@@ -213,15 +241,15 @@ page    <- 0
 while (!done) {
   url  <- if (page == 0) LIST_URL else paste0(LIST_URL, "?start=", page * 9)
   resp <- eppo_get(url)
-
+  
   if (resp_status(resp) != 200) {
     message("  HTTP ", resp_status(resp), " at page ", page, " — stop")
     break
   }
-
+  
   html  <- resp_body_string(resp) |> read_html()
   rows  <- html |> html_elements("table tr, .items-row, li.item")
-
+  
   # หาวันที่และ link จากหน้า
   date_texts <- html |>
     html_elements("td:first-child, .catItemTitle") |>
@@ -229,16 +257,16 @@ while (!done) {
   dl_links <- html |>
     html_elements("a[href*='download']") |>
     html_attr("href")
-
+  
   # parse วันที่ไทยทุกตัวในหน้า
   web_dates <- map_chr(date_texts, parse_thai_date) |>
     na.omit()
-
+  
   if (length(web_dates) == 0 || length(dl_links) == 0) {
     message("  page ", page, ": no items — stop")
     break
   }
-
+  
   # จับคู่ (web_date, link) — สมมติ 1:1 ตามลำดับ
   n <- min(length(web_dates), length(dl_links))
   for (i in seq_len(n)) {
@@ -247,7 +275,7 @@ while (!done) {
     if (wd <= last_date) { done <- TRUE; break }
     pending[[length(pending) + 1]] <- list(web_date = wd, link = dl_links[i])
   }
-
+  
   message(sprintf("  page %d: %d dates, %d links, %d pending so far",
                   page, length(web_dates), length(dl_links), length(pending)))
   if (done) break
@@ -271,9 +299,9 @@ for (item in pending) {
   web_date <- item$web_date
   link     <- item$link
   dl_url   <- paste0(BASE_URL, link)
-
+  
   message(sprintf("\n── [%s] %s", web_date, link))
-
+  
   # download xlsx
   tmp  <- tempfile(fileext = ".xlsx")
   resp <- eppo_get(dl_url)
@@ -282,7 +310,7 @@ for (item in pending) {
     next
   }
   writeBin(resp_body_raw(resp), tmp)
-
+  
   # อ่าน xlsx
   ws <- tryCatch(
     read_xlsx(tmp, col_names = FALSE, col_types = "text", sheet = 1),
@@ -290,7 +318,7 @@ for (item in pending) {
   )
   unlink(tmp)
   if (is.null(ws)) next
-
+  
   # validate: date ที่ B4
   date_raw    <- as.character(ws[DATE_ROW, DATE_COL])
   file_date   <- tryCatch(
@@ -301,13 +329,13 @@ for (item in pending) {
     flag_format_change(sprintf("[%s] Cannot parse date from B4: '%s'", web_date, date_raw))
     next
   }
-
+  
   # เช็คว่า file_date ตรงกับ web_date
   if (file_date != web_date) {
     message(sprintf("  ⚠ date mismatch: web=%s file=%s — skip", web_date, file_date))
     next
   }
-
+  
   # validate: header row 6 มี EX-REFIN และ RETAIL
   header_vals <- as.character(ws[HEADER_ROW, ])
   if (!any(str_detect(na.omit(header_vals), "(?i)EX.REFIN"))) {
@@ -318,24 +346,26 @@ for (item in pending) {
     flag_format_change(sprintf("[%s] RETAIL not found in header row 6", web_date))
     next
   }
-
+  
   # validate: C7 เป็นตัวเลข
   val_check <- suppressWarnings(as.numeric(as.character(ws[DATA_START, 3])))
   if (is.na(val_check)) {
     flag_format_change(sprintf("[%s] C7 not numeric — table may have shifted", web_date))
     next
   }
-
+  
   # EX_RATE D18
   exrate <- suppressWarnings(as.numeric(as.character(ws[EXRATE_ROW, EXRATE_COL])))
-
+  
   # parse rows
   for (r in DATA_START:min(DATA_END, nrow(ws))) {
     product <- str_trim(as.character(ws[r, 2]))
     if (is.na(product) || product == "" || product == "NA") next
-
-    row_data <- list(DATE = as.character(web_date), PRODUCT = product, EX_RATE = exrate)
-
+    
+    base <- resolve_base(product)
+    row_data <- list(DATE = as.character(web_date), PRODUCT = product,
+                     BASE_PRODUCT = base, EX_RATE = exrate)
+    
     for (field in names(FIELDS_COL)) {
       col_idx <- FIELDS_COL[[field]]
       v <- if (col_idx <= ncol(ws)) suppressWarnings(as.numeric(as.character(ws[r, col_idx]))) else NA_real_
@@ -343,10 +373,10 @@ for (item in pending) {
     }
     # fields ที่ไม่มีใน xlsx ใหม่ → NA
     row_data[["OIL_FUND_2"]] <- NA_real_
-
+    
     all_rows[[length(all_rows) + 1]] <- row_data
   }
-
+  
   message(sprintf("  ✓ parsed %s", web_date))
   Sys.sleep(DELAY)
 }
@@ -364,13 +394,17 @@ message(sprintf("\n── Parsed %d rows across %d dates",
 message("── Pushing to Firestore...")
 ok <- 0
 
-products <- unique(df_new$PRODUCT)
-for (prod in products) {
-  df_prod <- df_new |> filter(PRODUCT == prod)
-
+# group by BASE_PRODUCT ก่อน push
+base_products <- unique(df_new$BASE_PRODUCT)
+for (base in base_products) {
+  df_prod <- df_new |>
+    filter(BASE_PRODUCT == base) |>
+    arrange(DATE) |>
+    distinct(DATE, .keep_all = TRUE)
+  
   for (field in ALL_FIELDS) {
     if (!field %in% names(df_prod)) next
-
+    
     df_series <- df_prod |>
       select(date = DATE, value = all_of(field)) |>
       filter(!is.na(value)) |>
@@ -378,11 +412,11 @@ for (prod in products) {
       filter(!is.na(value), is.finite(value)) |>
       distinct(date, .keep_all = TRUE) |>
       arrange(date)
-
+    
     if (nrow(df_series) == 0) next
-
-    doc_id <- make_doc_id(prod, field)
-    label  <- paste0("EPPO ", prod, " — ", field)
+    
+    doc_id <- make_doc_id(base, field)
+    label  <- paste0("EPPO ", base, " — ", field)
     if (append_series(token, doc_id, label, df_series)) ok <- ok + 1
     Sys.sleep(0.1)
   }

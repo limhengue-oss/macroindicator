@@ -30,6 +30,18 @@
 body { background:var(--bg); color:var(--text); font-family:'SF Mono','JetBrains Mono','Fira Code',monospace; font-size:var(--fs); line-height:1.4; transition: background 0.2s, color 0.2s; }
 
 /* ── Mobile: font ปกติ, 1 column, portrait only ── */
+/* ── TH Energy page ─────────────────────────────────── */
+.energy-kpi-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(160px,1fr)); gap:8px; margin-bottom:14px; }
+.ekpi { background:var(--bg2); border:1px solid var(--border); border-radius:4px; padding:12px 14px; }
+.ekpi-group { font-size:0.7em; color:var(--text3); text-transform:uppercase; letter-spacing:0.06em; margin-bottom:2px; }
+.ekpi-name  { font-size:0.78em; color:var(--text2); margin-bottom:6px; }
+.ekpi-price { font-size:1.3em; font-weight:700; color:var(--text); }
+.ekpi-unit  { font-size:0.68em; color:var(--text3); margin-left:4px; }
+.ekpi-date  { font-size:0.68em; color:var(--text3); margin-top:4px; }
+.ekpi-chg.up{color:var(--up)} .ekpi-chg.dn{color:var(--dn)}
+.energy-section { margin-bottom:18px; }
+.energy-section-title { font-size:0.78em; color:var(--text3); text-transform:uppercase; letter-spacing:0.08em; margin-bottom:8px; border-bottom:1px solid var(--border); padding-bottom:4px; }
+
 @media (max-width:700px) {
   body { font-size:var(--fs); }
   .chart-grid { grid-template-columns:1fr !important; }
@@ -119,7 +131,7 @@ input[type=range] { width:80px; accent-color:var(--blue); }
 <body>
 
 <div id="topbar">
-  <div class="brand">Macro<span class="patch">v4.1</span></div>
+  <div class="brand">Macro<span class="patch">v4.3</span></div>
   <div class="topbar-right">
     <span class="sdot" id="sdot"></span>
     <span id="stxt">loading…</span>
@@ -149,6 +161,63 @@ input[type=range] { width:80px; accent-color:var(--blue); }
 
 <div id="nav"></div>
 <div id="pages"></div>
+
+<!-- TH ENERGY PAGE (special static page) -->
+<div id="page-th-energy" class="page" style="display:none">
+  <div class="page-head">
+    <span style="font-size:0.78em;color:var(--text2);text-transform:uppercase;letter-spacing:0.06em">TH Energy — ราคาพลังงานไทย</span>
+    <div class="page-actions">
+      <button class="btn" id="energy-cfg-btn" onclick="toggleEnergyCfg()">⚙ Config</button>
+    </div>
+  </div>
+
+  <!-- Energy Config panel -->
+  <div id="energy-cfg-panel" style="display:none;background:var(--bg2);border:1px solid var(--border2);border-radius:4px;padding:14px;margin-bottom:14px">
+    <div style="font-size:0.78em;color:var(--text3);margin-bottom:10px;text-transform:uppercase;letter-spacing:0.04em">Product Mapping</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:0.8em">
+      <div>
+        <label style="color:var(--text3);font-size:0.75em">Diesel series</label><br>
+        <select id="cfg-diesel" onchange="saveEnergyCfg()" style="width:100%;background:var(--bg3);border:1px solid var(--border2);color:var(--text);padding:5px 8px;border-radius:3px;font-family:inherit;font-size:0.9em;margin-top:3px">
+        </select>
+      </div>
+      <div>
+        <label style="color:var(--text3);font-size:0.75em">Gasoline series (หลัก)</label><br>
+        <select id="cfg-gasoline" onchange="saveEnergyCfg()" style="width:100%;background:var(--bg3);border:1px solid var(--border2);color:var(--text);padding:5px 8px;border-radius:3px;font-family:inherit;font-size:0.9em;margin-top:3px">
+        </select>
+      </div>
+    </div>
+  </div>
+
+  <!-- KPI Strip -->
+  <div class="energy-section">
+    <div class="energy-section-title">ราคาขายปลีกล่าสุด (บาท/ลิตร)</div>
+    <div class="energy-kpi-grid" id="energy-kpi-grid"></div>
+  </div>
+
+  <!-- Historical Charts -->
+  <div class="energy-section">
+    <div class="energy-section-title">ราคาย้อนหลัง</div>
+    <div class="tfs" id="energy-tfs" style="margin-bottom:10px"></div>
+    <div class="grid g2">
+      <div class="card">
+        <div class="ch"><div><div class="ct">Diesel</div><div class="cs" id="energy-diesel-sub"></div></div></div>
+        <div class="cb"><div style="position:relative;height:var(--chart-h,200px)">
+          <div class="ld" id="ld-energy-diesel">loading…</div>
+          <canvas id="c-energy-diesel" style="display:none"></canvas>
+        </div></div>
+        <div class="legend" id="lg-energy-diesel"></div>
+      </div>
+      <div class="card">
+        <div class="ch"><div><div class="ct">Gasoline</div><div class="cs" id="energy-gas-sub"></div></div></div>
+        <div class="cb"><div style="position:relative;height:var(--chart-h,200px)">
+          <div class="ld" id="ld-energy-gas">loading…</div>
+          <canvas id="c-energy-gas" style="display:none"></canvas>
+        </div></div>
+        <div class="legend" id="lg-energy-gas"></div>
+      </div>
+    </div>
+  </div>
+</div>
 
 <!-- Chart Modal -->
 <div class="modal-bg" id="chart-modal">
@@ -249,6 +318,9 @@ const SERIES_GROUPS = {
   'Commodities':  ['WTI','BRENT','GOLD','SILVER','COPPER','NATGAS'],
   'US Macro':     ['FEDFUNDS','CPI','CORECPI','DGS2','DGS10','UNRATE'],
   'EU Macro':     ['ECBRATE','EUCPI'],
+  'EPPO Diesel':  ['EPPO_H_DIESEL_RETAIL','EPPO_H_DIESEL_B7_RETAIL','EPPO_H_DIESEL_EX_REFIN','EPPO_H_DIESEL_OIL_FUND','EPPO_H_DIESEL_EXCISE_TAX','EPPO_H_DIESEL_MARKETING_MARGIN'],
+  'EPPO Gasoline':['EPPO_ULG_95_RETAIL','EPPO_GASOHOL_95_RETAIL','EPPO_GASOHOL_91_RETAIL','EPPO_GASOHOL95_E20_RETAIL','EPPO_GASOHOL95_E85_RETAIL'],
+  'EPPO Other':   ['EPPO_LPG_RETAIL','EPPO_FO_1500_2_2_S_RETAIL','EPPO_FO_600_1_2_S_RETAIL'],
   'PTT OR Oil':   ['PTTOR_PREMIUM_DIESEL','PTTOR_SUPER_POWER_GSH95','PTTOR_GASOHOL_91','PTTOR_GASOHOL_E20','PTTOR_GASOHOL_E85','PTTOR_BENZENE_95'],
 };
 
@@ -312,6 +384,10 @@ function defaultConfig() {
         { id:uid(), title:'Yield Curve 2Y-10Y', series:[{id:'DGS2',axis:'L',fn:'raw',color:'#4d9fff'},{id:'DGS10',axis:'L',fn:'raw',color:'#f05252'}], period:'5y' },
         { id:uid(), title:'Unemployment', series:[{id:'UNRATE',axis:'L',fn:'raw',color:'#888888'}], period:'3y' },
       ]},
+      { id:uid(), name:'TH Energy', cols:2, charts:[
+        { id:uid(), title:'Diesel Retail Price', series:[{id:'EPPO_H_DIESEL_RETAIL',axis:'L',fn:'raw',color:'#4d9fff'}], period:'10y' },
+        { id:uid(), title:'Gasoline Retail Price', series:[{id:'EPPO_ULG_95_RETAIL',axis:'L',fn:'raw',color:'#f5a623'},{id:'EPPO_GASOHOL_95_RETAIL',axis:'L',fn:'raw',color:'#f05252'},{id:'EPPO_GASOHOL_91_RETAIL',axis:'L',fn:'raw',color:'#22c97a'}], period:'10y' },
+      ]},
       { id:uid(), name:'Mag 7', cols:2, charts:[
         { id:uid(), title:'Mag7 normalized', series:[
           {id:'AAPL',axis:'L',fn:'norm',color:'#4d9fff'},
@@ -359,6 +435,249 @@ async function fetchAll() {
       data: (d.data||[]).map(p=>({x:p.d, y:p.v})).sort((a,b)=>a.x<b.x?-1:1)
     };
   });
+}
+
+// ══════════════════════════════════════════════════════
+//  TH ENERGY PAGE
+// ══════════════════════════════════════════════════════
+
+// products catalog — BASE_PRODUCT → [PRODUCT_CLEAN doc_ids]
+// doc_id = EPPO_{BASE_PRODUCT normalized}_RETAIL
+const EPPO_CATALOG = {
+  'DIESEL':        'EPPO_DIESEL',
+  'ULG 95':        'EPPO_ULG_95',
+  'GASOHOL 95':    'EPPO_GASOHOL_95',
+  'GASOHOL 91':    'EPPO_GASOHOL_91',
+  'GASOHOL95 E20': 'EPPO_GASOHOL95_E20',
+  'GASOHOL95 E85': 'EPPO_GASOHOL95_E85',
+  'LPG':           'EPPO_LPG',
+  'FO 1500':       'EPPO_FO_1500',
+  'FO 600':        'EPPO_FO_600',
+};
+// DIESEL และ ULG 95 ขึ้นก่อน
+const EPPO_ORDER = ['DIESEL','ULG 95','GASOHOL 95','GASOHOL 91','GASOHOL95 E20','GASOHOL95 E85','LPG','FO 1500','FO 600'];
+const FIELD_LABELS = {
+  EX_REFIN:'Ex-Refinery', EXCISE_TAX:'Excise Tax', M_TAX:'Municipal Tax',
+  OIL_FUND:'Oil Fund', CONSV_FUND:'Conservation Fund',
+  VAT_WS:'VAT(WS)', MARKETING_MARGIN:'Marketing Margin', VAT_MM:'VAT(MM)'
+};
+const STACK_COLORS = ['#4d9fff','#f05252','#f5a623','#22c97a','#a78bfa','#888888','#f0a500','#00c9a7'];
+const STACK_FIELDS = ['EX_REFIN','EXCISE_TAX','M_TAX','OIL_FUND','CONSV_FUND','VAT_WS','MARKETING_MARGIN','VAT_MM'];
+
+let energyPeriod = '10y';
+let energyCfg = {};
+let energyCharts = {};
+
+function loadEnergyCfg() {
+  try { energyCfg = JSON.parse(localStorage.getItem('macro:energy_cfg') || '{}'); } catch {}
+  if (!energyCfg.diesel)   energyCfg.diesel   = 'EPPO_H_DIESEL';
+  if (!energyCfg.gasoline) energyCfg.gasoline = 'EPPO_GASOHOL_95';
+}
+
+function saveEnergyCfg() {
+  energyCfg.diesel   = document.getElementById('cfg-diesel')?.value   || energyCfg.diesel;
+  energyCfg.gasoline = document.getElementById('cfg-gasoline')?.value || energyCfg.gasoline;
+  localStorage.setItem('macro:energy_cfg', JSON.stringify(energyCfg));
+  renderEnergyCharts();
+}
+
+window.toggleEnergyCfg = function() {
+  const p = document.getElementById('energy-cfg-panel');
+  p.style.display = p.style.display === 'none' ? 'block' : 'none';
+};
+
+// helper: ดึง series ตาม BASE_PRODUCT + field
+function resolveEppo(baseId, field) {
+  const prefix = EPPO_CATALOG[baseId];
+  if (!prefix) return null;
+  const key = prefix + '_' + field;
+  return (SERIES[key] && SERIES[key].data.length > 0) ? SERIES[key] : null;
+}
+
+// หา latest value จาก series
+function latestVal(s) {
+  if (!s || !s.data.length) return null;
+  return s.data[s.data.length - 1];
+}
+
+// cut by period
+function cutEnergy(data, period) {
+  if (period === 'max' || !data.length) return data;
+  const months = {'3m':3,'6m':6,'1y':12,'3y':36,'10y':120}[period] || 120;
+  const cutoff = new Date(); cutoff.setMonth(cutoff.getMonth()-months);
+  const cs = cutoff.toISOString().slice(0,10);
+  return data.filter(p => p.x >= cs);
+}
+
+function renderEnergyPage() {
+  loadEnergyCfg();
+  renderEnergyKPI();
+  renderEnergyPeriodBtns();
+  populateEnergyCfgSelects();
+  renderEnergyCharts();
+}
+
+function renderEnergyKPI() {
+  const grid = document.getElementById('energy-kpi-grid');
+  if (!grid) return;
+  grid.innerHTML = '';
+
+  for (const base of EPPO_ORDER) {
+    const s = resolveEppo(base, 'RETAIL');
+    const last = latestVal(s);
+    const prev = s && s.data.length > 1 ? s.data[s.data.length-2] : null;
+
+    const chg = (last && prev) ? last.y - prev.y : null;
+    const chgCls = chg === null ? '' : chg > 0 ? 'up' : chg < 0 ? 'dn' : '';
+    const chgTxt = chg === null ? '' : (chg >= 0 ? '+' : '') + chg.toFixed(2);
+
+    const unit = base === 'LPG' ? 'บาท/กก.' : 'บาท/ลิตร';
+
+    const el = document.createElement('div');
+    el.className = 'ekpi';
+    el.innerHTML = `
+      <div class="ekpi-group">${base}</div>
+      <div class="ekpi-name">${s ? s.name.replace('EPPO ','').replace(' — RETAIL','') : '—'}</div>
+      <div>
+        <span class="ekpi-price">${last ? last.y.toFixed(2) : '—'}</span>
+        <span class="ekpi-unit">${unit}</span>
+        ${chg !== null ? `<span class="ekpi-chg ${chgCls}" style="font-size:0.75em;margin-left:6px">${chgTxt}</span>` : ''}
+      </div>
+      <div class="ekpi-date">${last ? last.x : ''}</div>`;
+    grid.appendChild(el);
+  }
+}
+
+function renderEnergyPeriodBtns() {
+  const tfs = document.getElementById('energy-tfs');
+  if (!tfs) return;
+  tfs.innerHTML = '';
+  ['3m','6m','1y','3y','10y','max'].forEach(p => {
+    const b = document.createElement('button');
+    b.className = 'tf' + (p === energyPeriod ? ' on' : '');
+    b.textContent = p.toUpperCase();
+    b.onclick = () => {
+      energyPeriod = p;
+      tfs.querySelectorAll('.tf').forEach(x => x.classList.remove('on'));
+      b.classList.add('on');
+      renderEnergyCharts();
+    };
+    tfs.appendChild(b);
+  });
+}
+
+function populateEnergyCfgSelects() {
+  ['cfg-diesel','cfg-gasoline'].forEach(id => {
+    const sel = document.getElementById(id);
+    if (!sel) return;
+    sel.innerHTML = '';
+    const isGas = id === 'cfg-gasoline';
+    const groups = isGas
+      ? ['ULG 95','GASOHOL 95','GASOHOL 91','GASOHOL95 E20','GASOHOL95 E85']
+      : ['DIESEL'];
+    for (const base of groups) {
+      for (const c of (EPPO_CATALOG[base]||[])) {
+        if (!SERIES[c+'_RETAIL']) continue;
+        const opt = document.createElement('option');
+        opt.value = c;
+        opt.textContent = c.replace('EPPO_','').replace(/_/g,' ');
+        if (c === (isGas ? energyCfg.gasoline : energyCfg.diesel)) opt.selected = true;
+        sel.appendChild(opt);
+      }
+    }
+  });
+}
+
+function mkEnergyChart(canvasId, datasets, labels) {
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return;
+  document.getElementById(canvasId.replace('c-','ld-')).style.display = 'none';
+  canvas.style.display = 'block';
+  if (energyCharts[canvasId]) energyCharts[canvasId].destroy();
+  const tickColor = getComputedStyle(document.documentElement).getPropertyValue('--text3').trim() || '#555';
+  energyCharts[canvasId] = new Chart(canvas, {
+    type:'line', data:{labels, datasets},
+    options:{
+      responsive:true, maintainAspectRatio:false, animation:false,
+      interaction:{mode:'index',intersect:false},
+      plugins:{
+        legend:{display:false},
+        tooltip:{backgroundColor:'var(--bg)',borderColor:'var(--border2)',borderWidth:1,
+          titleColor:'var(--text2)',bodyColor:'var(--text)',
+          titleFont:{family:'monospace',size:11},bodyFont:{family:'monospace',size:12},
+          usePointStyle:false,
+          callbacks:{
+            title: items => { const d=labels[items[0]?.dataIndex]; return d ? new Date(d).toLocaleDateString('en-US',{day:'numeric',month:'short',year:'numeric',timeZone:'UTC'}) : ''; },
+            label: item => item.raw === null ? null : ' '+item.dataset.label+': '+Number(item.raw).toFixed(2)
+          }
+        }
+      },
+      scales:{
+        x:{type:'category',labels,ticks:{color:tickColor,font:{family:'monospace',size:10},maxRotation:0,
+          autoSkip:false,maxTicksLimit:9999,
+          callback:(val,idx) => {
+            const d=labels[idx]; if(!d) return '';
+            const dt=new Date(d);
+            const months={'3m':0.5,'6m':1,'1y':2,'3y':9,'10y':36,'max':36}[energyPeriod]||36;
+            // ตัดที่วันที่ 1 เท่านั้น
+            if(dt.getUTCDate()!==1) return '';
+            const prev = idx>0?new Date(labels[idx-1]):null;
+            if(!prev) return '';
+            const diffM=(dt.getFullYear()-prev.getFullYear())*12+(dt.getUTCMonth()-prev.getUTCMonth());
+            if(diffM<months) return '';
+            const mon=dt.toLocaleDateString('en-US',{month:'short',timeZone:'UTC'});
+            const yr=String(dt.getUTCFullYear()).slice(2);
+            return energyPeriod==='10y'||energyPeriod==='max' ? String(dt.getUTCFullYear()) : mon+yr;
+          }
+        },grid:{color:'rgba(128,128,128,0.08)'},border:{color:'rgba(128,128,128,0.15)'}},
+        y:{position:'left',ticks:{color:tickColor,font:{family:'monospace',size:10},maxTicksLimit:5},
+          grid:{color:'rgba(128,128,128,0.08)'},border:{color:'rgba(128,128,128,0.15)'}}
+      }
+    }
+  });
+}
+
+function renderEnergyCharts() {
+  // Diesel chart
+  const dRetail = resolveEppo('DIESEL','RETAIL');
+  if (dRetail) {
+    const data = cutEnergy(dRetail.data.map(p=>({x:p.x,y:p.y})), energyPeriod);
+    const labels = data.map(p=>p.x);
+    const datasets = [{
+      label:'ดีเซล',data:data.map(p=>p.y),
+      borderColor:'#4d9fff',borderWidth:1.8,pointRadius:0,tension:0.3,fill:false,spanGaps:true
+    }];
+
+    mkEnergyChart('c-energy-diesel', datasets, labels);
+    const lg = document.getElementById('lg-energy-diesel');
+    if (lg) lg.innerHTML = datasets.map(d=>`<div class="li"><span class="ls" style="background:${d.borderColor}"></span>${d.label}</div>`).join('');
+    const sub = document.getElementById('energy-diesel-sub');
+    if (sub) sub.textContent = `บาท/ลิตร · ${energyPeriod.toUpperCase()}`;
+  }
+
+  // Gasoline chart — หลาย series
+  const gasKeys = [
+    {key:'EPPO_GASOHOL_95_RETAIL',    label:'Gasohol 95', color:'#f5a623'},
+    {key:'EPPO_GASOHOL_91_RETAIL',    label:'Gasohol 91', color:'#22c97a'},
+    {key:'EPPO_GASOHOL95_E20_RETAIL', label:'E20',        color:'#a78bfa'},
+    {key:'EPPO_GASOHOL95_E85_RETAIL', label:'E85',        color:'#f05252'},
+    {key:'EPPO_ULG_95_RETAIL',        label:'ULG 95',     color:'#4d9fff'},
+  ];
+  const gasSeries = gasKeys.map(g=>({...g, s:SERIES[g.key]})).filter(g=>g.s);
+  if (gasSeries.length) {
+    const base = gasSeries[0].s.data.map(p=>p.x);
+    const labels = cutEnergy(gasSeries[0].s.data, energyPeriod).map(p=>p.x);
+    const datasets = gasSeries.map(g => {
+      const cut = cutEnergy(g.s.data, energyPeriod);
+      const m = Object.fromEntries(cut.map(p=>[p.x,p.y]));
+      return {label:g.label,data:labels.map(l=>m[l]??null),borderColor:g.color,borderWidth:1.8,pointRadius:0,tension:0.3,fill:false,spanGaps:true};
+    });
+    mkEnergyChart('c-energy-gas', datasets, labels);
+    const lg = document.getElementById('lg-energy-gas');
+    if (lg) lg.innerHTML = datasets.map(d=>`<div class="li"><span class="ls" style="background:${d.borderColor}"></span>${d.label}</div>`).join('');
+    const sub = document.getElementById('energy-gas-sub');
+    if (sub) sub.textContent = `บาท/ลิตร · ${energyPeriod.toUpperCase()}`;
+  }
 }
 
 window.toggleOptions = function() {
@@ -447,6 +766,20 @@ function render() { renderNav(); renderActivePage(); }
 function renderNav() {
   const nav=document.getElementById('nav');
   nav.innerHTML='';
+  // special TH Energy page
+  const energyBtn = document.createElement('button');
+  energyBtn.className = 'nb' + (activePageId === '__energy__' ? ' active' : '');
+  energyBtn.textContent = 'TH Energy';
+  energyBtn.onclick = () => {
+    activePageId = '__energy__';
+    document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
+    document.querySelectorAll('.nb').forEach(b=>b.classList.remove('active'));
+    document.getElementById('page-th-energy').classList.add('active');
+    energyBtn.classList.add('active');
+    renderEnergyPage();
+  };
+  nav.appendChild(energyBtn);
+
   config.pages.forEach(page=>{
     const btn=document.createElement('button');
     btn.className='nb'+(page.id===activePageId?' active':'');
@@ -464,6 +797,9 @@ function renderActivePage() {
   const container=document.getElementById('pages');
   container.innerHTML='';
   Object.values(charts).forEach(c=>c.destroy());
+
+  // TH Energy page handled by nav directly — skip
+  if (activePageId === '__energy__') return;
 
   const page=config.pages.find(p=>p.id===activePageId);
   if (!page) { container.innerHTML='<div class="empty">ยังไม่มี page — กด + ใน nav</div>'; return; }
