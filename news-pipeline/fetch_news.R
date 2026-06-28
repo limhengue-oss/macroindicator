@@ -136,13 +136,24 @@ build_prompt <- function(items) {
   )
 }
 
-call_gemini <- function(prompt) {
-  resp <- request("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent") |>
-    req_url_query(key = GEMINI_API_KEY) |>
-    req_headers("Content-Type" = "application/json") |>
-    req_body_json(list(contents = list(list(parts = list(list(text = prompt)))))) |>
-    req_timeout(60) |>
-    req_perform()
+call_gemini <- function(prompt, max_retries = 3) {
+  for (attempt in seq_len(max_retries)) {
+    result <- tryCatch({
+      resp <- request("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent") |>
+        req_url_query(key = GEMINI_API_KEY) |>
+        req_headers("Content-Type" = "application/json") |>
+        req_body_json(list(contents = list(list(parts = list(list(text = prompt)))))) |>
+        req_timeout(60) |>
+        req_perform()
+      list(ok = TRUE, resp = resp)
+    }, error = function(e) {
+      message("Gemini attempt ", attempt, " failed: ", e$message)
+      list(ok = FALSE)
+    })
+    if (result$ok) { resp <- result$resp; break }
+    if (attempt < max_retries) Sys.sleep(15)
+  }
+  if (!result$ok) stop("Gemini failed after ", max_retries, " attempts")
 
   raw <- resp_body_json(resp)$candidates[[1]]$content$parts[[1]]$text
   raw <- gsub("```json|```", "", raw)

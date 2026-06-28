@@ -30,6 +30,17 @@
 body { background:var(--bg); color:var(--text); font-family:'SF Mono','JetBrains Mono','Fira Code',monospace; font-size:var(--fs); line-height:1.4; transition: background 0.2s, color 0.2s; }
 
 /* ── Mobile: font ปกติ, 1 column, portrait only ── */
+/* ── News page ──────────────────────────────────────── */
+.news-day { margin-bottom:18px; }
+.news-day-header { font-size:0.72em; color:var(--text3); text-transform:uppercase; letter-spacing:0.06em; padding:4px 0; border-bottom:1px solid var(--border); margin-bottom:10px; }
+.news-item { background:var(--bg2); border:1px solid var(--border); border-radius:4px; padding:12px 14px; margin-bottom:8px; }
+.news-source { font-size:0.68em; color:var(--blue); text-transform:uppercase; letter-spacing:0.04em; margin-bottom:4px; }
+.news-title { font-size:0.82em; font-weight:700; margin-bottom:6px; line-height:1.4; }
+.news-title a { color:var(--text); text-decoration:none; }
+.news-title a:hover { color:var(--blue); }
+.news-summary { font-size:0.78em; color:var(--text2); line-height:1.5; margin-bottom:6px; }
+.news-why { font-size:0.7em; color:var(--text3); font-style:italic; }
+
 /* ── TH Energy page ─────────────────────────────────── */
 .energy-kpi-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(160px,1fr)); gap:8px; margin-bottom:14px; }
 .ekpi { background:var(--bg2); border:1px solid var(--border); border-radius:4px; padding:12px 14px; }
@@ -131,7 +142,7 @@ input[type=range] { width:80px; accent-color:var(--blue); }
 <body>
 
 <div id="topbar">
-  <div class="brand">Macro<span class="patch">v4.6g</span></div>
+  <div class="brand">Macro<span class="patch">v4.7</span></div>
   <div class="topbar-right">
     <span class="sdot" id="sdot"></span>
     <span id="stxt">loading…</span>
@@ -151,13 +162,13 @@ input[type=range] { width:80px; accent-color:var(--blue); }
           <input type="range" id="fs-range" min="100" max="300" step="10" value="100" oninput="setFont(this.value)" style="width:100%">
         </div>
         <div class="field" style="margin-bottom:0">
-          <label style="display:block;font-size:0.7em;color:var(--text3);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:4px">Reference Date (เช่น 2026-06-01)</label>
-          <div style="display:flex;gap:6px">
-            <input type="text" id="ref-date-input" placeholder="YYYY-MM-DD"
-              style="flex:1;background:var(--bg3);border:1px solid var(--border2);color:var(--text);padding:5px 8px;border-radius:3px;font-family:inherit;font-size:0.82em"
-              oninput="saveRefDate()">
-            <span id="ref-date-status" style="font-size:0.72em;color:var(--text3);line-height:1;display:flex;align-items:center"></span>
+          <label style="display:block;font-size:0.7em;color:var(--text3);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:4px">Reference Date</label>
+          <div style="display:flex;gap:6px;align-items:center">
+            <input type="date" id="ref-date-input"
+              style="flex:1;background:var(--bg3);border:1px solid var(--border2);color:var(--text);padding:5px 8px;border-radius:3px;font-family:inherit;font-size:0.82em;color-scheme:dark">
+            <button class="btn btn-primary" onclick="saveRefDate()" style="white-space:nowrap;padding:5px 10px">Set</button>
           </div>
+          <div id="ref-date-status" style="font-size:0.72em;margin-top:4px"></div>
         </div>
         <div style="display:flex;gap:6px;padding-top:4px;border-top:1px solid var(--border)">
           <button class="btn" onclick="exportConfig()" style="flex:1">Export</button>
@@ -171,10 +182,26 @@ input[type=range] { width:80px; accent-color:var(--blue); }
 <div id="nav"></div>
 <div id="pages"></div>
 
+<!-- NEWS PAGE -->
+<div id="page-news" class="page" style="display:none">
+  <div class="page-head" style="margin-bottom:14px">
+    <span style="font-size:0.78em;color:var(--text2);text-transform:uppercase;letter-spacing:0.06em">Daily News</span>
+    <div class="page-actions">
+      <button class="btn" onclick="loadData()">↻ Refresh</button>
+    </div>
+  </div>
+  <div id="news-container"><div class="ld">loading…</div></div>
+</div>
+
 <!-- TH ENERGY PAGE -->
 <div id="page-th-energy" class="page" style="display:none">
   <div class="page-head" style="margin-bottom:14px">
     <span style="font-size:0.78em;color:var(--text2);text-transform:uppercase;letter-spacing:0.06em">TH Energy — ราคาพลังงานไทย</span>
+  </div>
+  <!-- Shared legend -->
+  <div style="display:flex;gap:16px;align-items:center;margin-bottom:10px;font-size:0.8em" id="energy-shared-legend">
+    <div class="li"><span class="ls" style="background:#f5a623"></span><span id="energy-year-this">ปีนี้</span></div>
+    <div class="li"><span class="ls" style="background:rgba(128,128,128,0.5)"></span><span id="energy-year-last">ปีก่อน</span></div>
   </div>
   <div id="energy-boxes" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:12px"></div>
 </div>
@@ -288,6 +315,7 @@ const SERIES_GROUPS = {
 //  STATE
 // ════════════════════════════════════════════════════
 const SERIES = {};
+let NEWS = [];
 const charts = {};
 let config = loadConfig();
 let activePageId = config.pages[0]?.id || null;
@@ -395,20 +423,42 @@ async function fetchAll() {
   });
 }
 
+async function fetchNews() {
+  NEWS = [];
+  const snap = await getDocs(collection(db, 'daily_news'));
+  snap.forEach(d => {
+    const data = d.data();
+    const items = (data.news || []).map(n => ({
+      title:      n.title      || '',
+      summary_th: n.summary_th || '',
+      source:     n.source     || '',
+      url:        n.url        || '',
+      why_picked: n.why_picked || ''
+    }));
+    if (items.length) NEWS.push({
+      docId:   d.id,
+      date:    data.date    || d.id.slice(0,10),
+      session: data.session || '',
+      news:    items
+    });
+  });
+  NEWS.sort((a,b) => b.docId.localeCompare(a.docId));
+}
+
 // ══════════════════════════════════════════════════════
 //  TH ENERGY PAGE
 // ══════════════════════════════════════════════════════
 
 const EPPO_ORDER = [
-  { base:'DIESEL',        label:'Diesel',      color:'#4d9fff', unit:'บาท/ลิตร' },
-  { base:'ULG 95',        label:'ULG 95',      color:'#f5a623', unit:'บาท/ลิตร' },
-  { base:'LPG',           label:'LPG',         color:'#a78bfa', unit:'บาท/กก.'  },
-  { base:'GASOHOL 95',    label:'Gasohol 95',  color:'#22c97a', unit:'บาท/ลิตร' },
-  { base:'GASOHOL 91',    label:'Gasohol 91',  color:'#00c9a7', unit:'บาท/ลิตร' },
-  { base:'GASOHOL95 E20', label:'E20',         color:'#f0a500', unit:'บาท/ลิตร' },
-  { base:'GASOHOL95 E85', label:'E85',         color:'#f05252', unit:'บาท/ลิตร' },
-  { base:'FO 1500',       label:'FO 1500',     color:'#888888', unit:'บาท/ลิตร' },
-  { base:'FO 600',        label:'FO 600',      color:'#555555', unit:'บาท/ลิตร' },
+  { base:'DIESEL',        label:'Diesel',      color:'#f5a623', unit:'บาท/ลิตร', field:'RETAIL'    },
+  { base:'ULG 95',        label:'ULG 95',      color:'#f5a623', unit:'บาท/ลิตร', field:'RETAIL'    },
+  { base:'LPG',           label:'LPG',         color:'#f5a623', unit:'บาท/กก.',  field:'RETAIL'    },
+  { base:'GASOHOL 95',    label:'Gasohol 95',  color:'#f5a623', unit:'บาท/ลิตร', field:'RETAIL'    },
+  { base:'GASOHOL 91',    label:'Gasohol 91',  color:'#f5a623', unit:'บาท/ลิตร', field:'RETAIL'    },
+  { base:'GASOHOL95 E20', label:'E20',         color:'#f5a623', unit:'บาท/ลิตร', field:'RETAIL'    },
+  { base:'GASOHOL95 E85', label:'E85',         color:'#f5a623', unit:'บาท/ลิตร', field:'RETAIL'    },
+  { base:'FO 1500',       label:'FO 1500',     color:'#f5a623', unit:'บาท/ลิตร', field:'WHOLESALE' },
+  { base:'FO 600',        label:'FO 600',      color:'#f5a623', unit:'บาท/ลิตร', field:'WHOLESALE' },
 ];
 
 function eppoDocId(base, field) {
@@ -426,9 +476,12 @@ function loadRefDate() {
 }
 
 function saveRefDate() {
-  const val = document.getElementById('ref-date-input')?.value.trim() || '';
+  const val = document.getElementById('ref-date-input')?.value || '';
   localStorage.setItem('macro:ref_date', val);
   updateRefDateStatus(val);
+  // ปิด options panel
+  const panel = document.getElementById('opt-panel');
+  if (panel) panel.style.display = 'none';
   if (activePageId === '__energy__') renderEnergyPage();
 }
 
@@ -436,16 +489,17 @@ function updateRefDateStatus(val) {
   const el = document.getElementById('ref-date-status');
   if (!el) return;
   if (!val) { el.textContent = ''; return; }
-  const d = new Date(val);
+  const d = new Date(val + 'T00:00:00Z');
   if (isNaN(d)) { el.textContent = '❌ format ไม่ถูก'; el.style.color='var(--dn)'; return; }
-  el.textContent = '✓ ' + d.toLocaleDateString('en-US',{day:'numeric',month:'short',year:'numeric',timeZone:'UTC'});
+  el.textContent = '✓ Reference: ' + d.toLocaleDateString('en-US',{day:'numeric',month:'short',year:'numeric',timeZone:'UTC'});
   el.style.color = 'var(--up)';
 }
 
 // หาราคา ณ ref date (วันที่ตรงหรือใกล้ที่สุดก่อน ref date)
 function priceAtDate(data, dateStr) {
   if (!dateStr || !data.length) return null;
-  const pts = data.filter(p => p.x <= dateStr);
+  const ref = dateStr.slice(0,10);  // ตัดให้เหลือแค่ YYYY-MM-DD
+  const pts = data.filter(p => p.x.slice(0,10) <= ref);
   if (!pts.length) return null;
   return pts[pts.length-1].y;
 }
@@ -506,11 +560,16 @@ async function renderEnergyPage() {
   // sync ref date input
   const savedRef = loadRefDate();
   const inp = document.getElementById('ref-date-input');
-  if (inp && inp.value === '') inp.value = savedRef;
+  if (inp) inp.value = savedRef;  // date input ต้องการ YYYY-MM-DD เสมอ
   updateRefDateStatus(savedRef);
 
   const thisYear = new Date().getFullYear();
   const lastYear = thisYear - 1;
+  // อัพเดท shared legend
+  const lyEl = document.getElementById('energy-year-this');
+  const llEl = document.getElementById('energy-year-last');
+  if (lyEl) lyEl.textContent = String(thisYear);
+  if (llEl) llEl.textContent = String(lastYear);
   const yearLabels = makeYearLabels();
   const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   const tickSet = new Set();
@@ -518,7 +577,7 @@ async function renderEnergyPage() {
   const tickColor = getComputedStyle(document.documentElement).getPropertyValue('--text3').trim() || '#555';
 
   for (const prod of EPPO_ORDER) {
-    const sRetail   = getEppoSeries(prod.base, 'RETAIL');
+    const sRetail   = getEppoSeries(prod.base, prod.field);
     const sOilFund  = getEppoSeries(prod.base, 'OIL_FUND');
     if (!sRetail || !sRetail.data.length) continue;
 
@@ -528,17 +587,19 @@ async function renderEnergyPage() {
     const qtd     = calcQTD(data);
     const oilFund = sOilFund ? sOilFund.data[sOilFund.data.length-1]?.y : null;
 
-    // RTD
+    // RTD — ref date เปรียบเทียบกับราคา ณ วันนั้น
     let rtdHtml = '';
-    if (savedRef) {
-      const refPrice = priceAtDate(data, savedRef);
-      if (refPrice !== null && refPrice !== 0) {
+    const refStr = savedRef ? savedRef.trim() : '';
+    if (refStr) {
+      // หาราคา ณ ref date (วันที่ <= refStr ล่าสุด)
+      const refPrice = priceAtDate(data, refStr);
+      if (refPrice !== null && refPrice !== 0 && last.x > refStr) {
         const rtd = (last.y - refPrice) / refPrice * 100;
-        const cls = rtd >= 0 ? 'color:var(--dn)' : 'color:var(--up)'; // ราคาขึ้น=แดง ลง=เขียว
-        const refD = new Date(savedRef).toLocaleDateString('en-US',{day:'numeric',month:'short',timeZone:'UTC'});
+        const rtdColor = rtd >= 0 ? 'var(--dn)' : 'var(--up)';
+        const refD = new Date(refStr + 'T00:00:00Z').toLocaleDateString('en-US',{day:'numeric',month:'short',timeZone:'UTC'});
         rtdHtml = `<div style="padding:8px 12px;border-right:1px solid var(--border)">
           <div style="font-size:0.68em;color:var(--text3);margin-bottom:2px">vs ${refD}</div>
-          <div style="font-size:1.0em;font-weight:600;${cls}">${rtd>=0?'+':''}${rtd.toFixed(1)}%</div>
+          <div style="font-size:1.0em;font-weight:600;color:${rtdColor}">${rtd>=0?'+':''}${rtd.toFixed(1)}%</div>
         </div>`;
       }
     }
@@ -574,10 +635,7 @@ async function renderEnergyPage() {
         ${rtdHtml}
       </div>
       <div style="padding:6px 12px 10px">
-        <div style="display:flex;gap:12px;margin-bottom:4px;flex-wrap:wrap">
-          <div class="li"><span class="ls" style="background:${prod.color}"></span>${thisYear}</div>
-          <div class="li"><span class="ls" style="background:rgba(128,128,128,0.5)"></span>${lastYear}</div>
-        </div>
+
         <div style="position:relative;height:140px"><canvas id="${canvasId}"></canvas></div>
       </div>`;
 
@@ -626,7 +684,7 @@ async function renderEnergyPage() {
             borderColor:'rgba(128,128,128,0.35)', borderWidth:1.2,
             pointRadius:0, tension:0.3, fill:false, spanGaps:true },
           { label: String(thisYear), data: thisData,
-            borderColor: prod.color, borderWidth:1.8,
+            borderColor: '#f5a623', borderWidth:1.8,
             pointRadius:0, tension:0.3, fill:false, spanGaps:true }
         ]
       },
@@ -667,6 +725,42 @@ async function renderEnergyPage() {
 }
 
 window.renderEnergyPage = renderEnergyPage;
+
+function renderNews() {
+  const container = document.getElementById('news-container');
+  if (!container) return;
+  if (!NEWS.length) { container.innerHTML = '<div class="empty">ยังไม่มีข้อมูล news</div>'; return; }
+
+  container.innerHTML = '';
+  // group by date
+  const byDate = {};
+  NEWS.forEach(doc => {
+    if (!byDate[doc.date]) byDate[doc.date] = [];
+    byDate[doc.date].push(...doc.news);
+  });
+
+  Object.keys(byDate).sort().reverse().forEach(date => {
+    const dt = new Date(date + 'T00:00:00Z');
+    const label = dt.toLocaleDateString('en-US', {weekday:'long', day:'numeric', month:'long', year:'numeric', timeZone:'UTC'});
+    const section = document.createElement('div');
+    section.className = 'news-day';
+    section.innerHTML = `<div class="news-day-header">${label}</div>`;
+    byDate[date].forEach(item => {
+      const el = document.createElement('div');
+      el.className = 'news-item';
+      el.innerHTML = `
+        <div class="news-source">${item.source || 'Unknown'}</div>
+        <div class="news-title"><a href="${item.url}" target="_blank" rel="noopener">${item.title}</a></div>
+        ${item.summary_th ? `<div class="news-summary">${item.summary_th}</div>` : ''}
+        ${item.why_picked ? `<div class="news-why">${item.why_picked}</div>` : ''}`;
+      section.appendChild(el);
+    });
+    container.appendChild(section);
+  });
+}
+
+// refresh news ถ้ากำลังดูอยู่
+window.renderNews = renderNews;
 window._charts = charts;
 
 window.toggleOptions = function() {
@@ -688,13 +782,14 @@ document.addEventListener('click', function(e) {
 window.loadData = async function() {
   setStatus('load','loading…');
   try {
-    await fetchAll();
+    await Promise.all([fetchAll(), fetchNews()]);
     window._SERIES = SERIES;
     render();
     const upd = Object.values(SERIES)[0]?.updated || '';
     setStatus('ok', upd ? 'data: '+upd.slice(0,16).replace('T',' ')+' UTC' : 'loaded');
     // render energy page หลัง data พร้อมเสมอ
     if (activePageId === '__energy__') renderEnergyPage();
+    if (activePageId === '__news__') renderNews();
   } catch(e) { setStatus('err','Firestore error'); console.error(e); }
 };
 
@@ -757,6 +852,20 @@ function render() { renderNav(); renderActivePage(); }
 function renderNav() {
   const nav=document.getElementById('nav');
   nav.innerHTML='';
+  // News page
+  const newsBtn = document.createElement('button');
+  newsBtn.className = 'nb' + (activePageId === '__news__' ? ' active' : '');
+  newsBtn.textContent = 'News';
+  newsBtn.onclick = () => {
+    activePageId = '__news__';
+    document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
+    document.querySelectorAll('.nb').forEach(b=>b.classList.remove('active'));
+    document.getElementById('page-news').classList.add('active');
+    newsBtn.classList.add('active');
+    renderNews();
+  };
+  nav.appendChild(newsBtn);
+
   // special TH Energy page
   const energyBtn = document.createElement('button');
   energyBtn.className = 'nb' + (activePageId === '__energy__' ? ' active' : '');
@@ -798,8 +907,8 @@ function renderActivePage() {
   container.innerHTML='';
   Object.values(charts).forEach(c=>c.destroy());
 
-  // TH Energy page handled by nav directly — skip
-  if (activePageId === '__energy__') return;
+  // special pages handled by nav
+  if (activePageId === '__energy__' || activePageId === '__news__') return;
 
   const page=config.pages.find(p=>p.id===activePageId);
   if (!page) { container.innerHTML='<div class="empty">ยังไม่มี page — กด + ใน nav</div>'; return; }
