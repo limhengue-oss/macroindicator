@@ -35,20 +35,21 @@ EXRATE_ROW   <- 18; EXRATE_COL <- 4  # D18
 
 FIELDS_COL <- list(
   EX_REFIN         = 3,
-  EXCISE_TAX       = 5,
-  M_TAX            = 6,
-  OIL_FUND         = 7,
-  CONSV_FUND       = 8,
-  WHOLESALE        = 9,
-  VAT_WS           = 10,
-  WS_VAT           = 11,
-  MARKETING_MARGIN = 12,
-  VAT_MM           = 13,
-  RETAIL           = 14
+  EXCISE_TAX       = 4,
+  M_TAX            = 5,
+  OIL_FUND         = 6,
+  CONSV_FUND       = 7,
+  WHOLESALE        = 8,
+  VAT_WS           = 9,
+  # col10 = WS&VAT (ข้ามไป ไม่อยู่ใน backfill schema)
+  MARKETING_MARGIN = 11,
+  VAT_MM           = 12,
+  RETAIL           = 13
 )
 
-# schema เดิม — fields ที่ Firestore มี (backfill CSV)
-ALL_FIELDS <- c(names(FIELDS_COL), "EX_RATE")
+# fields ที่ push ลง Firestore — ตรงกับ backfill CSV schema
+ALL_FIELDS <- c("EX_REFIN","EXCISE_TAX","M_TAX","OIL_FUND","CONSV_FUND",
+                "VAT_WS","MARKETING_MARGIN","VAT_MM","RETAIL","WHOLESALE","EX_RATE")
 
 # ── Credentials ───────────────────────────────────────────────────
 sa_json <- Sys.getenv("GCP_SA_KEY")
@@ -58,22 +59,37 @@ sa <- fromJSON(sa_json)
 # ── Helpers ───────────────────────────────────────────────────────
 # map product name → BASE_PRODUCT (รองรับชื่อที่เปลี่ยนตามเวลา)
 PRODUCT_TO_BASE <- list(
-  "H-DIESEL"           = "DIESEL",
-  "H-DIESEL B7"        = "DIESEL",
-  "ULG 95"             = "ULG 95",
-  "ULG95R : UNL"       = "ULG 95",
-  "GASOHOL 95"         = "GASOHOL 95",
-  "GASOHOL95 E10"      = "GASOHOL 95",
-  "GASOHOL 91"         = "GASOHOL 91",
-  "GASOHOL95 E20"      = "GASOHOL95 E20",
-  "GASOHOL95 E85"      = "GASOHOL95 E85",
-  "LPG (BAHT/KILOGRAM)"= "LPG",
-  "LPG"                = "LPG",
-  "FO 1500 (2) 2%S"    = "FO 1500",
-  "FO 1500 2%S"        = "FO 1500",
-  "FO 600 (1) 2%S"     = "FO 600",
-  "FO 600 2%S"         = "FO 600"
+  # DIESEL — B7 เป็น priority, B20 skip (ไม่อยู่ใน backfill schema)
+  "H-DIESEL"            = "DIESEL",
+  "H-DIESEL "           = "DIESEL",
+  "H-DIESEL B7"         = "DIESEL",
+  "H-DIESEL  B7"        = "DIESEL",
+  # ULG 95
+  "ULG95"               = "ULG 95",
+  "ULG 95"              = "ULG 95",
+  "ULG95R : UNL"        = "ULG 95",
+  # GASOHOL 95
+  "GASOHOL95 E10"       = "GASOHOL 95",
+  "GASOHOL 95"          = "GASOHOL 95",
+  "GASOHOL95"           = "GASOHOL 95",
+  # GASOHOL 91
+  "GASOHOL91"           = "GASOHOL 91",
+  "GASOHOL 91"          = "GASOHOL 91",
+  # E20, E85
+  "GASOHOL95 E20"       = "GASOHOL95 E20",
+  "GASOHOL95 E85"       = "GASOHOL95 E85",
+  # LPG
+  "LPG (BAHT/KILOGRAM)" = "LPG",
+  "LPG"                 = "LPG",
+  # FO
+  "FO 1500 (2) 2%S"     = "FO 1500",
+  "FO 1500 2%S"         = "FO 1500",
+  "FO 600 (1) 2%S"      = "FO 600",
+  "FO 600 2%S"          = "FO 600"
 )
+
+# products ที่ skip (ไม่อยู่ใน backfill schema)
+SKIP_PRODUCTS <- c("H-DIESEL  B20", "H-DIESEL B20", "H-DIESEL 20")
 
 make_doc_id <- function(base_product, field) {
   p <- base_product |>
@@ -85,11 +101,11 @@ make_doc_id <- function(base_product, field) {
 }
 
 resolve_base <- function(product_name) {
+  if (str_trim(product_name) %in% SKIP_PRODUCTS) return(NULL)
   base <- PRODUCT_TO_BASE[[product_name]]
   if (is.null(base)) {
-    # fallback: normalize product name เป็น base
-    warning(sprintf("  ⚠ Unknown product: '%s' — using as-is", product_name))
-    base <- product_name
+    message(sprintf("  ⚠ Unknown product: '%s' — skipping", product_name))
+    return(NULL)
   }
   base
 }
@@ -248,36 +264,40 @@ while (!done) {
   }
   
   html  <- resp_body_string(resp) |> read_html()
-  rows  <- html |> html_elements("table tr, .items-row, li.item")
-  
-  # หาวันที่และ link จากหน้า
-  date_texts <- html |>
-    html_elements("td:first-child, .catItemTitle") |>
-    html_text()
-  dl_links <- html |>
-    html_elements("a[href*='download']") |>
-    html_attr("href")
-  
-  # parse วันที่ไทยทุกตัวในหน้า
-  web_dates <- map_chr(date_texts, parse_thai_date) |>
-    na.omit()
-  
-  if (length(web_dates) == 0 || length(dl_links) == 0) {
+
+  # ดึง date+link เป็นคู่จาก grandparent ของ download link
+  dl_nodes <- html |> html_elements("a[href*='download']")
+
+  if (length(dl_nodes) == 0) {
     message("  page ", page, ": no items — stop")
     break
   }
-  
-  # จับคู่ (web_date, link) — สมมติ 1:1 ตามลำดับ
-  n <- min(length(web_dates), length(dl_links))
-  for (i in seq_len(n)) {
-    wd <- as.Date(web_dates[i])
+
+  `%||%` <- function(x, y) if (is.null(x) || length(x) == 0) y else x
+
+  pairs <- map(dl_nodes, function(node) {
+    href     <- html_attr(node, "href")
+    date_txt <- node |>
+      xml_parent() |>
+      xml_parent() |>
+      html_element("div[style*='float:left']") |>
+      html_text(trim = TRUE)
+    list(date_txt = date_txt %||% "", href = href)
+  })
+
+  n_found <- 0
+  for (pair in pairs) {
+    wd_str <- parse_thai_date(pair$date_txt)
+    if (is.na(wd_str)) next
+    wd <- as.Date(wd_str)
     if (is.na(wd)) next
+    n_found <- n_found + 1
     if (wd <= last_date) { done <- TRUE; break }
-    pending[[length(pending) + 1]] <- list(web_date = wd, link = dl_links[i])
+    pending[[length(pending) + 1]] <- list(web_date = wd, link = pair$href)
   }
-  
-  message(sprintf("  page %d: %d dates, %d links, %d pending so far",
-                  page, length(web_dates), length(dl_links), length(pending)))
+
+  message(sprintf("  page %d: %d links, %d parsed, %d pending so far",
+                  page, length(dl_nodes), n_found, length(pending)))
   if (done) break
   page <- page + 1
   Sys.sleep(DELAY)
@@ -313,18 +333,20 @@ for (item in pending) {
   
   # อ่าน xlsx
   ws <- tryCatch(
-    read_xlsx(tmp, col_names = FALSE, col_types = "text", sheet = 1),
+    read_xlsx(tmp, col_names = FALSE, col_types = "text", sheet = "Oil Price Structure"),
     error = function(e) { message("  ✗ read_xlsx error: ", e$message); NULL }
   )
   unlink(tmp)
   if (is.null(ws)) next
   
-  # validate: date ที่ B4
-  date_raw    <- as.character(ws[DATE_ROW, DATE_COL])
-  file_date   <- tryCatch(
-    as.Date(as.numeric(date_raw), origin = "1899-12-30"),
-    error = function(e) tryCatch(dmy(date_raw), error = function(e2) NA)
-  )
+  # validate: date ที่ B4 — อาจเป็น Excel serial number หรือ ISO datetime string
+  date_raw  <- as.character(ws[DATE_ROW, DATE_COL])
+  file_date <- tryCatch({
+    # col_types="text" จะเก็บ datetime เป็น Excel serial เช่น "46197"
+    n <- suppressWarnings(as.numeric(date_raw))
+    if (!is.na(n)) as.Date(n, origin = "1899-12-30")
+    else as.Date(substr(date_raw, 1, 10))   # "2026-06-25 00:00:00" → "2026-06-25"
+  }, error = function(e) NA_character_)
   if (is.na(file_date)) {
     flag_format_change(sprintf("[%s] Cannot parse date from B4: '%s'", web_date, date_raw))
     next
@@ -371,8 +393,6 @@ for (item in pending) {
       v <- if (col_idx <= ncol(ws)) suppressWarnings(as.numeric(as.character(ws[r, col_idx]))) else NA_real_
       row_data[[field]] <- v
     }
-    # fields ที่ไม่มีใน xlsx ใหม่ → NA
-    row_data[["OIL_FUND_2"]] <- NA_real_
     
     all_rows[[length(all_rows) + 1]] <- row_data
   }
