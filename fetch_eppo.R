@@ -239,6 +239,8 @@ append_series <- function(token, doc_id, name, new_df) {
 #  MAIN
 # ══════════════════════════════════════════════════════════════════
 
+`%||%` <- function(x, y) if (is.null(x) || length(x) == 0) y else x
+
 message("── Authenticating...")
 token    <- get_token(sa)
 message("  ✓ token OK")
@@ -273,13 +275,11 @@ while (!done) {
     break
   }
 
-  `%||%` <- function(x, y) if (is.null(x) || length(x) == 0) y else x
-
   pairs <- map(dl_nodes, function(node) {
     href     <- html_attr(node, "href")
     date_txt <- node |>
-      xml_parent() |>
-      xml_parent() |>
+      xml2::xml_parent() |>
+      xml2::xml_parent() |>
       html_element("div[style*='float:left']") |>
       html_text(trim = TRUE)
     list(date_txt = date_txt %||% "", href = href)
