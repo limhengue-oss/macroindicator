@@ -142,7 +142,7 @@ input[type=range] { width:80px; accent-color:var(--blue); }
 <body>
 
 <div id="topbar">
-  <div class="brand">Macro<span class="patch">v4.7b</span></div>
+  <div class="brand">Macro<span class="patch">v4.7c</span></div>
   <div class="topbar-right">
     <span class="sdot" id="sdot"></span>
     <span id="stxt">loading…</span>
@@ -841,7 +841,12 @@ function movAvg(data,n) {
 // ════════════════════════════════════════════════════
 //  RENDER
 // ════════════════════════════════════════════════════
-function render() { renderNav(); renderActivePage(); }
+function render() {
+  document.getElementById('page-news').classList.remove('active');
+  document.getElementById('page-th-energy').classList.remove('active');
+  renderNav();
+  renderActivePage();
+}
 
 function renderNav() {
   const nav=document.getElementById('nav');
