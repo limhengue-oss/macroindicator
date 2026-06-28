@@ -131,7 +131,7 @@ input[type=range] { width:80px; accent-color:var(--blue); }
 <body>
 
 <div id="topbar">
-  <div class="brand">Macro<span class="patch">v4.6f</span></div>
+  <div class="brand">Macro<span class="patch">v4.6g</span></div>
   <div class="topbar-right">
     <span class="sdot" id="sdot"></span>
     <span id="stxt">loading…</span>
@@ -485,12 +485,18 @@ function mapToYearAxis(data, year, yearLabels) {
 let energyCharts = {};
 
 // ── Render ────────────────────────────────────────────
-function renderEnergyPage() {
+async function renderEnergyPage() {
   const container = document.getElementById('energy-boxes');
   if (!container) return;
   if (Object.keys(SERIES).length === 0) {
     container.innerHTML = '<div class="ld">กำลังโหลดข้อมูล…</div>';
     return;
+  }
+
+  // ถ้า page ยัง hidden อยู่ ให้รอให้ visible ก่อนแล้ว render
+  const pg = document.getElementById('page-th-energy');
+  if (pg && pg.style.display === 'none') {
+    pg.style.display = 'block';
   }
 
   container.innerHTML = '';
@@ -583,6 +589,9 @@ function renderEnergyPage() {
 
     const canvas = document.getElementById(canvasId);
     if (!canvas) continue;
+
+    // รอให้ browser paint ก่อน Chart.js วัด canvas size
+    await new Promise(r => requestAnimationFrame(r));
 
     // ref date line annotation (ถ้ามี)
     const refLinePlugin = savedRef ? [{
