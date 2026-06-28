@@ -131,7 +131,7 @@ input[type=range] { width:80px; accent-color:var(--blue); }
 <body>
 
 <div id="topbar">
-  <div class="brand">Macro<span class="patch">v4.6d</span></div>
+  <div class="brand">Macro<span class="patch">v4.6f</span></div>
   <div class="topbar-right">
     <span class="sdot" id="sdot"></span>
     <span id="stxt">loading…</span>
@@ -627,8 +627,11 @@ function renderEnergyPage() {
         plugins:{
           legend:{display:false},
           tooltip:{
-            backgroundColor:'var(--bg)',borderColor:'var(--border2)',borderWidth:1,
-            titleColor:'var(--text2)',bodyColor:'var(--text)',
+            backgroundColor: ()=>getComputedStyle(document.documentElement).getPropertyValue('--bg2').trim()||'#1a1a1a',
+            borderColor: ()=>getComputedStyle(document.documentElement).getPropertyValue('--border2').trim()||'#444',
+            borderWidth:1,
+            titleColor: ()=>getComputedStyle(document.documentElement).getPropertyValue('--text2').trim()||'#aaa',
+            bodyColor: ()=>getComputedStyle(document.documentElement).getPropertyValue('--text').trim()||'#e8e8e8',
             titleFont:{family:'monospace',size:11},bodyFont:{family:'monospace',size:12},
             callbacks:{
               title: items => yearLabels[items[0]?.dataIndex] || '',
@@ -655,6 +658,7 @@ function renderEnergyPage() {
 }
 
 window.renderEnergyPage = renderEnergyPage;
+window._charts = charts;
 
 window.toggleOptions = function() {
   const panel = document.getElementById('opt-panel');
@@ -1026,10 +1030,15 @@ function drawChart(page,chart) {
       plugins:{
         legend:{display:false},
         tooltip:{
-          backgroundColor:'var(--bg)',borderColor:'var(--border2)',borderWidth:1,
-          titleColor:'var(--text2)',bodyColor:'var(--text)',
+          backgroundColor: ()=>getComputedStyle(document.documentElement).getPropertyValue('--bg2').trim()||'#1a1a1a',
+          borderColor: ()=>getComputedStyle(document.documentElement).getPropertyValue('--border2').trim()||'#444',
+          borderWidth:1,
+          titleColor: ()=>getComputedStyle(document.documentElement).getPropertyValue('--text2').trim()||'#aaa',
+          bodyColor: ()=>getComputedStyle(document.documentElement).getPropertyValue('--text').trim()||'#e8e8e8',
           titleFont:{family:'monospace',size:11},bodyFont:{family:'monospace',size:12},
-          usePointStyle:false,
+          displayColors:true,
+          boxWidth:10,
+          boxHeight:10,
           callbacks:{
             title: function(items) {
               const d = items[0]?.label;
