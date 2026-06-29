@@ -250,24 +250,21 @@ message("── Checking last date from Firestore (", REF_DOC, ")...")
 last_date <- get_last_date(token, REF_DOC)
 message("  last_date = ", last_date)
 
-# 2. Scrape หน้า list — เก็บ (web_date, link) ที่ยังไม่มี
-message("── Scraping EPPO list...")
-pending <- list()   # list of list(web_date, link)
-done    <- FALSE
-page    <- 0
+# 2. Scrape สูงสุด 3 หน้า — เว็บเรียงล่าสุดมาก่อน ดึงแค่ที่ยังไม่มี
+message("── Scraping EPPO list (max 3 pages)...")
+pending  <- list()
+MAX_PAGE <- 3
 
-while (!done) {
+for (page in 0:(MAX_PAGE - 1)) {
   url  <- if (page == 0) LIST_URL else paste0(LIST_URL, "?start=", page * 9)
   resp <- eppo_get(url)
-  
+
   if (resp_status(resp) != 200) {
     message("  HTTP ", resp_status(resp), " at page ", page, " — stop")
     break
   }
-  
-  html  <- resp_body_string(resp) |> read_html()
 
-  # ดึง date+link เป็นคู่จาก grandparent ของ download link
+  html     <- resp_body_string(resp) |> read_html()
   dl_nodes <- html |> html_elements("a[href*='download']")
 
   if (length(dl_nodes) == 0) {
@@ -285,25 +282,22 @@ while (!done) {
     list(date_txt = date_txt %||% "", href = href)
   })
 
-  n_found <- 0
+  done <- FALSE
   for (pair in pairs) {
     wd_str <- parse_thai_date(pair$date_txt)
     if (is.na(wd_str)) next
     wd <- as.Date(wd_str)
     if (is.na(wd)) next
-    n_found <- n_found + 1
     if (wd <= last_date) { done <- TRUE; break }
     pending[[length(pending) + 1]] <- list(web_date = wd, link = pair$href)
   }
 
-  message(sprintf("  page %d: %d links, %d parsed, %d pending so far",
-                  page, length(dl_nodes), n_found, length(pending)))
+  message(sprintf("  page %d: %d links, %d pending so far", page, length(dl_nodes), length(pending)))
   if (done) break
-  page <- page + 1
   Sys.sleep(DELAY)
 }
 
-message(sprintf("  %d files to download", length(pending)))
+message(sprintf("  %d new file(s) to download (last_date = %s)", length(pending), last_date))
 if (length(pending) == 0) {
   message("✓ Already up to date")
   quit(save = "no", status = 0)
