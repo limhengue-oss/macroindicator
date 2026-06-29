@@ -30,7 +30,7 @@ DELAY        <- 1.0
 # cell positions (format ล่าสุด)
 DATE_ROW     <- 4;  DATE_COL  <- 2   # B4
 HEADER_ROW   <- 6
-DATA_START   <- 7;  DATA_END  <- 15
+DATA_START   <- 7;  DATA_END  <- 16
 EXRATE_ROW   <- 18; EXRATE_COL <- 4  # D18
 
 FIELDS_COL <- list(
@@ -101,10 +101,11 @@ make_doc_id <- function(base_product, field) {
 }
 
 resolve_base <- function(product_name) {
-  if (str_trim(product_name) %in% SKIP_PRODUCTS) return(NULL)
-  base <- PRODUCT_TO_BASE[[product_name]]
+  clean <- str_squish(product_name)   # trim + collapse internal spaces
+  if (clean %in% SKIP_PRODUCTS) return(NULL)
+  base <- PRODUCT_TO_BASE[[clean]]
   if (is.null(base)) {
-    message(sprintf("  ⚠ Unknown product: '%s' — skipping", product_name))
+    message(sprintf("  ⚠ Unknown product: '%s' — skipping", clean))
     return(NULL)
   }
   base
@@ -325,29 +326,21 @@ for (item in pending) {
   }
   writeBin(resp_body_raw(resp), tmp)
   
-  # อ่าน xlsx
+  # อ่าน xlsx — ลอง sheet ชื่อก่อน fallback sheet 1
   ws <- tryCatch(
     read_xlsx(tmp, col_names = FALSE, col_types = "text", sheet = "Oil Price Structure"),
-    error = function(e) { message("  ✗ read_xlsx error: ", e$message); NULL }
+    error = function(e) tryCatch(
+      read_xlsx(tmp, col_names = FALSE, col_types = "text", sheet = 1),
+      error = function(e2) { message("  ✗ read_xlsx error: ", e2$message); NULL }
+    )
   )
   unlink(tmp)
   if (is.null(ws)) next
 
-  # ใช้ web_date โดยตรง — ดึงมาจากหน้าเว็บแล้ว correspond กับไฟล์นี้
+  # ใช้ web_date โดยตรง
   file_date <- web_date
 
-  # validate: header row 6 มี EX-REFIN และ RETAIL
-  header_vals <- as.character(ws[HEADER_ROW, ])
-  if (!any(str_detect(na.omit(header_vals), "(?i)EX.REFIN"))) {
-    flag_format_change(sprintf("[%s] EX-REFIN not found in header row 6", web_date))
-    next
-  }
-  if (!any(str_detect(na.omit(header_vals), "(?i)RETAIL"))) {
-    flag_format_change(sprintf("[%s] RETAIL not found in header row 6", web_date))
-    next
-  }
-  
-  # validate: C7 เป็นตัวเลข
+  # validate: C7 เป็นตัวเลข (ไฟล์ถูก format)
   val_check <- suppressWarnings(as.numeric(as.character(ws[DATA_START, 3])))
   if (is.na(val_check)) {
     flag_format_change(sprintf("[%s] C7 not numeric — table may have shifted", web_date))
