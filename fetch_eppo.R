@@ -325,44 +325,17 @@ for (item in pending) {
   }
   writeBin(resp_body_raw(resp), tmp)
   
-  # อ่าน xlsx — text สำหรับ data, date แยกสำหรับ B4
+  # อ่าน xlsx
   ws <- tryCatch(
     read_xlsx(tmp, col_names = FALSE, col_types = "text", sheet = "Oil Price Structure"),
     error = function(e) { message("  ✗ read_xlsx error: ", e$message); NULL }
   )
-  if (is.null(ws)) { unlink(tmp); next }
-
-  # อ่าน B4 แยกด้วย col_types="date" เพราะ "text" แปลง date เป็น NA
-  ws_date <- tryCatch(
-    read_xlsx(tmp, col_names = FALSE, col_types = "date",
-              sheet = "Oil Price Structure", range = "B4:B4"),
-    error = function(e) NULL
-  )
   unlink(tmp)
+  if (is.null(ws)) next
 
-  file_date <- tryCatch({
-    if (!is.null(ws_date) && !is.na(ws_date[[1,1]])) {
-      as.Date(ws_date[[1,1]])
-    } else {
-      # fallback: ลอง parse จาก text cell
-      date_raw <- as.character(ws[DATE_ROW, DATE_COL])
-      n <- suppressWarnings(as.numeric(date_raw))
-      if (!is.na(n)) as.Date(n, origin = "1899-12-30")
-      else as.Date(substr(date_raw, 1, 10))
-    }
-  }, error = function(e) as.Date(NA))
+  # ใช้ web_date โดยตรง — ดึงมาจากหน้าเว็บแล้ว correspond กับไฟล์นี้
+  file_date <- web_date
 
-  if (is.na(file_date)) {
-    flag_format_change(sprintf("[%s] Cannot parse date from B4", web_date))
-    next
-  }
-  
-  # เช็คว่า file_date ตรงกับ web_date
-  if (file_date != web_date) {
-    message(sprintf("  ⚠ date mismatch: web=%s file=%s — skip", web_date, file_date))
-    next
-  }
-  
   # validate: header row 6 มี EX-REFIN และ RETAIL
   header_vals <- as.character(ws[HEADER_ROW, ])
   if (!any(str_detect(na.omit(header_vals), "(?i)EX.REFIN"))) {
