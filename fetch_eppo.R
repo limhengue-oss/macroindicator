@@ -325,24 +325,35 @@ for (item in pending) {
   }
   writeBin(resp_body_raw(resp), tmp)
   
-  # อ่าน xlsx
+  # อ่าน xlsx — text สำหรับ data, date แยกสำหรับ B4
   ws <- tryCatch(
     read_xlsx(tmp, col_names = FALSE, col_types = "text", sheet = "Oil Price Structure"),
     error = function(e) { message("  ✗ read_xlsx error: ", e$message); NULL }
   )
+  if (is.null(ws)) { unlink(tmp); next }
+
+  # อ่าน B4 แยกด้วย col_types="date" เพราะ "text" แปลง date เป็น NA
+  ws_date <- tryCatch(
+    read_xlsx(tmp, col_names = FALSE, col_types = "date",
+              sheet = "Oil Price Structure", range = "B4:B4"),
+    error = function(e) NULL
+  )
   unlink(tmp)
-  if (is.null(ws)) next
-  
-  # validate: date ที่ B4 — อาจเป็น Excel serial number หรือ ISO datetime string
-  date_raw  <- as.character(ws[DATE_ROW, DATE_COL])
+
   file_date <- tryCatch({
-    # col_types="text" จะเก็บ datetime เป็น Excel serial เช่น "46197"
-    n <- suppressWarnings(as.numeric(date_raw))
-    if (!is.na(n)) as.Date(n, origin = "1899-12-30")
-    else as.Date(substr(date_raw, 1, 10))   # "2026-06-25 00:00:00" → "2026-06-25"
-  }, error = function(e) NA_character_)
+    if (!is.null(ws_date) && !is.na(ws_date[[1,1]])) {
+      as.Date(ws_date[[1,1]])
+    } else {
+      # fallback: ลอง parse จาก text cell
+      date_raw <- as.character(ws[DATE_ROW, DATE_COL])
+      n <- suppressWarnings(as.numeric(date_raw))
+      if (!is.na(n)) as.Date(n, origin = "1899-12-30")
+      else as.Date(substr(date_raw, 1, 10))
+    }
+  }, error = function(e) as.Date(NA))
+
   if (is.na(file_date)) {
-    flag_format_change(sprintf("[%s] Cannot parse date from B4: '%s'", web_date, date_raw))
+    flag_format_change(sprintf("[%s] Cannot parse date from B4", web_date))
     next
   }
   
