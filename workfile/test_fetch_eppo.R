@@ -28,23 +28,23 @@ FLAG_FILE    <- "eppo_format_flag.txt"
 DELAY        <- 1.0
 
 # cell positions (format ล่าสุด)
-DATE_ROW     <- 3;  DATE_COL  <- 2   # B3
-HEADER_ROW   <- 5
-DATA_START   <- 6;  DATA_END  <- 15
-EXRATE_ROW   <- 17; EXRATE_COL <- 3  # C17
+DATE_ROW     <- 4;  DATE_COL  <- 2   # B4
+HEADER_ROW   <- 6
+DATA_START   <- 7;  DATA_END  <- 16
+EXRATE_ROW   <- 18; EXRATE_COL <- 4  # D18
 
 FIELDS_COL <- list(
-  EX_REFIN         = 2,
-  EXCISE_TAX       = 3,
-  M_TAX            = 4,
-  OIL_FUND         = 5,
-  CONSV_FUND       = 6,
-  WHOLESALE        = 7,
-  VAT_WS           = 8,
-  # col9 = WS&VAT — ข้าม
-  MARKETING_MARGIN = 10,
-  VAT_MM           = 11,
-  RETAIL           = 12
+  EX_REFIN         = 3,
+  EXCISE_TAX       = 4,
+  M_TAX            = 5,
+  OIL_FUND         = 6,
+  CONSV_FUND       = 7,
+  WHOLESALE        = 8,
+  VAT_WS           = 9,
+  # col10 = WS&VAT (ข้ามไป ไม่อยู่ใน backfill schema)
+  MARKETING_MARGIN = 11,
+  VAT_MM           = 12,
+  RETAIL           = 13
 )
 
 # fields ที่ push ลง Firestore — ตรงกับ backfill CSV schema
@@ -352,7 +352,7 @@ for (item in pending) {
   
   # parse rows
   for (r in DATA_START:min(DATA_END, nrow(ws))) {
-    product <- str_squish(as.character(ws[r, 1]))
+    product <- str_trim(as.character(ws[r, 2]))
     if (is.na(product) || product == "" || product == "NA") next
     
     base <- resolve_base(product)
