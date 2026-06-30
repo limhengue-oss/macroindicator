@@ -26,10 +26,11 @@ suppressPackageStartupMessages({
   library(jose)
 })
 
-PROJECT_ID <- "macroindicator-6b265"
-COLLECTION <- "series"
-DATE_FROM  <- as.Date("1990-01-01")
-DATE_TO    <- Sys.Date()
+PROJECT_ID   <- "macroindicator-6b265"
+COLLECTION   <- "series"
+DEFAULT_FROM <- as.Date("1990-01-01")   # ใช้เมื่อ series ใหม่ ไม่เคยมีใน meta
+DAILY_FROM   <- as.Date("2024-01-01")   # ข้อมูลตั้งแต่วันนี้เป็นต้นไป เก็บ daily, ก่อนหน้านั้น thin เป็น weekly
+DATE_TO      <- Sys.Date()
 
 # ── 0. อ่าน credentials จาก env ────────────────────────────────────
 fred_key <- Sys.getenv("FRED_API_KEY")
@@ -71,25 +72,42 @@ get_access_token <- function(sa) {
 # ── Firestore write: 1 document = 1 series ─────────────────────────
 # REST API: PATCH https://firestore.googleapis.com/v1/projects/{pid}/databases/(default)/documents/{collection}/{docId}
 
-push_series <- function(token, doc_id, name, df) {
+push_series <- function(token, doc_id, name, df, is_incremental) {
   # df: tibble(date, value)  →  Firestore array of maps
-  points <- pmap(df, function(date, value) {
+  new_points <- pmap(df, function(date, value) {
     list(mapValue = list(fields = list(
       d = list(stringValue = as.character(date)),
       v = list(doubleValue = value)
     )))
   })
 
-  body <- list(fields = list(
-    name    = list(stringValue = name),
-    updated = list(stringValue = format(Sys.time(), "%Y-%m-%dT%H:%M:%SZ", tz = "UTC")),
-    data    = list(arrayValue = list(values = points))
-  ))
-
   url <- sprintf(
     "https://firestore.googleapis.com/v1/projects/%s/databases/(default)/documents/%s/%s",
     PROJECT_ID, COLLECTION, doc_id
   )
+
+  # ถ้าเป็น incremental update — GET existing แล้ว append
+  all_points <- new_points
+  if (is_incremental) {
+    existing_points <- tryCatch({
+      r <- request(url) |>
+        req_auth_bearer_token(token) |>
+        req_error(is_error = \(r) FALSE) |>
+        req_perform()
+      if (resp_status(r) == 200) {
+        d   <- resp_body_json(r)
+        arr <- d$fields$data$arrayValue$values
+        if (!is.null(arr)) arr else list()
+      } else list()
+    }, error = function(e) list())
+    all_points <- c(existing_points, new_points)
+  }
+
+  body <- list(fields = list(
+    name    = list(stringValue = name),
+    updated = list(stringValue = format(Sys.time(), "%Y-%m-%dT%H:%M:%SZ", tz = "UTC")),
+    data    = list(arrayValue = list(values = all_points))
+  ))
 
   resp <- request(url) |>
     req_method("PATCH") |>
@@ -104,18 +122,19 @@ push_series <- function(token, doc_id, name, df) {
                     substr(resp_body_string(resp), 1, 200)))
     return(FALSE)
   }
-  message(sprintf("  ✓ %s (%d points)", doc_id, nrow(df)))
+  message(sprintf("  ✓ %s (+%d new points)", doc_id, nrow(df)))
   TRUE
 }
+
 
 # ══════════════════════════════════════════════════════════════════
 #  PART 2 — Fetch data
 # ══════════════════════════════════════════════════════════════════
 
 # helper: yahoo via tidyquant → tibble(date, value)
-fetch_yf <- function(ticker) {
+fetch_yf <- function(ticker, from) {
   tryCatch({
-    df <- tq_get(ticker, from = DATE_FROM, to = DATE_TO)
+    df <- tq_get(ticker, from = from, to = DATE_TO)
     if (is.null(df) || !is.data.frame(df)) stop("no data returned")
     result <- df |>
       select(date, value = close) |>
@@ -130,9 +149,9 @@ fetch_yf <- function(ticker) {
   })
 }
 
-fetch_fred <- function(series_id) {
+fetch_fred <- function(series_id, from) {
   tryCatch({
-    fredr(series_id = series_id, observation_start = DATE_FROM) |>
+    fredr(series_id = series_id, observation_start = from) |>
       select(date, value) |>
       drop_na()
   }, error = function(e) {
@@ -221,41 +240,9 @@ CATALOG <- tribble(
 )
 
 # ══════════════════════════════════════════════════════════════════
-#  PART 3 — Main
+#  PART 2b — Meta status helpers
 # ══════════════════════════════════════════════════════════════════
-
-message("── Authenticating with Firestore...")
-token <- get_access_token(sa)
-message("  ✓ token acquired")
-
-message("── Fetching + pushing ", nrow(CATALOG), " series...")
-
-ok_count <- 0
-for (i in seq_len(nrow(CATALOG))) {
-  row <- CATALOG[i, ]
-  df <- if (row$src == "yf") fetch_yf(row$code) else fetch_fred(row$code)
-
-  if (nrow(df) == 0) {
-    warning(sprintf("  ⊘ %s: no data, skip push", row$doc_id))
-    next
-  }
-
-  # ลด payload — เก็บ weekly สำหรับ daily data ที่ยาวมาก (ประหยัด Firestore)
-  if (nrow(df) > 400) {
-    df <- df |>
-      mutate(wk = floor_date(date, "week")) |>
-      group_by(wk) |>
-      slice_tail(n = 1) |>
-      ungroup() |>
-      select(date, value)
-  }
-
-  if (push_series(token, row$doc_id, row$name, df)) ok_count <- ok_count + 1
-  Sys.sleep(0.2)  # gentle on API
-}
-
-# ── meta document: last update timestamp ───────────────────────────
-push_meta <- function(token) {
+push_meta <- function(token, ok_count) {
   body <- list(fields = list(
     updated = list(stringValue = format(Sys.time(), "%Y-%m-%dT%H:%M:%SZ", tz = "UTC")),
     count   = list(integerValue = as.character(ok_count))
@@ -271,7 +258,111 @@ push_meta <- function(token) {
     req_error(is_error = function(resp) FALSE) |>
     req_perform()
 }
-push_meta(token)
+
+# ── meta/fetch_status: per-series last_date ─────────────────────────
+get_fetch_status <- function(token) {
+  url <- sprintf(
+    "https://firestore.googleapis.com/v1/projects/%s/databases/(default)/documents/meta/fetch_status",
+    PROJECT_ID
+  )
+  r <- request(url) |>
+    req_auth_bearer_token(token) |>
+    req_error(is_error = \(r) FALSE) |>
+    req_perform()
+  if (resp_status(r) != 200) return(list())  # ไม่มี doc — ทุก series เป็น full backfill
+
+  d      <- resp_body_json(r)
+  fields <- d$fields
+  if (is.null(fields)) return(list())
+
+  out <- list()
+  for (k in names(fields)) {
+    v <- fields[[k]]$stringValue
+    if (!is.null(v)) out[[k]] <- as.Date(v)
+  }
+  out
+}
+
+push_fetch_status <- function(token, status_list) {
+  # status_list: named list doc_id -> Date
+  fields <- list()
+  for (k in names(status_list)) {
+    fields[[k]] <- list(stringValue = as.character(status_list[[k]]))
+  }
+  body <- list(fields = fields)
+  url <- sprintf(
+    "https://firestore.googleapis.com/v1/projects/%s/databases/(default)/documents/meta/fetch_status",
+    PROJECT_ID
+  )
+  r <- request(url) |>
+    req_method("PATCH") |>
+    req_auth_bearer_token(token) |>
+    req_body_json(body, auto_unbox = TRUE) |>
+    req_error(is_error = \(r) FALSE) |>
+    req_perform()
+  resp_status(r)
+}
+
+# ══════════════════════════════════════════════════════════════════
+#  PART 3 — Main
+# ══════════════════════════════════════════════════════════════════
+
+message("── Authenticating with Firestore...")
+token <- get_access_token(sa)
+message("  ✓ token acquired")
+
+message("── Reading meta/fetch_status...")
+fetch_status <- get_fetch_status(token)
+message(sprintf("  %d series have prior last_date", length(fetch_status)))
+
+message("── Fetching + pushing ", nrow(CATALOG), " series...")
+
+ok_count <- 0
+new_status <- fetch_status   # จะอัพเดททีละ series ที่ push สำเร็จ
+
+for (i in seq_len(nrow(CATALOG))) {
+  row <- CATALOG[i, ]
+  is_incremental <- !is.null(fetch_status[[row$doc_id]])
+  from <- if (is_incremental) fetch_status[[row$doc_id]] + 1 else DEFAULT_FROM
+
+  df <- if (row$src == "yf") fetch_yf(row$code, from) else fetch_fred(row$code, from)
+
+  if (nrow(df) == 0) {
+    message(sprintf("  ⊘ %s: no new data since %s", row$doc_id, from))
+    next
+  }
+
+  # เก็บ daily ตั้งแต่ DAILY_FROM เป็นต้นไป, ก่อนหน้านั้น thin เป็น weekly
+  df_recent <- df |> filter(date >= DAILY_FROM)
+  df_old    <- df |> filter(date <  DAILY_FROM)
+
+  if (nrow(df_old) > 0) {
+    df_old <- df_old |>
+      mutate(wk = floor_date(date, "week")) |>
+      group_by(wk) |>
+      slice_tail(n = 1) |>
+      ungroup() |>
+      select(date, value)
+  }
+
+  df <- bind_rows(df_old, df_recent) |> arrange(date)
+
+  if (push_series(token, row$doc_id, row$name, df, is_incremental)) {
+    ok_count <- ok_count + 1
+    new_status[[row$doc_id]] <- max(df$date, na.rm = TRUE)
+  }
+  Sys.sleep(0.2)
+}
+
+push_meta(token, ok_count)
+
+message("── Updating meta/fetch_status...")
+status_code <- push_fetch_status(token, new_status)
+if (status_code < 300) {
+  message("  ✓ fetch_status updated")
+} else {
+  message(sprintf("  ✗ HTTP %d updating fetch_status", status_code))
+}
 
 message(sprintf("\n✓ Done — %d/%d series pushed at %s",
                 ok_count, nrow(CATALOG), Sys.time()))
