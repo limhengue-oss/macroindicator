@@ -10,6 +10,8 @@
 
 setwd("C:/Users/limhe/OneDrive/Documents/GitHub/macroindicator/workfile")
 
+Sys.setenv(GCP_SA_KEY = paste(readLines("C:/Users/limhe/OneDrive/Desktop/Rdevclaude/macroindicator-6b265-firebase-adminsdk-fbsvc-3a4c23a65a.json"), collapse = "\n"))
+
 suppressPackageStartupMessages({
   library(httr2); library(jsonlite); library(jose)
   library(dplyr); library(stringr); library(purrr); library(readr)

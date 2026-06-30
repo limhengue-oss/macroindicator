@@ -23,8 +23,6 @@ PROJECT_ID   <- "macroindicator-6b265"
 COLLECTION   <- "series"
 BASE_URL     <- "https://old.eppo.go.th"
 LIST_URL     <- paste0(BASE_URL, "/index.php/th/petroleum/price/structure-oil-price")
-REF_DOC      <- "EPPO_H_DIESEL_RETAIL"   # ใช้เช็ค last_date
-FLAG_FILE    <- "eppo_format_flag.txt"
 DELAY        <- 1.0
 
 # cell positions (format ล่าสุด)
@@ -89,7 +87,7 @@ PRODUCT_TO_BASE <- list(
 )
 
 # products ที่ skip (ไม่อยู่ใน backfill schema)
-SKIP_PRODUCTS <- c("H-DIESEL  B20", "H-DIESEL B20", "H-DIESEL 20")
+SKIP_PRODUCTS <- c("H-DIESEL B20", "H-DIESEL 20")
 
 make_doc_id <- function(base_product, field) {
   p <- base_product |>
@@ -130,12 +128,6 @@ parse_thai_date <- function(txt) {
   as.character(as.Date(sprintf("%04d-%02d-%02d", year, mon, day)))
 }
 
-flag_format_change <- function(msg) {
-  writeLines(c(format(Sys.time()), msg), FLAG_FILE)
-  message("⚠ FORMAT CHANGE: ", msg)
-  stop(paste("FORMAT CHANGE:", msg))
-}
-
 eppo_get <- function(url) {
   request(url) |>
     req_headers(
@@ -162,26 +154,6 @@ get_token <- function(sa) {
                   assertion  = jwt) |>
     req_perform()
   resp_body_json(resp)$access_token
-}
-
-# ── Firestore: get last date ──────────────────────────────────────
-get_last_date <- function(token, doc_id) {
-  url <- sprintf(
-    "https://firestore.googleapis.com/v1/projects/%s/databases/(default)/documents/%s/%s",
-    PROJECT_ID, COLLECTION, doc_id
-  )
-  tryCatch({
-    r <- request(url) |>
-      req_auth_bearer_token(token) |>
-      req_error(is_error = \(r) FALSE) |>
-      req_perform()
-    if (resp_status(r) != 200) return(as.Date("1990-01-01"))
-    d   <- resp_body_json(r)
-    arr <- d$fields$data$arrayValue$values
-    if (is.null(arr)) return(as.Date("1990-01-01"))
-    dates <- map_chr(arr, \(v) v$mapValue$fields$d$stringValue)
-    max(as.Date(dates), na.rm = TRUE)
-  }, error = function(e) as.Date("1990-01-01"))
 }
 
 # ── Firestore: append points ──────────────────────────────────────
@@ -243,15 +215,36 @@ append_series <- function(token, doc_id, name, new_df) {
 `%||%` <- function(x, y) if (is.null(x) || length(x) == 0) y else x
 
 message("── Authenticating...")
-token    <- get_token(sa)
+token <- get_token(sa)
 message("  ✓ token OK")
 
-# 1. เช็ค last_date จาก Firestore
-message("── Checking last date from Firestore (", REF_DOC, ")...")
-last_date <- get_last_date(token, REF_DOC)
-message("  last_date = ", last_date)
+# 1. อ่าน meta/eppo_status
+message("── Reading meta/eppo_status...")
+meta_url <- sprintf(
+  "https://firestore.googleapis.com/v1/projects/%s/databases/(default)/documents/meta/eppo_status",
+  PROJECT_ID
+)
+meta_resp <- request(meta_url) |>
+  req_auth_bearer_token(token) |>
+  req_error(is_error = \(r) FALSE) |>
+  req_perform()
 
-# 2. Scrape สูงสุด 3 หน้า — เว็บเรียงล่าสุดมาก่อน ดึงแค่ที่ยังไม่มี
+if (resp_status(meta_resp) != 200) {
+  stop("meta/eppo_status ไม่พบ — รัน init_eppo_meta.R ก่อน")
+}
+
+meta        <- resp_body_json(meta_resp)
+last_date   <- as.Date(meta$fields$last_date$stringValue)
+meta_fields <- map_chr(meta$fields$fields$arrayValue$values,
+                       \(v) v$stringValue)
+meta_products <- map_chr(meta$fields$products$arrayValue$values,
+                         \(v) v$stringValue)
+
+message(sprintf("  last_date = %s", last_date))
+message(sprintf("  fields    = %s", paste(meta_fields, collapse = ", ")))
+message(sprintf("  products  = %s", paste(meta_products, collapse = ", ")))
+
+# 2. Scrape สูงสุด 3 หน้า
 message("── Scraping EPPO list (max 3 pages)...")
 pending  <- list()
 MAX_PAGE <- 3
@@ -293,7 +286,8 @@ for (page in 0:(MAX_PAGE - 1)) {
     pending[[length(pending) + 1]] <- list(web_date = wd, link = pair$href)
   }
 
-  message(sprintf("  page %d: %d links, %d pending so far", page, length(dl_nodes), length(pending)))
+  message(sprintf("  page %d: %d links, %d pending so far",
+                  page, length(dl_nodes), length(pending)))
   if (done) break
   Sys.sleep(DELAY)
 }
@@ -304,70 +298,86 @@ if (length(pending) == 0) {
   quit(save = "no", status = 0)
 }
 
-# เรียงจากเก่าไปใหม่ (push chronologically)
-pending <- rev(pending)
+pending <- rev(pending)  # เรียงเก่า → ใหม่
 
-# 3. Download + validate + parse + push
-all_rows <- list()   # เก็บทุก row ของวันที่ดาวน์โหลดมา
+# 3. Download + validate + parse
+all_rows    <- list()
+latest_date <- NULL
 
 for (item in pending) {
   web_date <- item$web_date
-  link     <- item$link
-  dl_url   <- paste0(BASE_URL, link)
-  
-  message(sprintf("\n── [%s] %s", web_date, link))
-  
-  # download xlsx
-  tmp  <- tempfile(fileext = ".xlsx")
+  dl_url   <- paste0(BASE_URL, item$link)
+  message(sprintf("\n── [%s] %s", web_date, item$link))
+
   resp <- eppo_get(dl_url)
   if (resp_status(resp) != 200) {
-    message("  ✗ download failed HTTP ", resp_status(resp))
+    message("  ✗ HTTP ", resp_status(resp), " — skip")
     next
   }
+
+  tmp <- tempfile(fileext = ".xlsx")
   writeBin(resp_body_raw(resp), tmp)
-  
-  # อ่าน xlsx — ลอง sheet ชื่อก่อน fallback sheet 1
+
   ws <- tryCatch(
     read_xlsx(tmp, col_names = FALSE, col_types = "text", sheet = "Oil Price Structure"),
     error = function(e) tryCatch(
       read_xlsx(tmp, col_names = FALSE, col_types = "text", sheet = 1),
-      error = function(e2) { message("  ✗ read_xlsx error: ", e2$message); NULL }
+      error = function(e2) { message("  ✗ read_xlsx: ", e2$message); NULL }
     )
   )
   unlink(tmp)
   if (is.null(ws)) next
 
-  # ใช้ web_date โดยตรง
-  file_date <- web_date
-
-  # validate: C7 เป็นตัวเลข (ไฟล์ถูก format)
+  # validate: C col DATA_START ต้องเป็นตัวเลข
   val_check <- suppressWarnings(as.numeric(as.character(ws[DATA_START, 3])))
   if (is.na(val_check)) {
-    flag_format_change(sprintf("[%s] C7 not numeric — table may have shifted", web_date))
+    message(sprintf("  ✗ [%s] col3 row%d not numeric — skip", web_date, DATA_START))
     next
   }
-  
-  # EX_RATE D18
-  exrate <- suppressWarnings(as.numeric(as.character(ws[EXRATE_ROW, EXRATE_COL])))
-  
+
+  # validate: products ที่ parse ได้ตรงกับ meta_products
+  parsed_products <- c()
+  for (r in DATA_START:min(DATA_END, nrow(ws))) {
+    p <- str_squish(as.character(ws[r, 1]))
+    b <- resolve_base(p)
+    if (!is.null(b)) parsed_products <- c(parsed_products, b)
+  }
+  parsed_products <- unique(parsed_products)
+  missing_products <- setdiff(meta_products, parsed_products)
+  if (length(missing_products) > 0) {
+    message(sprintf("  ✗ [%s] missing products: %s — skip",
+                    web_date, paste(missing_products, collapse = ", ")))
+    next
+  }
+
+  # validate: ไฟล์มี column ครบตาม FIELDS_COL (เช็คว่า col index ไม่เกิน ncol)
+  max_col_needed <- max(unlist(FIELDS_COL))
+  if (ncol(ws) < max_col_needed) {
+    message(sprintf("  ✗ [%s] only %d cols, need %d — stop (format may have changed)",
+                    web_date, ncol(ws), max_col_needed))
+    stop("Column count mismatch — ไม่ push เพื่อป้องกัน data corruption")
+  }
+
   # parse rows
+  exrate <- suppressWarnings(as.numeric(as.character(ws[EXRATE_ROW, EXRATE_COL])))
+
   for (r in DATA_START:min(DATA_END, nrow(ws))) {
     product <- str_squish(as.character(ws[r, 1]))
     if (is.na(product) || product == "" || product == "NA") next
-    
     base <- resolve_base(product)
-    row_data <- list(DATE = as.character(web_date), PRODUCT = product,
+    if (is.null(base)) next
+
+    row_data <- list(DATE = as.character(web_date), PRODUCT_CLEAN = product,
                      BASE_PRODUCT = base, EX_RATE = exrate)
-    
     for (field in names(FIELDS_COL)) {
       col_idx <- FIELDS_COL[[field]]
       v <- if (col_idx <= ncol(ws)) suppressWarnings(as.numeric(as.character(ws[r, col_idx]))) else NA_real_
       row_data[[field]] <- v
     }
-    
     all_rows[[length(all_rows) + 1]] <- row_data
   }
-  
+
+  latest_date <- web_date
   message(sprintf("  ✓ parsed %s", web_date))
   Sys.sleep(DELAY)
 }
@@ -385,17 +395,14 @@ message(sprintf("\n── Parsed %d rows across %d dates",
 message("── Pushing to Firestore...")
 ok <- 0
 
-# group by BASE_PRODUCT ก่อน push
-base_products <- unique(df_new$BASE_PRODUCT)
-for (base in base_products) {
+for (base in unique(df_new$BASE_PRODUCT)) {
   df_prod <- df_new |>
     filter(BASE_PRODUCT == base) |>
     arrange(DATE) |>
     distinct(DATE, .keep_all = TRUE)
-  
+
   for (field in ALL_FIELDS) {
     if (!field %in% names(df_prod)) next
-    
     df_series <- df_prod |>
       select(date = DATE, value = all_of(field)) |>
       filter(!is.na(value)) |>
@@ -403,13 +410,39 @@ for (base in base_products) {
       filter(!is.na(value), is.finite(value)) |>
       distinct(date, .keep_all = TRUE) |>
       arrange(date)
-    
     if (nrow(df_series) == 0) next
-    
     doc_id <- make_doc_id(base, field)
     label  <- paste0("EPPO ", base, " — ", field)
     if (append_series(token, doc_id, label, df_series)) ok <- ok + 1
     Sys.sleep(0.1)
+  }
+}
+
+message(sprintf("── Pushed %d series", ok))
+
+# 5. Update meta/eppo_status.last_date
+if (!is.null(latest_date)) {
+  message("── Updating meta/eppo_status...")
+  body <- list(fields = list(
+    last_date = list(stringValue = as.character(latest_date)),
+    fields    = list(arrayValue = list(
+      values = map(as.list(meta_fields), \(f) list(stringValue = f))
+    )),
+    products  = list(arrayValue = list(
+      values = map(as.list(meta_products), \(p) list(stringValue = p))
+    )),
+    updated   = list(stringValue = format(Sys.time(), "%Y-%m-%dT%H:%M:%SZ", tz = "UTC"))
+  ))
+  r <- request(meta_url) |>
+    req_method("PATCH") |>
+    req_auth_bearer_token(token) |>
+    req_body_json(body, auto_unbox = TRUE) |>
+    req_error(is_error = \(r) FALSE) |>
+    req_perform()
+  if (resp_status(r) < 300) {
+    message(sprintf("  ✓ last_date updated to %s", latest_date))
+  } else {
+    message(sprintf("  ✗ HTTP %d updating meta", resp_status(r)))
   }
 }
 
