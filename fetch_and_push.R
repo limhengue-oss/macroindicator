@@ -29,7 +29,7 @@ suppressPackageStartupMessages({
 PROJECT_ID   <- "macroindicator-6b265"
 COLLECTION   <- "series"
 DEFAULT_FROM <- as.Date("1990-01-01")   # ใช้เมื่อ series ใหม่ ไม่เคยมีใน meta
-DAILY_FROM   <- as.Date("2024-01-01")   # ข้อมูลตั้งแต่วันนี้เป็นต้นไป เก็บ daily, ก่อนหน้านั้น thin เป็น weekly
+DAILY_FROM   <- as.Date("1990-01-01")   # เก็บ daily ทั้งหมด ไม่ thin
 DATE_TO      <- Sys.Date()
 
 # ── 0. อ่าน credentials จาก env ────────────────────────────────────
