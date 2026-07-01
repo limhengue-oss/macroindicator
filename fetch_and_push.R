@@ -72,7 +72,7 @@ get_access_token <- function(sa) {
 # ── Firestore write: 1 document = 1 series ─────────────────────────
 # REST API: PATCH https://firestore.googleapis.com/v1/projects/{pid}/databases/(default)/documents/{collection}/{docId}
 
-push_series <- function(token, doc_id, name, df, is_incremental) {
+push_series <- function(token, doc_id, name, df, is_incremental, meta = NULL) {
   # df: tibble(date, value)  →  Firestore array of maps
   new_points <- pmap(df, function(date, value) {
     list(mapValue = list(fields = list(
@@ -103,11 +103,24 @@ push_series <- function(token, doc_id, name, df, is_incremental) {
     all_points <- c(existing_points, new_points)
   }
 
-  body <- list(fields = list(
+  fields <- list(
     name    = list(stringValue = name),
     updated = list(stringValue = format(Sys.time(), "%Y-%m-%dT%H:%M:%SZ", tz = "UTC")),
     data    = list(arrayValue = list(values = all_points))
-  ))
+  )
+
+  # เพิ่ม meta field ถ้ามี
+  if (!is.null(meta)) {
+    fields$meta <- list(mapValue = list(fields = list(
+      fullName = list(stringValue = meta$fullName %||% ""),
+      currency = list(stringValue = meta$currency %||% ""),
+      unit     = list(stringValue = meta$unit     %||% ""),
+      freq     = list(stringValue = meta$freq     %||% ""),
+      source   = list(stringValue = meta$source   %||% "")
+    )))
+  }
+
+  body <- list(fields = fields)
 
   resp <- request(url) |>
     req_method("PATCH") |>
@@ -149,7 +162,47 @@ fetch_yf <- function(ticker, from) {
   })
 }
 
-fetch_fred <- function(series_id, from) {
+fetch_meta_yf <- function(ticker) {
+  tryCatch({
+    info <- tq_get(ticker, get = "stock.prices", from = Sys.Date()-1) |> head(1)
+    # ดึง extra info ผ่าน quantmod
+    env <- new.env()
+    suppressWarnings(quantmod::getQuote(ticker, src = "yahoo", what = quantmod::yahooQF(
+      c("Name", "Currency", "Last Trade (Price Only)")
+    ), env = env))
+    q <- get(ls(env)[1], envir = env)
+    list(
+      fullName = tryCatch(as.character(q[,"Name"]), error=function(e) ticker),
+      currency = tryCatch(as.character(q[,"Currency"]), error=function(e) ""),
+      unit     = "",
+      freq     = "Daily",
+      source   = paste0("Yahoo Finance (", ticker, ")")
+    )
+  }, error = function(e) {
+    list(fullName=ticker, currency="", unit="", freq="Daily",
+         source=paste0("Yahoo Finance (", ticker, ")"))
+  })
+}
+
+fetch_meta_fred <- function(series_id) {
+  tryCatch({
+    s <- fredr_series(series_id = series_id)
+    list(
+      fullName = s$title,
+      currency = "",
+      unit     = s$units_short %||% s$units %||% "",
+      freq     = s$frequency_short %||% s$frequency %||% "",
+      source   = paste0("FRED (", series_id, ")")
+    )
+  }, error = function(e) {
+    list(fullName=series_id, currency="", unit="", freq="",
+         source=paste0("FRED (", series_id, ")"))
+  })
+}
+
+`%||%` <- function(x, y) if (is.null(x) || length(x)==0 || is.na(x)) y else x
+
+
   tryCatch({
     fredr(series_id = series_id, observation_start = from) |>
       select(date, value) |>
@@ -347,7 +400,13 @@ for (i in seq_len(nrow(CATALOG))) {
 
   df <- bind_rows(df_old, df_recent) |> arrange(date)
 
-  if (push_series(token, row$doc_id, row$name, df, is_incremental)) {
+  # fetch meta เฉพาะตอน full backfill ครั้งแรก
+  meta <- if (!is_incremental) {
+    message(sprintf("  fetching meta for %s...", row$doc_id))
+    if (row$src == "yf") fetch_meta_yf(row$code) else fetch_meta_fred(row$code)
+  } else NULL
+
+  if (push_series(token, row$doc_id, row$name, df, is_incremental, meta)) {
     ok_count <- ok_count + 1
     new_status[[row$doc_id]] <- max(df$date, na.rm = TRUE)
   }
