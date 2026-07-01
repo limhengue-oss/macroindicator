@@ -72,6 +72,8 @@ get_access_token <- function(sa) {
 # ── Firestore write: 1 document = 1 series ─────────────────────────
 # REST API: PATCH https://firestore.googleapis.com/v1/projects/{pid}/databases/(default)/documents/{collection}/{docId}
 
+`%||%` <- function(x, y) if (is.null(x) || length(x)==0 || is.na(x)) y else x
+
 push_series <- function(token, doc_id, name, df, is_incremental, meta = NULL) {
   # df: tibble(date, value)  →  Firestore array of maps
   new_points <- pmap(df, function(date, value) {
@@ -200,9 +202,7 @@ fetch_meta_fred <- function(series_id) {
   })
 }
 
-`%||%` <- function(x, y) if (is.null(x) || length(x)==0 || is.na(x)) y else x
-
-
+fetch_fred <- function(series_id, from) {
   tryCatch({
     fredr(series_id = series_id, observation_start = from) |>
       select(date, value) |>
