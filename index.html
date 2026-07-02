@@ -153,7 +153,7 @@ input[type=range] { width:80px; accent-color:var(--blue); }
 <body>
 
 <div id="topbar">
-  <div class="brand">Macro<span class="patch">v4.9d</span></div>
+  <div class="brand">Macro<span class="patch">v4.9f</span></div>
   <div class="topbar-right">
     <span class="sdot" id="sdot"></span>
     <span id="stxt">loading…</span>
@@ -221,7 +221,7 @@ input[type=range] { width:80px; accent-color:var(--blue); }
     <div class="li"><span class="ls" style="background:#f5a623"></span><span id="energy-year-this">ปีนี้</span></div>
     <div class="li"><span class="ls" style="background:rgba(128,128,128,0.5)"></span><span id="energy-year-last">ปีก่อน</span></div>
   </div>
-  <div id="energy-boxes" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:12px"></div>
+  <div id="energy-boxes" style="display:grid;grid-template-columns:repeat(2,1fr);gap:16px;max-width:1200px;margin:0 auto;padding:0 16px"></div>
 </div>
 
 <!-- META POPUP -->
@@ -959,6 +959,12 @@ async function renderEnergyPage() {
 }
 
 window.renderEnergyPage = renderEnergyPage;
+window.toggleBreakdown = toggleBreakdown;
+window.openMetaChart = openMetaChart;
+window.openMeta = openMeta;
+window.closeMeta = closeMeta;
+window.openStructureModal = openStructureModal;
+window.closeStructureModal = closeStructureModal;
 
 function renderNews() {
   const container = document.getElementById('news-container');
