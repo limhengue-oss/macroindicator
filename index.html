@@ -7,36 +7,37 @@
 <title>Macro</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Mitr:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 /* ── Theme variables ── */
 :root {
-  --bg:#0f0f0f; --bg2:#181818; --bg3:#222; --bg4:#2a2a2a;
+  --bg:#000000; --bg2:#0e0e10; --bg3:#1c1c1e; --bg4:#2c2c2e;
   --chart-h: 180px;
-  --border:rgba(255,255,255,0.08); --border2:rgba(255,255,255,0.16);
-  --text:#e8e8e8; --text2:#888; --text3:#555;
-  --up:#22c97a; --dn:#f05252;
-  --blue:#4d9fff; --red:#f05252; --amber:#f5a623; --green:#22c97a; --purple:#a78bfa;
+  --border:#2c2c2e; --border2:#3a3a3c;
+  --text:#f5f5f7; --text2:#98989d; --text3:#636366;
+  --up:#30d158; --dn:#ff453a;
+  --blue:#0a84ff; --red:#ff453a; --amber:#ffd60a; --green:#30d158; --purple:#bf5af2;
   --fs: 1rem;
 }
 [data-theme="light"] {
-  --bg:#f5f5f5; --bg2:#ffffff; --bg3:#ebebeb; --bg4:#e0e0e0;
-  --border:rgba(0,0,0,0.10); --border2:rgba(0,0,0,0.18);
-  --text:#111111; --text2:#555; --text3:#999;
-  --up:#16a35a; --dn:#d63030;
-  --blue:#1a73e8; --red:#d63030; --amber:#d97706; --green:#16a35a; --purple:#7c3aed;
+  --bg:#ffffff; --bg2:#ffffff; --bg3:#f2f2f7; --bg4:#e5e5ea;
+  --border:#e5e5ea; --border2:#d1d1d6;
+  --text:#1d1d1f; --text2:#6e6e73; --text3:#aeaeb2;
+  --up:#34c759; --dn:#ff3b30;
+  --blue:#007aff; --red:#ff3b30; --amber:#ff9500; --green:#34c759; --purple:#af52de;
 }
 
-body { background:var(--bg); color:var(--text); font-family:'Mitr','SF Mono','JetBrains Mono','Fira Code',monospace; font-size:var(--fs); line-height:1.4; transition: background 0.2s, color 0.2s; }
+body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display','SF Pro Text','Sarabun',sans-serif; font-size:var(--fs); line-height:1.4; transition: background 0.2s, color 0.2s; }
 
 /* ── Mobile: font ปกติ, 1 column, portrait only ── */
 /* ── News page ──────────────────────────────────────── */
 .news-day { margin-bottom:18px; }
 .news-day-header { font-size:0.72em; color:var(--text3); text-transform:uppercase; letter-spacing:0.06em; padding:4px 0; border-bottom:1px solid var(--border); margin-bottom:10px; }
-.news-item { background:var(--bg2); border:1px solid var(--border); border-radius:4px; padding:12px 14px; display:flex; flex-direction:column; }
+.energy-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:16px; max-width:1200px; margin:0 auto; padding:0 16px; }
+@media (max-width:700px), (orientation:portrait) and (max-width:1024px) { .energy-grid { grid-template-columns:1fr; } }
 .news-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-bottom:18px; }
 @media (max-width: 700px) { .news-grid { grid-template-columns:1fr; } }
 .news-source { font-size:0.68em; color:var(--blue); text-transform:uppercase; letter-spacing:0.04em; margin-bottom:4px; }
@@ -153,7 +154,7 @@ input[type=range] { width:80px; accent-color:var(--blue); }
 <body>
 
 <div id="topbar">
-  <div class="brand">Macro<span class="patch">v4.9f</span></div>
+  <div class="brand">Macro<span class="patch">v5.1b</span></div>
   <div class="topbar-right">
     <span class="sdot" id="sdot"></span>
     <span id="stxt">loading…</span>
@@ -221,7 +222,7 @@ input[type=range] { width:80px; accent-color:var(--blue); }
     <div class="li"><span class="ls" style="background:#f5a623"></span><span id="energy-year-this">ปีนี้</span></div>
     <div class="li"><span class="ls" style="background:rgba(128,128,128,0.5)"></span><span id="energy-year-last">ปีก่อน</span></div>
   </div>
-  <div id="energy-boxes" style="display:grid;grid-template-columns:repeat(2,1fr);gap:16px;max-width:1200px;margin:0 auto;padding:0 16px"></div>
+  <div id="energy-boxes" class="energy-grid"></div>
 </div>
 
 <!-- META POPUP -->
@@ -310,7 +311,7 @@ input[type=range] { width:80px; accent-color:var(--blue); }
 
 <script type="module">
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
-import { getFirestore, collection, getDocs } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
+import { getFirestore, collection, getDocs, query, where, documentId } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
 
 const firebaseConfig = {
   apiKey: "AIzaSyCggg5oZZl2dUNrncisVlJuugsT2XUtls8",
@@ -356,7 +357,7 @@ const SERIES = {};
 let NEWS = [];
 const charts = {};
 let config = loadConfig();
-let activePageId = '__news__';
+let activePageId = '__energy__';
 let editingChart = null;
 
 // ── theme & font (persist) ────────────────────────
@@ -449,17 +450,29 @@ function uid() { return Math.random().toString(36).slice(2,9); }
 // ════════════════════════════════════════════════════
 //  DATA
 // ════════════════════════════════════════════════════
-async function fetchAll() {
+function storeDoc(doc) {
+  const d = doc.data();
+  SERIES[doc.id] = {
+    name: d.name || doc.id,
+    updated: d.updated || '',
+    meta: d.meta || null,
+    data: (d.data||[]).map(p=>({x:p.d, y:p.v})).sort((a,b)=>a.x<b.x?-1:1)
+  };
+}
+
+// Phase 1: EPPO docs เท่านั้น (ใช้ prefix range query กับ documentId)
+async function fetchEppo() {
+  const q = query(collection(db, 'series'),
+    where(documentId(), '>=', 'EPPO_'),
+    where(documentId(), '<', 'EPPO`'));  // ` คือ char ถัดจาก _ ใน ASCII
+  const snap = await getDocs(q);
+  snap.forEach(storeDoc);
+}
+
+// Phase 2: series ที่เหลือ (โหลด background หลัง render หน้าแรกแล้ว)
+async function fetchRest() {
   const snap = await getDocs(collection(db, 'series'));
-  snap.forEach(doc => {
-    const d = doc.data();
-    SERIES[doc.id] = {
-      name: d.name || doc.id,
-      updated: d.updated || '',
-      meta: d.meta || null,
-      data: (d.data||[]).map(p=>({x:p.d, y:p.v})).sort((a,b)=>a.x<b.x?-1:1)
-    };
-  });
+  snap.forEach(doc => { if (!SERIES[doc.id]) storeDoc(doc); });
 }
 
 async function fetchNews() {
@@ -692,28 +705,6 @@ function toggleBreakdown(id) {
   if (arrow) arrow.textContent = isHidden ? '▴' : '▾';
 }
 
-function openMeta(seriesId) {
-  const s = SERIES[seriesId];
-  if (!s) return;
-  const m = s.meta || {};
-  document.getElementById('meta-title').textContent = s.name;
-  const rows = [
-    ['Full name', m.fullName],
-    ['Unit',      m.unit],
-    ['Currency',  m.currency],
-    ['Frequency', m.freq],
-    ['Source',    m.source],
-    ['Updated',   s.updated ? s.updated.slice(0,10) : ''],
-  ].filter(([,v]) => v).map(([k,v]) =>
-    `<div style="display:flex;gap:8px;border-bottom:1px solid var(--border);padding:6px 0">
-      <span style="color:var(--text3);width:90px;flex-shrink:0">${k}</span>
-      <span>${v}</span>
-    </div>`
-  ).join('');
-  document.getElementById('meta-body').innerHTML = rows || '<span style="color:var(--text3)">ไม่มี metadata</span>';
-  document.getElementById('meta-popup').style.display = 'flex';
-}
-
 function closeMeta() { document.getElementById('meta-popup').style.display = 'none'; }
 
 
@@ -790,7 +781,7 @@ async function renderEnergyPage() {
         const rtd = (last.y - refPrice) / refPrice * 100;
         const rtdColor = rtd >= 0 ? 'var(--dn)' : 'var(--up)';
         const refD = new Date(refStr + 'T00:00:00Z').toLocaleDateString('en-US',{day:'numeric',month:'short',timeZone:'UTC'});
-        rtdHtml = `<div style="padding:8px 12px;border-right:1px solid var(--border)">
+        rtdHtml = `<div style="padding:8px 12px">
           <div style="font-size:0.68em;color:var(--text3);margin-bottom:2px">vs ${refD}</div>
           <div style="font-size:1.0em;font-weight:600;color:${rtdColor}">${rtd>=0?'+':''}${rtd.toFixed(1)}%</div>
         </div>`;
@@ -815,9 +806,17 @@ async function renderEnergyPage() {
         const vLast = breakdownLast[i].value;
         const vRef  = breakdownRef ? breakdownRef[i].value : null;
         const isTotal = f.key === 'RETAIL' || f.key === 'WHOLESALE';
+
+        // flag สีตาม direction เทียบ ref date
+        let flagColor = '';
+        if (vLast !== null && vRef !== null && Math.abs(vLast - vRef) > 0.0001) {
+          flagColor = vLast > vRef ? '#e53935' : '#43a047';  // เพิ่ม=แดง, ลด=เขียว
+        }
+        const lastStyle = `padding:5px 8px;text-align:right${flagColor ? `;color:${flagColor};font-weight:600` : ''}`;
+
         return `<tr style="${isTotal ? 'font-weight:600;border-top:1px solid var(--border)' : ''}">
           <td style="padding:5px 8px;color:var(--text2)">${f.label}</td>
-          <td style="padding:5px 8px;text-align:right">${vLast !== null ? vLast.toFixed(4) : '—'}</td>
+          <td style="${lastStyle}">${vLast !== null ? vLast.toFixed(4) : '—'}</td>
           ${refStr ? `<td style="padding:5px 8px;text-align:right;color:var(--text3)">${vRef !== null ? vRef.toFixed(4) : '—'}</td>` : ''}
         </tr>`;
       }).join('');
@@ -852,7 +851,7 @@ async function renderEnergyPage() {
           <div class="cs">${prod.unit}${oilFundHtml}</div>
         </div>
       </div>
-      <div style="display:grid;grid-template-columns:${savedRef ? 'repeat(4,1fr)' : 'repeat(3,1fr)'};border-top:1px solid var(--border);border-bottom:1px solid var(--border)">
+      <div style="display:grid;grid-template-columns:${rtdHtml ? 'repeat(4,1fr)' : 'repeat(3,1fr)'};border-top:1px solid var(--border);border-bottom:1px solid var(--border)">
         <div style="padding:8px 12px;border-right:1px solid var(--border)">
           <div style="font-size:0.68em;color:var(--text3);margin-bottom:2px">ล่าสุด · ${last.x.slice(5)}</div>
           <div style="font-size:1.4em;font-weight:600;color:${prod.color}">${last.y.toFixed(2)}</div>
@@ -861,7 +860,7 @@ async function renderEnergyPage() {
           <div style="font-size:0.68em;color:var(--text3);margin-bottom:2px">MTD avg</div>
           <div style="font-size:1.05em;font-weight:600">${mtd !== null ? mtd.toFixed(2) : '—'}</div>
         </div>
-        <div style="padding:8px 12px;${savedRef ? 'border-right:1px solid var(--border)' : ''}">
+        <div style="padding:8px 12px;${rtdHtml ? 'border-right:1px solid var(--border)' : ''}">
           <div style="font-size:0.68em;color:var(--text3);margin-bottom:2px">QTD avg</div>
           <div style="font-size:1.05em;font-weight:600">${qtd !== null ? qtd.toFixed(2) : '—'}</div>
         </div>
@@ -961,7 +960,6 @@ async function renderEnergyPage() {
 window.renderEnergyPage = renderEnergyPage;
 window.toggleBreakdown = toggleBreakdown;
 window.openMetaChart = openMetaChart;
-window.openMeta = openMeta;
 window.closeMeta = closeMeta;
 window.openStructureModal = openStructureModal;
 window.closeStructureModal = closeStructureModal;
@@ -1025,14 +1023,19 @@ document.addEventListener('click', function(e) {
 window.loadData = async function() {
   setStatus('load','loading…');
   try {
-    await Promise.all([fetchAll(), fetchNews()]);
+    // Phase 1: EPPO + news — พอสำหรับหน้าแรก (TH Energy)
+    await Promise.all([fetchEppo(), fetchNews()]);
     window._SERIES = SERIES;
     render();
-    const upd = Object.values(SERIES)[0]?.updated || '';
-    setStatus('ok', upd ? 'data: '+upd.slice(0,16).replace('T',' ')+' UTC' : 'loaded');
-    // render energy page หลัง data พร้อมเสมอ
     if (activePageId === '__energy__') renderEnergyPage();
     if (activePageId === '__news__') renderNews();
+
+    // Phase 2: series ที่เหลือ โหลด background
+    await fetchRest();
+    const upd = Object.values(SERIES)[0]?.updated || '';
+    setStatus('ok', upd ? 'data: '+upd.slice(0,16).replace('T',' ')+' UTC' : 'loaded');
+    // ถ้า user เปิดหน้า regular อยู่ระหว่างรอ ให้ re-render
+    if (activePageId !== '__energy__' && activePageId !== '__news__') renderActivePage();
   } catch(e) { setStatus('err','Firestore error'); console.error(e); }
 };
 
@@ -1093,6 +1096,8 @@ function movAvg(data,n) {
 function render() {
   document.getElementById('page-news').classList.remove('active');
   document.getElementById('page-th-energy').classList.remove('active');
+  if (activePageId === '__news__')   document.getElementById('page-news').classList.add('active');
+  if (activePageId === '__energy__') document.getElementById('page-th-energy').classList.add('active');
   renderNav();
   renderActivePage();
 }
