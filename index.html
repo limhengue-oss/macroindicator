@@ -154,7 +154,7 @@ input[type=range] { width:80px; accent-color:var(--blue); }
 <body>
 
 <div id="topbar">
-  <div class="brand">Macro<span class="patch">v5.1b</span></div>
+  <div class="brand">Macro<span class="patch">v5.1c</span></div>
   <div class="topbar-right">
     <span class="sdot" id="sdot"></span>
     <span id="stxt">loading…</span>
@@ -808,15 +808,16 @@ async function renderEnergyPage() {
         const isTotal = f.key === 'RETAIL' || f.key === 'WHOLESALE';
 
         // flag สีตาม direction เทียบ ref date
-        let flagColor = '';
+        let flagColor = '', arrow = '';
         if (vLast !== null && vRef !== null && Math.abs(vLast - vRef) > 0.0001) {
-          flagColor = vLast > vRef ? '#e53935' : '#43a047';  // เพิ่ม=แดง, ลด=เขียว
+          if (vLast > vRef) { flagColor = '#e53935'; arrow = ' ↑'; }
+          else              { flagColor = '#43a047'; arrow = ' ↓'; }
         }
         const lastStyle = `padding:5px 8px;text-align:right${flagColor ? `;color:${flagColor};font-weight:600` : ''}`;
 
         return `<tr style="${isTotal ? 'font-weight:600;border-top:1px solid var(--border)' : ''}">
           <td style="padding:5px 8px;color:var(--text2)">${f.label}</td>
-          <td style="${lastStyle}">${vLast !== null ? vLast.toFixed(4) : '—'}</td>
+          <td style="${lastStyle}">${vLast !== null ? vLast.toFixed(4) + arrow : '—'}</td>
           ${refStr ? `<td style="padding:5px 8px;text-align:right;color:var(--text3)">${vRef !== null ? vRef.toFixed(4) : '—'}</td>` : ''}
         </tr>`;
       }).join('');
