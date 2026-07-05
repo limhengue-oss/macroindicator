@@ -1,3 +1,4 @@
+<!-- patch v5.2c: fix MA/YoY/MoM period-cut order, QTD timezone off-by-one, norm/cumret div-by-zero, remove dead setFont code -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -154,7 +155,7 @@ input[type=range] { width:80px; accent-color:var(--blue); }
 <body>
 
 <div id="topbar">
-  <div class="brand">Macro<span class="patch">v5.2b</span></div>
+  <div class="brand">Macro<span class="patch">v5.2c</span></div>
   <div class="topbar-right">
     <span class="sdot" id="sdot"></span>
     <span id="stxt">loading…</span>
@@ -378,12 +379,6 @@ function setFont(pct) {
   // chart height ตาม font size
   const chartH = pct <= 150 ? 180 : pct <= 200 ? 240 : 320;
   document.documentElement.style.setProperty('--chart-h', chartH+'px');
-  // ปรับ min-width ของ chart grid ตาม font size
-  const minW = pct <= 150 ? 360 : pct <= 200 ? 480 : 600;
-  document.querySelectorAll('.chart-grid').forEach(g => {
-    if (!g.style.gridTemplateColumns.includes('1fr')) return; // skip manual cols
-    // ไม่แตะ grid ที่ user set ไว้
-  });
   // ปรับ card canvas height ตาม font
   const h = pct <= 150 ? 180 : pct <= 200 ? 220 : 280;
   document.querySelectorAll('.cb > div[style]').forEach(el => {
@@ -600,7 +595,8 @@ function calcMTD(data) {
 
 function calcQTD(data) {
   const now = new Date();
-  const qStart = new Date(now.getFullYear(), Math.floor(now.getMonth()/3)*3, 1).toISOString().slice(0,10);
+  const qMonth = Math.floor(now.getMonth()/3)*3 + 1; // 1-based
+  const qStart = `${now.getFullYear()}-${String(qMonth).padStart(2,'0')}-01`;
   const pts = data.filter(p => p.x >= qStart);
   return pts.length ? pts.reduce((s,p)=>s+p.y,0)/pts.length : null;
 }
@@ -1086,8 +1082,8 @@ function applyFn(data, fn) {
   if (!data.length) return data;
   switch(fn) {
     case 'raw':    return data;
-    case 'norm':   { const b=data[0].y; return data.map(d=>({x:d.x,y:+(d.y/b*100).toFixed(2)})); }
-    case 'cumret': { const b=data[0].y; return data.map(d=>({x:d.x,y:+((d.y/b-1)*100).toFixed(2)})); }
+    case 'norm':   { const b=data.find(d=>d.y!==0)?.y; return b ? data.map(d=>({x:d.x,y:+(d.y/b*100).toFixed(2)})) : data.map(d=>({x:d.x,y:null})); }
+    case 'cumret': { const b=data.find(d=>d.y!==0)?.y; return b ? data.map(d=>({x:d.x,y:+((d.y/b-1)*100).toFixed(2)})) : data.map(d=>({x:d.x,y:null})); }
     case 'yoy':    return lookbackPct(data,365);
     case 'mom':    return lookbackPct(data,30);
     case 'ma20':   return movAvg(data,20);
@@ -1307,8 +1303,8 @@ function drawChart(page,chart) {
   chart.series.forEach(s=>{
     const src=SERIES[s.id];
     if (!src) return;
-    let pts=cutByPeriod(src.data, chart.period);
-    pts=applyFn(pts, s.fn||'raw');
+    let pts=applyFn(src.data, s.fn||'raw');
+    pts=cutByPeriod(pts, chart.period);
     if (!pts.length) return;
     if (!commonLabels) commonLabels=pts.map(p=>p.x);
     const map=Object.fromEntries(pts.map(p=>[p.x,p.y]));

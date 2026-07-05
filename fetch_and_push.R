@@ -74,6 +74,16 @@ get_access_token <- function(sa) {
 
 `%||%` <- function(x, y) if (is.null(x) || length(x)==0 || is.na(x)) y else x
 
+# dedup ตาม date (จุดที่มาทีหลังใน list ชนะถ้าวันที่ซ้ำ) แล้ว sort ตามวันที่
+dedup_sort_points <- function(pts) {
+  if (length(pts) == 0) return(pts)
+  dates <- map_chr(pts, \(p) p$mapValue$fields$d$stringValue)
+  keep  <- !duplicated(dates, fromLast = TRUE)
+  pts   <- pts[keep]
+  dates <- dates[keep]
+  pts[order(dates)]
+}
+
 push_series <- function(token, doc_id, name, df, is_incremental, meta = NULL) {
   # df: tibble(date, value)  →  Firestore array of maps
   new_points <- pmap(df, function(date, value) {
@@ -102,7 +112,7 @@ push_series <- function(token, doc_id, name, df, is_incremental, meta = NULL) {
         if (!is.null(arr)) arr else list()
       } else list()
     }, error = function(e) list())
-    all_points <- c(existing_points, new_points)
+    all_points <- dedup_sort_points(c(existing_points, new_points))
   }
 
   fields <- list(

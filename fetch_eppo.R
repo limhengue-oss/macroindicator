@@ -156,6 +156,16 @@ get_token <- function(sa) {
   resp_body_json(resp)$access_token
 }
 
+# dedup ตาม date (จุดที่มาทีหลังใน list ชนะถ้าวันที่ซ้ำ) แล้ว sort ตามวันที่
+dedup_sort_points <- function(pts) {
+  if (length(pts) == 0) return(pts)
+  dates <- map_chr(pts, \(p) p$mapValue$fields$d$stringValue)
+  keep  <- !duplicated(dates, fromLast = TRUE)
+  pts   <- pts[keep]
+  dates <- dates[keep]
+  pts[order(dates)]
+}
+
 # ── Firestore: append points ──────────────────────────────────────
 append_series <- function(token, doc_id, name, new_df) {
   # new_df: tibble(date, value) — วันที่ยังไม่มีใน Firestore
@@ -184,8 +194,8 @@ append_series <- function(token, doc_id, name, new_df) {
     )))
   })
   
-  all_pts <- c(existing_pts, new_pts)
-  
+  all_pts <- dedup_sort_points(c(existing_pts, new_pts))
+
   body <- list(fields = list(
     name    = list(stringValue = name),
     updated = list(stringValue = format(Sys.time(), "%Y-%m-%dT%H:%M:%SZ", tz = "UTC")),
