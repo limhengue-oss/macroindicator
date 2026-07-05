@@ -154,7 +154,7 @@ input[type=range] { width:80px; accent-color:var(--blue); }
 <body>
 
 <div id="topbar">
-  <div class="brand">Macro<span class="patch">v5.2a</span></div>
+  <div class="brand">Macro<span class="patch">v5.2b</span></div>
   <div class="topbar-right">
     <span class="sdot" id="sdot"></span>
     <span id="stxt">loading…</span>
@@ -1368,23 +1368,28 @@ function drawChart(page,chart) {
       const minor = new Set();   // grid เท่านั้น (ไม่มี label)
 
       if (period === '3m' || period === '6m') {
-        // major: วันที่ 1 ทุกเดือน + 3m เพิ่มครึ่งเดือน (วัน 15/16)
-        for (let i = 0; i < labels.length; i++) {
-          const day = new Date(labels[i]).getUTCDate();
-          if (day === 1) { major.add(i); continue; }
-          if (period === '3m' && (day === 15 || day === 16)) {
-            // หาวันแรกของครึ่งเดือนหลัง (15 หรือ 16 แล้วแต่ data)
-            const mon = new Date(labels[i]).getUTCMonth();
-            const yr  = new Date(labels[i]).getUTCFullYear();
-            // เพิ่มแค่วันเดียวต่อครึ่งเดือน — เช็คว่ายังไม่มี major ในครึ่งเดือนนี้
+        // วนทีละเดือนในช่วง data หา index วันแรกที่มีของแต่ละเดือน
+        let y = first.getUTCFullYear(), m = first.getUTCMonth() + 1;
+        const endY = last.getUTCFullYear(), endM = last.getUTCMonth() + 1;
+        while (y < endY || (y === endY && m <= endM)) {
+          const idx = firstDayIdx(y, m);
+          if (idx >= 0) major.add(idx);
+          m++; if (m > 12) { m = 1; y++; }
+        }
+        // 3m: เพิ่มครึ่งเดือน (วัน 15/16 วันแรกที่มีในครึ่งหลัง)
+        if (period === '3m') {
+          for (let i = 0; i < labels.length; i++) {
+            const d   = new Date(labels[i]);
+            const day = d.getUTCDate();
+            if (day < 15) continue;
+            const mon = d.getUTCMonth(), yr = d.getUTCFullYear();
             const alreadyHalf = [...major].some(j => {
-              const d = new Date(labels[j]);
-              return d.getUTCFullYear() === yr && d.getUTCMonth() === mon && d.getUTCDate() >= 14;
+              const d2 = new Date(labels[j]);
+              return d2.getUTCFullYear() === yr && d2.getUTCMonth() === mon && d2.getUTCDate() >= 14;
             });
-            if (!alreadyHalf) major.add(i);
+            if (!alreadyHalf) { major.add(i); break; }
           }
         }
-
       } else if (period === '1y') {
         // major: เดือนคี่หรือคู่ตาม lastMon, minor: ทุกเดือน
         const parity = lastMon % 2;  // 0=คู่, 1=คี่
@@ -1438,7 +1443,9 @@ function drawChart(page,chart) {
         if (yearOnly) return String(dt.getUTCFullYear());
         const mon = dt.toLocaleDateString('en-GB', {month:'short', timeZone:'UTC'});
         if (showDay) {
-          return `${dt.getUTCDate()}-${mon}-${dt.getUTCFullYear()}`;
+          return period === '3m'
+            ? `${dt.getUTCDate()}-${mon}`
+            : `${dt.getUTCDate()}-${mon}-${dt.getUTCFullYear()}`;
         }
         return mon + String(dt.getUTCFullYear()).slice(2);
       };
