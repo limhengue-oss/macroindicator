@@ -199,7 +199,11 @@ scrape_list <- function(base_url, get_pairs_fn, last_date) {
     if (length(pairs) == 0) { message("  no items — stop"); break }
     done <- FALSE
     for (pair in pairs) {
-      wd <- as.Date(parse_thai_date(pair$date_txt))
+      # extractor อาจส่ง date_txt เป็น thai text (EPPO) หรือ ISO string (OFFO)
+      raw <- pair$date_txt
+      wd_str <- if (grepl("^\\d{4}-\\d{2}-\\d{2}$", raw)) raw else parse_thai_date(raw)
+      if (is.na(wd_str)) next
+      wd <- as.Date(wd_str)
       if (is.na(wd)) next
       if (wd <= last_date) { done <- TRUE; break }
       pending[[length(pending)+1]] <- list(date=wd, href=pair$href)
