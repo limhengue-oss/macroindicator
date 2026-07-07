@@ -1,3 +1,4 @@
+<!-- patch v5.7.2: fix TH Energy chart zoom range wrapping across year boundary (min>max) when latest month is near Jan or Dec — clamp to 1-12 instead of modulo wrap -->
 <!-- patch v5.7.1: fix chart canvases overflowing/cut off at right edge on window resize — canvas max-width:100%, html overflow-x:hidden, resize listener recalculates chart.js canvas size -->
 <!-- patch v5.7: Export PDF now limited to Diesel + Gasohol 95 with breakdown expanded, laid out 2-column A4 landscape -->
 <!-- patch v5.6: 3M/6M x-axis skips month label if first data point of that month is after the 4th; 6M label format drops year, matches 3M "1-Jan" -->
@@ -172,7 +173,7 @@ input[type=range] { width:80px; accent-color:var(--blue); }
 <body>
 
 <div id="topbar">
-  <div class="brand">Macro<span class="patch">v5.7.1</span></div>
+  <div class="brand">Macro<span class="patch">v5.7.2</span></div>
   <div class="topbar-right">
     <span class="sdot" id="sdot"></span>
     <span id="stxt">loading…</span>
@@ -980,10 +981,14 @@ async function renderEnergyPage() {
     }] : [];
 
     // คำนวณ zoom range: last month -4 (วันที่ 1) ถึง +2 (สิ้นเดือน)
+    // clamp ไว้ในปีเดียว (1–12) ไม่ wrap ข้ามปี เพราะ yearLabels เป็น array
+    // ม.ค.–ธ.ค. ปีเดียว ถ้า wrap ข้ามปีจะได้ zoomStart index > zoomEnd index
+    // (min > max) กราฟแสดงผลผิดเพี้ยน — เดือนล่าสุดใกล้ต้น/ท้ายปีจะได้ช่วงซูม
+    // สั้นกว่าปกติ (ไม่ครบ 6 เดือน) แทนที่จะ wrap
     const latestMmDd = last.x.slice(5);  // "MM-DD"
     const latestMon  = parseInt(latestMmDd.slice(0,2), 10);
-    const zoomStart  = ((latestMon - 4 - 1 + 12) % 12) + 1;  // เดือนเริ่ม
-    const zoomEnd    = ((latestMon + 2 - 1 + 12) % 12) + 1;  // เดือนสิ้นสุด
+    const zoomStart  = Math.max(1, latestMon - 4);   // เดือนเริ่ม
+    const zoomEnd    = Math.min(12, latestMon + 2);  // เดือนสิ้นสุด
     const zoomStartStr = String(zoomStart).padStart(2,'0') + '-01';
     const zoomEndDay   = new Date(2000, zoomEnd, 0).getDate();
     const zoomEndStr   = String(zoomEnd).padStart(2,'0') + '-' + String(zoomEndDay).padStart(2,'0');
