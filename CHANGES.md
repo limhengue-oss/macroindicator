@@ -1,5 +1,92 @@
 # Changelog
 
+## v5.5.3 — 2026-07-07
+
+### fetch_eppo.R
+
+- **เพิ่ม "missing products" check กลับเข้าไป** ที่หายไปตอน rewrite เป็น
+  2-step OFFO+EPPO (ดู v5.5.2) — `parse_xlsx()` รับ `meta_products` เพิ่ม
+  (base product list จาก `meta/eppo_status`) หลัง parse ไฟล์เสร็จจะเทียบ
+  `unique(df$BASE_PRODUCT)` กับ `meta_products`: ถ้าขาด → `return(NULL)`
+  ทั้งไฟล์ทันที (all-or-nothing ต่อวัน ไม่ push ข้อมูลครึ่ง ๆ กลาง ๆ) พร้อม
+  message บอกว่าขาด product ตัวไหน
+  - ดึง `meta_products` ครั้งเดียวใน MAIN หลังอ่าน meta/eppo_status ตอนเริ่ม
+    สคริปต์ แล้วส่งต่อให้ `download_and_parse()` → `parse_xlsx()` ทั้ง 2 step
+    (OFFO และ EPPO)
+
+## v5.5.2 — 2026-07-07 (bugfix pass)
+
+### index.html
+
+- **`--bg3` เพี้ยนจาก `#1c1c1e` เป็น `#1d1e1c` โดยไม่ตั้งใจ** (เข้าใจว่าหลุดมา
+  จากการแก้ไขก่อนหน้านี้ในเซสชัน) — คืนค่าเดิม
+- **PDF export ไม่ได้ขยายความสูงกราฟจริง** — CSS
+  `#energy-boxes.pdf-export .energy-chart-box { height:220px }` ไม่มี
+  `!important` เลยแพ้ inline `style="height:140px"` ที่ติดอยู่บน element เดิม
+  (inline style ชนะ CSS ปกติเสมอ ยกเว้น CSS นั้นมี `!important`) ทำให้กราฟ
+  ตอน export PDF ยังคงสูงแค่ 140px เหมือนตอนแสดงบนจอ ไม่ได้ขยายเป็น 220px
+  ตามที่ตั้งใจ — เพิ่ม `!important` ให้ถูกต้อง
+
+### fetch_eppo.R (พบขณะรีวิว — ไฟล์ถูกแก้ไขนอกเซสชันนี้)
+
+- สคริปต์ถูกเขียนใหม่เป็น 2 ขั้นตอน (OFFO scrape ก่อน แล้ว EPPO scrape ทับ)
+  ระหว่างรีวิวพบว่า **การตรวจสอบ "missing products"** ที่เวอร์ชันก่อนหน้าเคยมี
+  (เทียบ products ที่ parse ได้กับ `meta_products` แล้ว skip+เตือนถ้าขาด
+  เพื่อกัน format spreadsheet เปลี่ยนแล้วข้อมูลหายเงียบ ๆ) **หายไปจากเวอร์ชัน
+  ปัจจุบัน** — ตอนนี้ `parse_xlsx()` แค่ข้าม product ที่ resolve ไม่ได้ทีละแถว
+  (message คำเตือนเฉย ๆ) แล้วยังคง push วันที่นั้นต่อไปด้วยข้อมูลที่เหลือ
+  ถ้าฝั่ง EPPO เปลี่ยนโครงสร้างไฟล์ (เพิ่ม/ลบ/สลับแถว product) อาจทำให้บาง
+  product หายไปจากวันนั้นแบบไม่มี error แจ้งเตือนเลย — ยังไม่ได้แก้ (เป็นการ
+  ตัดสินใจเชิง design ว่าจะ fail-loud หรือ skip-silent ที่ควรถามเจ้าของสคริปต์
+  ก่อน)
+
+## v5.5.1 — 2026-07-07
+
+### index.html
+
+- **รวม EPPO เป็นหมวดเดียวใน series selector** — เดิมแบ่งเป็น "EPPO Diesel" /
+  "EPPO Gasoline" / "EPPO Other" 3 กลุ่ม ตอนนี้รวมเป็นกลุ่มเดียวชื่อ "EPPO"
+  (ยังจำกัดแค่ Retail/Wholesale + Oil Fund เหมือนเดิม) เอา `EPPO_CATEGORY`
+  ที่ใช้แยกหมวดออก
+
+## v5.5 — 2026-07-07
+
+### index.html
+
+- **จำกัด EPPO series ที่เลือกได้ในหน้า chart ทั่วไป** ให้เหลือแค่
+  Retail/Wholesale (ราคาขาย) กับ Oil Fund เท่านั้น ซ่อน field breakdown อื่น
+  (Ex-Refin, Excise Tax, Municipal Tax, Conservation Fund, VAT, Marketing
+  Margin) ออกจาก series picker
+  - เดิม `SERIES_GROUPS['EPPO Diesel'/'EPPO Gasoline'/'EPPO Other']` เป็น
+    hardcoded doc id ที่ผิด/ไม่ตรงกับ schema จริง (เช่น `EPPO_H_DIESEL_RETAIL`)
+    ตอนนี้ generate อัตโนมัติจาก `EPPO_ORDER` + `eppoDocId()` แทน เพื่อให้ id
+    ถูกต้องเสมอและไม่ต้องคอย sync มือ
+  - เพิ่ม `EPPO_CATEGORY` map เพื่อจัดกลุ่ม Diesel/Gasoline/Other เหมือนเดิม
+  - แก้ fallback "Other" optgroup ใน `makeSeriesRow()` ให้ข้าม series ที่ขึ้นต้น
+    ด้วย `EPPO_` แต่ไม่อยู่ในกลุ่มที่ generate ไว้ (เดิม field breakdown อื่น ๆ
+    จะหลุดไปโผล่ใน optgroup "Other" ของ dropdown ทั่วไปแทน)
+
+## v5.4.1 — 2026-07-07
+
+### index.html
+
+- **เรียงลำดับการ์ด TH Energy ใหม่** — `EPPO_ORDER` เปลี่ยนเป็น Diesel, Gasohol 95,
+  Gasohol 91, E20, E85, ULG 95, LPG, FO 1500, FO 600
+
+## v5.4 — 2026-07-07
+
+### index.html
+
+- **MTD/QTD แสดง avg level + %YoY** — เดิม `calcMTD()`/`calcQTD()` คืนแค่ตัวเลข
+  average ตอนนี้คืน `{ avg, yoy }` โดย `yoy` เทียบกับค่าเฉลี่ยของ**ช่วงวันที่
+  เดียวกัน**ในปีก่อน (ไม่ใช่ทั้งเดือน/ไตรมาสเต็ม ๆ ของปีก่อน) เพื่อเทียบแบบ
+  like-for-like:
+  - MTD: 1 ต้นเดือนถึงวันนี้ ปีนี้ vs 1 ต้นเดือนถึงวันเดียวกัน (clamp ถ้าเดือน
+    สั้นกว่า เช่น ก.พ.) ปีก่อน
+  - QTD: 1 ต้นไตรมาสถึงวันนี้ ปีนี้ vs จำนวนวันเท่ากันนับจากต้นไตรมาสปีก่อน
+  - การ์ดในหน้า TH Energy แสดงเลข avg เหมือนเดิม และเพิ่มบรรทัด `YoY ±X.X%`
+    ด้านล่าง (สีแดง = ราคาขึ้น, สีเขียว = ราคาลง — ตาม convention เดียวกับ RTD)
+
 ## v5.3 — 2026-07-07
 
 ### index.html

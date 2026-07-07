@@ -152,7 +152,10 @@ upsert_series <- function(token, doc_id, name, new_df) {
 }
 
 # parse xlsx → df rows (shared by OFFO and EPPO)
-parse_xlsx <- function(tmp, web_date) {
+# meta_products: base product ทั้งหมดที่ควรมีในไฟล์ (จาก meta/eppo_status) —
+# ใช้เช็คว่า parse ได้ครบไหม กัน EPPO เปลี่ยนชื่อ/ลำดับ/จำนวนแถว product แล้ว
+# ข้อมูลหายไปเงียบ ๆ โดยไม่มีใครสังเกต (all-or-nothing ต่อวัน ไม่ push บางส่วน)
+parse_xlsx <- function(tmp, web_date, meta_products = NULL) {
   ws <- tryCatch(
     read_xlsx(tmp, col_names=FALSE, col_types="text", sheet="Oil Price Structure"),
     error=function(e) tryCatch(
@@ -184,7 +187,20 @@ parse_xlsx <- function(tmp, web_date) {
     rows[[length(rows)+1]] <- row_data
   }
   if (length(rows) == 0) return(NULL)
-  bind_rows(rows)
+  df <- bind_rows(rows)
+
+  # เช็คว่า product ที่ resolve ได้ครบตาม meta_products ไหม — ถ้าขาด ไม่ push
+  # เลยทั้งไฟล์ (กันข้อมูลครึ่ง ๆ กลาง ๆ หลุดเข้า production ตอน format เปลี่ยน)
+  if (!is.null(meta_products)) {
+    missing <- setdiff(meta_products, unique(df$BASE_PRODUCT))
+    if (length(missing) > 0) {
+      message(sprintf("  ✗ [%s] missing products: %s — skip ทั้งไฟล์",
+                      web_date, paste(missing, collapse=", ")))
+      return(NULL)
+    }
+  }
+
+  df
 }
 
 # scrape list → pending list(date, href)
@@ -250,7 +266,7 @@ offo_extractor <- list(
 )
 
 # download pending → parse → df
-download_and_parse <- function(pending) {
+download_and_parse <- function(pending, meta_products = NULL) {
   all_rows <- list()
   latest   <- NULL
   for (item in pending) {
@@ -259,7 +275,7 @@ download_and_parse <- function(pending) {
     if (resp_status(resp) != 200) { message("  ✗ HTTP ", resp_status(resp)); next }
     tmp <- tempfile(fileext=".xlsx")
     writeBin(resp_body_raw(resp), tmp)
-    df <- parse_xlsx(tmp, item$date)
+    df <- parse_xlsx(tmp, item$date, meta_products)
     unlink(tmp)
     if (is.null(df)) next
     all_rows <- c(all_rows, list(df))
@@ -322,9 +338,11 @@ meta_resp <- request(meta_url) |> req_auth_bearer_token(token) |>
   req_error(is_error=\(r) FALSE) |> req_perform()
 if (resp_status(meta_resp) != 200) stop("meta/eppo_status ไม่พบ — รัน init_eppo_meta.R ก่อน")
 
-meta      <- resp_body_json(meta_resp)
-last_date <- as.Date(meta$fields$last_date$stringValue)
+meta          <- resp_body_json(meta_resp)
+last_date     <- as.Date(meta$fields$last_date$stringValue)
+meta_products <- map_chr(meta$fields$products$arrayValue$values, \(v) v$stringValue)
 message(sprintf("  last_date = %s", last_date))
+message(sprintf("  products  = %s", paste(meta_products, collapse=", ")))
 
 # ── Step 1: OFFO ─────────────────────────────────────────────────
 message("\n── OFFO scrape (fast source)...")
@@ -333,7 +351,7 @@ message(sprintf("  %d new file(s) from OFFO", length(offo_pending)))
 
 offo_latest <- last_date
 if (length(offo_pending) > 0) {
-  result <- download_and_parse(offo_pending)
+  result <- download_and_parse(offo_pending, meta_products)
   if (!is.null(result$df)) {
     ok <- push_df(token, result$df)
     message(sprintf("── OFFO pushed %d series", ok))
@@ -354,7 +372,7 @@ message(sprintf("  %d file(s) from EPPO (may overlap with OFFO)", length(eppo_pe
 
 eppo_latest <- NULL
 if (length(eppo_pending) > 0) {
-  result <- download_and_parse(eppo_pending)
+  result <- download_and_parse(eppo_pending, meta_products)
   if (!is.null(result$df)) {
     ok <- push_df(token, result$df)
     message(sprintf("── EPPO pushed %d series (overwrote OFFO where dates overlap)", ok))

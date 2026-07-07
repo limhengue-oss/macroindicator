@@ -1,3 +1,8 @@
+<!-- patch v5.5.2: bugfix pass — restore accidental --bg3 color change; fix pdf-export chart height being silently overridden by inline style (missing !important) -->
+<!-- patch v5.5.1: merge EPPO Diesel/Gasoline/Other into a single "EPPO" group in the series selector -->
+<!-- patch v5.5: limit EPPO series selectable on general chart page to Retail/Wholesale + Oil Fund only; hide other breakdown fields -->
+<!-- patch v5.4.1: reorder TH Energy product cards -->
+<!-- patch v5.4: MTD/QTD now show avg level + %YoY vs same-period-last-year average -->
 <!-- patch v5.3: remove print feature, add "Export PDF" button on TH Energy page (client-side via html2canvas + jsPDF) -->
 <!-- patch v5.2c: fix MA/YoY/MoM period-cut order, QTD timezone off-by-one, norm/cumret div-by-zero, remove dead setFont code -->
 <!DOCTYPE html>
@@ -18,7 +23,7 @@
 
 /* ── Theme variables ── */
 :root {
-  --bg:#000000; --bg2:#0e0e10; --bg3:#1d1e1c; --bg4:#2c2c2e;
+  --bg:#000000; --bg2:#0e0e10; --bg3:#1c1c1e; --bg4:#2c2c2e;
   --chart-h: 180px;
   --border:#2c2c2e; --border2:#3a3a3c;
   --text:#f5f5f7; --text2:#98989d; --text3:#636366;
@@ -44,7 +49,7 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkM
 @media (max-width:700px), (orientation:portrait) and (max-width:1024px) { .energy-grid { grid-template-columns:1fr; } }
 /* ตอน export PDF: เต็มปีมี 12 label บนแกน x — ขยาย card เป็น 1 คอลัมน์ + กราฟสูงขึ้น กัน label ชนกัน */
 #energy-boxes.pdf-export { grid-template-columns:1fr; }
-#energy-boxes.pdf-export .energy-chart-box { height:220px; }
+#energy-boxes.pdf-export .energy-chart-box { height:220px !important; }
 .news-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-bottom:18px; }
 @media (max-width: 700px) { .news-grid { grid-template-columns:1fr; } }
 .news-source { font-size:0.68em; color:var(--blue); text-transform:uppercase; letter-spacing:0.04em; margin-bottom:4px; }
@@ -161,7 +166,7 @@ input[type=range] { width:80px; accent-color:var(--blue); }
 <body>
 
 <div id="topbar">
-  <div class="brand">Macro<span class="patch">v5.3</span></div>
+  <div class="brand">Macro<span class="patch">v5.5.2</span></div>
   <div class="topbar-right">
     <span class="sdot" id="sdot"></span>
     <span id="stxt">loading…</span>
@@ -354,9 +359,9 @@ const SERIES_GROUPS = {
   'Commodities':  ['WTI','BRENT','GOLD','SILVER','COPPER','NATGAS'],
   'US Macro':     ['FEDFUNDS','CPI','CORECPI','DGS2','DGS10','UNRATE'],
   'EU Macro':     ['ECBRATE','EUCPI'],
-  'EPPO Diesel':  ['EPPO_H_DIESEL_RETAIL','EPPO_H_DIESEL_B7_RETAIL','EPPO_H_DIESEL_EX_REFIN','EPPO_H_DIESEL_OIL_FUND','EPPO_H_DIESEL_EXCISE_TAX','EPPO_H_DIESEL_MARKETING_MARGIN'],
-  'EPPO Gasoline':['EPPO_ULG_95_RETAIL','EPPO_GASOHOL_95_RETAIL','EPPO_GASOHOL_91_RETAIL','EPPO_GASOHOL95_E20_RETAIL','EPPO_GASOHOL95_E85_RETAIL'],
-  'EPPO Other':   ['EPPO_LPG_RETAIL','EPPO_FO_1500_2_2_S_RETAIL','EPPO_FO_600_1_2_S_RETAIL'],
+  // EPPO Diesel/Gasoline/Other ถูกเติมด้านล่างหลังประกาศ EPPO_ORDER — จำกัดให้
+  // เลือกได้แค่ Retail/Wholesale + Oil Fund เท่านั้น (ซ่อน field breakdown อื่น
+  // เช่น Ex-Refin, Excise Tax, VAT, Marketing Margin จากหน้า chart ทั่วไป)
   'PTT OR Oil':   ['PTTOR_PREMIUM_DIESEL','PTTOR_SUPER_POWER_GSH95','PTTOR_GASOHOL_91','PTTOR_GASOHOL_E20','PTTOR_GASOHOL_E85','PTTOR_BENZENE_95'],
 };
 
@@ -507,12 +512,12 @@ async function fetchNews() {
 
 const EPPO_ORDER = [
   { base:'DIESEL',        label:'Diesel',      color:'#f5a623', unit:'บาท/ลิตร', field:'RETAIL'    },
-  { base:'ULG 95',        label:'ULG 95',      color:'#f5a623', unit:'บาท/ลิตร', field:'RETAIL'    },
-  { base:'LPG',           label:'LPG',         color:'#f5a623', unit:'บาท/กก.',  field:'RETAIL'    },
   { base:'GASOHOL 95',    label:'Gasohol 95',  color:'#f5a623', unit:'บาท/ลิตร', field:'RETAIL'    },
   { base:'GASOHOL 91',    label:'Gasohol 91',  color:'#f5a623', unit:'บาท/ลิตร', field:'RETAIL'    },
   { base:'GASOHOL95 E20', label:'E20',         color:'#f5a623', unit:'บาท/ลิตร', field:'RETAIL'    },
   { base:'GASOHOL95 E85', label:'E85',         color:'#f5a623', unit:'บาท/ลิตร', field:'RETAIL'    },
+  { base:'ULG 95',        label:'ULG 95',      color:'#f5a623', unit:'บาท/ลิตร', field:'RETAIL'    },
+  { base:'LPG',           label:'LPG',         color:'#f5a623', unit:'บาท/กก.',  field:'RETAIL'    },
   { base:'FO 1500',       label:'FO 1500',     color:'#f5a623', unit:'บาท/ลิตร', field:'WHOLESALE' },
   { base:'FO 600',        label:'FO 600',      color:'#f5a623', unit:'บาท/ลิตร', field:'WHOLESALE' },
 ];
@@ -525,6 +530,16 @@ function eppoDocId(base, field) {
 function getEppoSeries(base, field) {
   return SERIES[eppoDocId(base, field)] || null;
 }
+
+// เติม EPPO series group สำหรับหน้า chart ทั่วไป — รวมเป็นหมวดเดียว "EPPO"
+// เลือกได้แค่ Retail/Wholesale (ราคาขาย) กับ Oil Fund เท่านั้น ซ่อน field
+// breakdown อื่น ๆ (Ex-Refin, Excise Tax, Municipal Tax, Conservation Fund,
+// VAT, Marketing Margin)
+SERIES_GROUPS['EPPO'] = [];
+EPPO_ORDER.forEach(prod => {
+  SERIES_GROUPS['EPPO'].push(eppoDocId(prod.base, prod.field));   // Retail หรือ Wholesale
+  SERIES_GROUPS['EPPO'].push(eppoDocId(prod.base, 'OIL_FUND'));   // Oil Fund
+});
 
 // fields ที่ใช้แสดง breakdown โครงสร้างราคา (ตามลำดับ EPPO)
 const BREAKDOWN_FIELDS = [
@@ -594,20 +609,49 @@ function priceAtDate(data, dateStr) {
   return pts[pts.length-1].y;
 }
 
-// ── Averages ─────────────────────────────────────────
-function calcMTD(data) {
-  const now = new Date();
-  const prefix = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
-  const pts = data.filter(p => p.x.startsWith(prefix));
+// ── Averages (+ YoY เทียบค่าเฉลี่ยช่วงเดียวกันปีก่อน) ──
+function ymd(y,m,d) { return `${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`; }
+function daysInMonth(y,m) { return new Date(y,m,0).getDate(); } // m = 1-based
+
+function periodAvg(data, startStr, endStr) {
+  const pts = data.filter(p => p.x >= startStr && p.x <= endStr);
   return pts.length ? pts.reduce((s,p)=>s+p.y,0)/pts.length : null;
 }
+function yoyOf(avg, avgLY) {
+  return (avg !== null && avgLY !== null && avgLY !== 0) ? (avg/avgLY-1)*100 : null;
+}
 
+// MTD: เฉลี่ย 1 ต้นเดือนถึงวันนี้ vs ช่วงวันที่เดียวกันของเดือนเดียวกันปีก่อน
+function calcMTD(data) {
+  const now = new Date();
+  const y = now.getFullYear(), m = now.getMonth()+1, d = now.getDate();
+  const avg = periodAvg(data, ymd(y,m,1), ymd(y,m,d));
+
+  const lyDay = Math.min(d, daysInMonth(y-1,m));
+  const avgLY = periodAvg(data, ymd(y-1,m,1), ymd(y-1,m,lyDay));
+
+  return { avg, yoy: yoyOf(avg, avgLY) };
+}
+
+// QTD: เฉลี่ยต้นไตรมาสถึงวันนี้ vs จำนวนวันเท่ากันนับจากต้นไตรมาสปีก่อน
 function calcQTD(data) {
   const now = new Date();
-  const qMonth = Math.floor(now.getMonth()/3)*3 + 1; // 1-based
-  const qStart = `${now.getFullYear()}-${String(qMonth).padStart(2,'0')}-01`;
-  const pts = data.filter(p => p.x >= qStart);
-  return pts.length ? pts.reduce((s,p)=>s+p.y,0)/pts.length : null;
+  const y = now.getFullYear(), m0 = now.getMonth(); // 0-based
+  const qStartMonth0 = Math.floor(m0/3)*3;
+  const qStartDate   = new Date(y, qStartMonth0, 1);
+  const todayMid     = new Date(y, m0, now.getDate());
+  const daysElapsed  = Math.round((todayMid - qStartDate) / 86400000);
+
+  const avg = periodAvg(data, ymd(y, qStartMonth0+1, 1), ymd(y, m0+1, now.getDate()));
+
+  const lyQStart = new Date(y-1, qStartMonth0, 1);
+  const lyEnd    = new Date(lyQStart.getTime());
+  lyEnd.setDate(lyEnd.getDate() + daysElapsed);
+  const avgLY = periodAvg(data,
+    ymd(lyQStart.getFullYear(), lyQStart.getMonth()+1, lyQStart.getDate()),
+    ymd(lyEnd.getFullYear(), lyEnd.getMonth()+1, lyEnd.getDate()));
+
+  return { avg, yoy: yoyOf(avg, avgLY) };
 }
 
 // ── Year chart helpers ────────────────────────────────
@@ -877,11 +921,13 @@ async function renderEnergyPage() {
         </div>
         <div style="padding:8px 12px;border-right:1px solid var(--border)">
           <div style="font-size:0.68em;color:var(--text3);margin-bottom:2px">MTD avg</div>
-          <div style="font-size:1.05em;font-weight:600">${mtd !== null ? mtd.toFixed(2) : '—'}</div>
+          <div style="font-size:1.05em;font-weight:600">${mtd.avg !== null ? mtd.avg.toFixed(2) : '—'}</div>
+          ${mtd.yoy !== null ? `<div style="font-size:0.68em;font-weight:600;color:${mtd.yoy>=0?'var(--dn)':'var(--up)'}">YoY ${mtd.yoy>=0?'+':''}${mtd.yoy.toFixed(1)}%</div>` : ''}
         </div>
         <div style="padding:8px 12px;${rtdHtml ? 'border-right:1px solid var(--border)' : ''}">
           <div style="font-size:0.68em;color:var(--text3);margin-bottom:2px">QTD avg</div>
-          <div style="font-size:1.05em;font-weight:600">${qtd !== null ? qtd.toFixed(2) : '—'}</div>
+          <div style="font-size:1.05em;font-weight:600">${qtd.avg !== null ? qtd.avg.toFixed(2) : '—'}</div>
+          ${qtd.yoy !== null ? `<div style="font-size:0.68em;font-weight:600;color:${qtd.yoy>=0?'var(--dn)':'var(--up)'}">YoY ${qtd.yoy>=0?'+':''}${qtd.yoy.toFixed(1)}%</div>` : ''}
         </div>
         ${rtdHtml}
       </div>
@@ -1563,6 +1609,7 @@ function makeSeriesRow(s,idx) {
   const other=document.createElement('optgroup'); other.label='Other';
   Object.keys(SERIES).sort().forEach(id=>{
     if (grouped.has(id)) return;
+    if (id.startsWith('EPPO_')) return; // ซ่อน field breakdown อื่นของ EPPO ที่ไม่ใช่ retail/wholesale/oil fund
     const opt=document.createElement('option');
     opt.value=id; opt.textContent=SERIES[id].name;
     if (id===s.id) opt.selected=true;

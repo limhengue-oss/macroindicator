@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(powershell -Command \"Get-Item fetch_and_push.R, push_meta_only.R, index.html, fetch_eppo.R | Select-Object Name, LastWriteTime\")"
+    ]
+  }
+}
