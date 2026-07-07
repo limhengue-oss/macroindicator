@@ -1,7 +1,4 @@
-<!-- patch v5.2g: TH Energy print — 1-column layout + taller chart so 12-month labels don't overlap and don't look shrunk -->
-<!-- patch v5.2f: TH Energy print shows full year (Jan-Dec) instead of zoomed ~6mo window -->
-<!-- patch v5.2e: fix chart overflow on print (resize charts on beforeprint, add layout padding, clamp canvas width) -->
-<!-- patch v5.2d: add print support (@media print + Print button) -->
+<!-- patch v5.3: remove print feature, add "Export PDF" button on TH Energy page (client-side via html2canvas + jsPDF) -->
 <!-- patch v5.2c: fix MA/YoY/MoM period-cut order, QTD timezone off-by-one, norm/cumret div-by-zero, remove dead setFont code -->
 <!DOCTYPE html>
 <html lang="en">
@@ -14,6 +11,8 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -43,6 +42,9 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkM
 .news-day-header { font-size:0.72em; color:var(--text3); text-transform:uppercase; letter-spacing:0.06em; padding:4px 0; border-bottom:1px solid var(--border); margin-bottom:10px; }
 .energy-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:16px; max-width:1200px; margin:0 auto; padding:0 16px; }
 @media (max-width:700px), (orientation:portrait) and (max-width:1024px) { .energy-grid { grid-template-columns:1fr; } }
+/* ตอน export PDF: เต็มปีมี 12 label บนแกน x — ขยาย card เป็น 1 คอลัมน์ + กราฟสูงขึ้น กัน label ชนกัน */
+#energy-boxes.pdf-export { grid-template-columns:1fr; }
+#energy-boxes.pdf-export .energy-chart-box { height:220px; }
 .news-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-bottom:18px; }
 @media (max-width: 700px) { .news-grid { grid-template-columns:1fr; } }
 .news-source { font-size:0.68em; color:var(--blue); text-transform:uppercase; letter-spacing:0.04em; margin-bottom:4px; }
@@ -154,42 +156,16 @@ input[type=range] { width:80px; accent-color:var(--blue); }
 .add-series-btn:hover{border-color:var(--blue)}
 .hint { font-size:0.68em; color:var(--text3); margin-top:3px; }
 .modal-actions { display:flex; gap:7px; justify-content:flex-end; margin-top:16px; }
-
-/* ── Print ── */
-@media print {
-  @page { margin: 12mm; }
-  html, body { background:#fff !important; color:#000 !important; }
-  #nav, .btn, .ch-actions, .tfs, .page-actions, .icon-btn,
-  #opt-panel, .modal-bg, #meta-popup, #structure-modal,
-  .nb-add, #sdot, #stxt { display:none !important; }
-  #topbar { border-bottom:1px solid #000; position:static; }
-  .page { display:none; padding:0; }
-  .page.active { display:block !important; }
-  .card { border:1px solid #999; background:#fff; break-inside:avoid; page-break-inside:avoid; }
-  .ct, .ekpi-price, .ekpi-name, .cs, .li, .ekpi-group, .ekpi-unit, .ekpi-date,
-  .news-title, .news-summary, .news-source, .news-why { color:#000 !important; }
-  .chart-grid { display:block !important; }
-  .chart-grid .card { margin-bottom:12px; }
-  .cb > div[style] { height:260px !important; }
-  /* เต็มปีมี 12 label บนแกน x — ให้ card กว้างเต็มหน้าแทน 2 คอลัมน์ ไม่งั้น label ชนกัน */
-  .energy-grid { grid-template-columns:1fr !important; gap:10px !important; }
-  .energy-grid .card { break-inside:avoid; page-break-inside:avoid; max-width:100%; }
-  .energy-chart-box { height:220px !important; }
-  canvas { max-width:100% !important; }
-  .skeleton { display:none !important; }
-  a { color:#000 !important; text-decoration:none !important; }
-}
 </style>
 </head>
 <body>
 
 <div id="topbar">
-  <div class="brand">Macro<span class="patch">v5.2g</span></div>
+  <div class="brand">Macro<span class="patch">v5.3</span></div>
   <div class="topbar-right">
     <span class="sdot" id="sdot"></span>
     <span id="stxt">loading…</span>
     <button class="btn" onclick="loadData()">↻</button>
-    <button class="btn" onclick="window.print()">🖨 Print</button>
     <div style="position:relative">
       <button class="btn" id="opt-btn" onclick="toggleOptions()">⚙ Options</button>
       <div id="opt-panel" style="display:none;position:absolute;right:0;top:calc(100% + 6px);background:var(--bg2);border:1px solid var(--border2);border-radius:4px;padding:14px 16px;min-width:220px;z-index:50;display:none;flex-direction:column;gap:12px;">
@@ -246,7 +222,10 @@ input[type=range] { width:80px; accent-color:var(--blue); }
 <div id="page-th-energy" class="page">
   <div class="page-head" style="margin-bottom:14px;display:flex;justify-content:space-between;align-items:center">
     <span style="font-size:0.78em;color:var(--text2);text-transform:uppercase;letter-spacing:0.06em">TH Energy — ราคาพลังงานไทย</span>
-    <button class="btn" onclick="openStructureModal()">ℹ โครงสร้างราคา</button>
+    <div class="page-actions">
+      <button class="btn" id="energy-export-btn" onclick="exportEnergyPDF()">⬇ Export PDF</button>
+      <button class="btn" onclick="openStructureModal()">ℹ โครงสร้างราคา</button>
+    </div>
   </div>
   <!-- Shared legend -->
   <div style="display:flex;gap:16px;align-items:center;margin-bottom:10px;font-size:0.8em" id="energy-shared-legend">
@@ -1755,13 +1734,10 @@ window.setGlobalPeriod = function(pageId, period, btn) {
   saveConfig();
 };
 
-// ── Print ──────────────────────────────────────────
-// Chart.js เก็บ canvas width เป็น inline px ตาม container ตอน render บนจอ
-// พอสั่ง print ขนาดหน้า A4 แคบกว่า container เดิม ต้อง resize ให้ chart คำนวณใหม่
-// ไม่งั้นกราฟจะยืด/ตกขอบกระดาษ
-// ส่วนกราฟ TH Energy ปกติ zoom แสดงแค่ ~6 เดือนรอบ ๆ วันล่าสุด — ตอน print ขยาย
-// เป็นเต็มปี (Jan–Dec) ให้เห็นภาพรวมทั้งปีแทน แล้วค่อยคืนค่า zoom เดิมหลังพิมพ์
-function expandEnergyChartsForPrint() {
+// ── TH Energy: Export PDF ────────────────────────────
+// กราฟ TH Energy ปกติ zoom แสดงแค่ ~6 เดือนรอบ ๆ วันล่าสุด — ตอน export ขยาย
+// เป็นเต็มปี (Jan–Dec) ให้เห็นภาพรวมทั้งปีแทน แล้วค่อยคืนค่า zoom เดิมหลังจบ
+function expandEnergyChartsForExport() {
   Object.values(energyCharts).forEach(c => {
     if (!c.$zoomRange) return;
     c.options.scales.x.min = 0;
@@ -1769,7 +1745,7 @@ function expandEnergyChartsForPrint() {
     c.update('none');
   });
 }
-function restoreEnergyChartsZoom() {
+function restoreEnergyChartsZoomAfterExport() {
   Object.values(energyCharts).forEach(c => {
     if (!c.$zoomRange) return;
     c.options.scales.x.min = c.$zoomRange.min;
@@ -1777,18 +1753,59 @@ function restoreEnergyChartsZoom() {
     c.update('none');
   });
 }
-function resizeAllCharts() {
-  Object.values(charts).forEach(c => c.resize());
+function resizeEnergyCharts() {
   Object.values(energyCharts).forEach(c => c.resize());
 }
-window.addEventListener('beforeprint', () => { expandEnergyChartsForPrint(); resizeAllCharts(); });
-window.addEventListener('afterprint', () => { restoreEnergyChartsZoom(); resizeAllCharts(); });
-if (window.matchMedia) {
-  window.matchMedia('print').addEventListener('change', mql => {
-    if (mql.matches) { expandEnergyChartsForPrint(); resizeAllCharts(); }
-    else { restoreEnergyChartsZoom(); resizeAllCharts(); }
-  });
-}
+
+window.exportEnergyPDF = async function() {
+  const btn = document.getElementById('energy-export-btn');
+  const boxes = document.getElementById('energy-boxes');
+  const target = document.getElementById('page-th-energy');
+  if (!boxes || !target || !Object.keys(SERIES).length) { alert('ข้อมูลยังโหลดไม่เสร็จ ลองใหม่อีกครั้ง'); return; }
+  if (typeof html2canvas === 'undefined' || !window.jspdf) { alert('โหลด PDF library ไม่สำเร็จ ลอง refresh หน้า'); return; }
+
+  const originalLabel = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'กำลังสร้าง PDF…';
+
+  try {
+    // ขยาย layout เป็น 1 คอลัมน์ + กราฟเต็มปี ให้ label ไม่ชนกันตอน export
+    boxes.classList.add('pdf-export');
+    expandEnergyChartsForExport();
+    resizeEnergyCharts();
+    await new Promise(r => setTimeout(r, 350)); // รอ layout + chart วาดใหม่
+
+    const canvas = await html2canvas(target, { backgroundColor: getComputedStyle(document.documentElement).getPropertyValue('--bg2').trim() || '#ffffff', scale: 2 });
+
+    const { jsPDF } = window.jspdf;
+    const pdf = new jsPDF('p', 'mm', 'a4');
+    const pageW = pdf.internal.pageSize.getWidth();
+    const pageH = pdf.internal.pageSize.getHeight();
+    const imgW = pageW;
+    const imgH = canvas.height * imgW / canvas.width;
+    const imgData = canvas.toDataURL('image/png');
+
+    let heightLeft = imgH, position = 0;
+    pdf.addImage(imgData, 'PNG', 0, position, imgW, imgH);
+    heightLeft -= pageH;
+    while (heightLeft > 0) {
+      position -= pageH;
+      pdf.addPage();
+      pdf.addImage(imgData, 'PNG', 0, position, imgW, imgH);
+      heightLeft -= pageH;
+    }
+    pdf.save(`th-energy-${new Date().toISOString().slice(0,10)}.pdf`);
+  } catch (e) {
+    console.error(e);
+    alert('สร้าง PDF ไม่สำเร็จ: ' + e.message);
+  } finally {
+    boxes.classList.remove('pdf-export');
+    restoreEnergyChartsZoomAfterExport();
+    resizeEnergyCharts();
+    btn.disabled = false;
+    btn.textContent = originalLabel;
+  }
+};
 
 // รอให้ Firebase SDK โหลดเสร็จก่อน init
 if (document.readyState === 'loading') {

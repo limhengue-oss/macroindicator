@@ -1,6 +1,24 @@
 # Changelog
 
-## v5.2g — 2026-07-07
+## v5.3 — 2026-07-07
+
+### index.html
+
+- **เอา print feature ออก** — ลบปุ่ม Print, `@media print` CSS ทั้งหมด, และ
+  event listener ที่เกี่ยวกับ `beforeprint`/`afterprint`/`matchMedia('print')`
+  (เดิมทำใน v5.2d–v5.2g)
+- **เพิ่ม "Export PDF" เฉพาะหน้า TH Energy** — ปุ่มใหม่ `⬇ Export PDF` ที่หัวหน้า
+  TH Energy กดแล้วสร้าง PDF ของหน้านั้นทั้งหน้าให้ดาวน์โหลดทันที
+  - ใช้ `html2canvas` (แคปหน้าเป็นภาพ) + `jsPDF` (ประกอบเป็น PDF หลายหน้าตาม
+    ความสูง) โหลดผ่าน CDN
+  - ก่อน export จะขยาย layout เป็น 1 คอลัมน์ + ขยายกราฟเป็นเต็มปี (Jan–Dec)
+    ชั่วคราว (ผ่าน class `pdf-export` และ `expandEnergyChartsForExport()`)
+    เพื่อให้ label 12 เดือนไม่ชนกันในไฟล์ที่ได้ แล้วคืนค่า layout/zoom กลับ
+    หลัง export เสร็จ (สำเร็จหรือ error ก็คืนค่าเสมอ ผ่าน `finally`)
+  - ไฟล์ตั้งชื่อ `th-energy-YYYY-MM-DD.pdf`
+  - ปุ่มจะ disable + เปลี่ยนข้อความเป็น "กำลังสร้าง PDF…" ระหว่างประมวลผล
+
+## v5.2g — 2026-07-07 (superseded by v5.3 — print feature removed)
 
 ### index.html
 
