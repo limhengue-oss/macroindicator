@@ -1,5 +1,22 @@
 # Changelog
 
+## v5.2e — 2026-07-07
+
+### index.html
+
+- **แก้กราฟตกขอบตอน print (โดยเฉพาะหน้า TH Energy)** — สาเหตุคือ Chart.js
+  จำ canvas width เป็นค่า px คงที่จากตอน render บนจอ (ซึ่งกว้างกว่าหน้ากระดาษ
+  A4) พอสั่งพิมพ์ canvas เลยยืด/ล้นออกนอกขอบกระดาษ
+  - เพิ่ม `resizeAllCharts()` เรียก `chart.resize()` ทุก instance (ทั้ง
+    `charts` และ `energyCharts`) ตอน `beforeprint`/`afterprint` และตอนออกจาก
+    print preview (`matchMedia('print')` change event) เพื่อให้ Chart.js
+    คำนวณขนาดใหม่ตามความกว้างหน้ากระดาษจริง
+  - เพิ่ม `layout.padding` (right:6, left:2) ในทุก chart config กันเส้นข้อมูล
+    ชนขอบ canvas พอดี
+  - เพิ่ม CSS สำรอง `canvas { max-width:100% !important }` และ
+    `.energy-grid .card { break-inside:avoid; max-width:100% }` กันการล้น/ตัด
+    หน้ากระดาษกลาง card
+
 ## v5.2d — 2026-07-07
 
 ### index.html

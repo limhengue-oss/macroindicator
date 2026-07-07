@@ -1,3 +1,4 @@
+<!-- patch v5.2e: fix chart overflow on print (resize charts on beforeprint, add layout padding, clamp canvas width) -->
 <!-- patch v5.2d: add print support (@media print + Print button) -->
 <!-- patch v5.2c: fix MA/YoY/MoM period-cut order, QTD timezone off-by-one, norm/cumret div-by-zero, remove dead setFont code -->
 <!DOCTYPE html>
@@ -168,7 +169,9 @@ input[type=range] { width:80px; accent-color:var(--blue); }
   .chart-grid { display:block !important; }
   .chart-grid .card { margin-bottom:12px; }
   .cb > div[style] { height:260px !important; }
-  .energy-grid { grid-template-columns:1fr 1fr !important; }
+  .energy-grid { grid-template-columns:1fr 1fr !important; gap:10px !important; }
+  .energy-grid .card { break-inside:avoid; page-break-inside:avoid; max-width:100%; }
+  canvas { max-width:100% !important; }
   .skeleton { display:none !important; }
   a { color:#000 !important; text-decoration:none !important; }
 }
@@ -177,7 +180,7 @@ input[type=range] { width:80px; accent-color:var(--blue); }
 <body>
 
 <div id="topbar">
-  <div class="brand">Macro<span class="patch">v5.2d</span></div>
+  <div class="brand">Macro<span class="patch">v5.2e</span></div>
   <div class="topbar-right">
     <span class="sdot" id="sdot"></span>
     <span id="stxt">loading…</span>
@@ -967,6 +970,7 @@ async function renderEnergyPage() {
       },
       options: {
         responsive:true, maintainAspectRatio:false, animation:false,
+        layout:{ padding:{ right:6, left:2 } },
         interaction:{mode:'index',intersect:false},
         plugins:{
           legend:{display:false},
@@ -1495,6 +1499,7 @@ function drawChart(page,chart) {
     type:'line', data:{labels:commonLabels,datasets},
     options:{
       responsive:true, maintainAspectRatio:false, animation:false,
+      layout:{ padding:{ right:6, left:2 } },
       interaction:{mode:'index',intersect:false},
       plugins:{
         legend:{display:false},
@@ -1744,6 +1749,20 @@ window.setGlobalPeriod = function(pageId, period, btn) {
   }
   saveConfig();
 };
+
+// ── Print ──────────────────────────────────────────
+// Chart.js เก็บ canvas width เป็น inline px ตาม container ตอน render บนจอ
+// พอสั่ง print ขนาดหน้า A4 แคบกว่า container เดิม ต้อง resize ให้ chart คำนวณใหม่
+// ไม่งั้นกราฟจะยืด/ตกขอบกระดาษ
+function resizeAllCharts() {
+  Object.values(charts).forEach(c => c.resize());
+  Object.values(energyCharts).forEach(c => c.resize());
+}
+window.addEventListener('beforeprint', resizeAllCharts);
+window.addEventListener('afterprint', resizeAllCharts);
+if (window.matchMedia) {
+  window.matchMedia('print').addEventListener('change', mql => { if (!mql.matches) resizeAllCharts(); });
+}
 
 // รอให้ Firebase SDK โหลดเสร็จก่อน init
 if (document.readyState === 'loading') {
