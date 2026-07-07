@@ -1,3 +1,4 @@
+<!-- patch v5.2f: TH Energy print shows full year (Jan-Dec) instead of zoomed ~6mo window -->
 <!-- patch v5.2e: fix chart overflow on print (resize charts on beforeprint, add layout padding, clamp canvas width) -->
 <!-- patch v5.2d: add print support (@media print + Print button) -->
 <!-- patch v5.2c: fix MA/YoY/MoM period-cut order, QTD timezone off-by-one, norm/cumret div-by-zero, remove dead setFont code -->
@@ -180,7 +181,7 @@ input[type=range] { width:80px; accent-color:var(--blue); }
 <body>
 
 <div id="topbar">
-  <div class="brand">Macro<span class="patch">v5.2e</span></div>
+  <div class="brand">Macro<span class="patch">v5.2f</span></div>
   <div class="topbar-right">
     <span class="sdot" id="sdot"></span>
     <span id="stxt">loading…</span>
@@ -1003,6 +1004,7 @@ async function renderEnergyPage() {
         }
       }
     });
+    energyCharts[canvasId].$zoomRange = { min: zoomMinIdx, max: zoomMaxIdx };
   }
 }
 
@@ -1754,14 +1756,35 @@ window.setGlobalPeriod = function(pageId, period, btn) {
 // Chart.js เก็บ canvas width เป็น inline px ตาม container ตอน render บนจอ
 // พอสั่ง print ขนาดหน้า A4 แคบกว่า container เดิม ต้อง resize ให้ chart คำนวณใหม่
 // ไม่งั้นกราฟจะยืด/ตกขอบกระดาษ
+// ส่วนกราฟ TH Energy ปกติ zoom แสดงแค่ ~6 เดือนรอบ ๆ วันล่าสุด — ตอน print ขยาย
+// เป็นเต็มปี (Jan–Dec) ให้เห็นภาพรวมทั้งปีแทน แล้วค่อยคืนค่า zoom เดิมหลังพิมพ์
+function expandEnergyChartsForPrint() {
+  Object.values(energyCharts).forEach(c => {
+    if (!c.$zoomRange) return;
+    c.options.scales.x.min = 0;
+    c.options.scales.x.max = c.data.labels.length - 1;
+    c.update('none');
+  });
+}
+function restoreEnergyChartsZoom() {
+  Object.values(energyCharts).forEach(c => {
+    if (!c.$zoomRange) return;
+    c.options.scales.x.min = c.$zoomRange.min;
+    c.options.scales.x.max = c.$zoomRange.max;
+    c.update('none');
+  });
+}
 function resizeAllCharts() {
   Object.values(charts).forEach(c => c.resize());
   Object.values(energyCharts).forEach(c => c.resize());
 }
-window.addEventListener('beforeprint', resizeAllCharts);
-window.addEventListener('afterprint', resizeAllCharts);
+window.addEventListener('beforeprint', () => { expandEnergyChartsForPrint(); resizeAllCharts(); });
+window.addEventListener('afterprint', () => { restoreEnergyChartsZoom(); resizeAllCharts(); });
 if (window.matchMedia) {
-  window.matchMedia('print').addEventListener('change', mql => { if (!mql.matches) resizeAllCharts(); });
+  window.matchMedia('print').addEventListener('change', mql => {
+    if (mql.matches) { expandEnergyChartsForPrint(); resizeAllCharts(); }
+    else { restoreEnergyChartsZoom(); resizeAllCharts(); }
+  });
 }
 
 // รอให้ Firebase SDK โหลดเสร็จก่อน init

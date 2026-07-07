@@ -1,5 +1,18 @@
 # Changelog
 
+## v5.2f — 2026-07-07
+
+### index.html
+
+- **TH Energy print แสดงแค่ ~6 เดือนรอบวันล่าสุด ไม่เห็นข้อมูลถึงสิ้นปี** —
+  ปกติกราฟ TH Energy zoom เข้าเฉพาะช่วง latest month ±4/+2 เดือนเพื่อโฟกัสข้อมูล
+  ล่าสุดตอนใช้งานบนจอ แต่พอ print ผู้ใช้อยากเห็นภาพรวมทั้งปี (Jan–Dec)
+  - เก็บ zoom range เดิมไว้ที่ `chart.$zoomRange` ตอนสร้างกราฟ
+  - เพิ่ม `expandEnergyChartsForPrint()` / `restoreEnergyChartsZoom()` ขยาย
+    แกน x เป็น index เต็มปี (`0` ถึง `labels.length-1`) ตอนเข้าสู่ print
+    (`beforeprint` + `matchMedia('print')` change) แล้วคืนค่า zoom เดิม
+    หลังพิมพ์เสร็จ (`afterprint`)
+
 ## v5.2e — 2026-07-07
 
 ### index.html
