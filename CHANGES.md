@@ -1,5 +1,33 @@
 # Changelog
 
+## v5.5.4 — 2026-07-07
+
+### index.html
+
+- **Cum%/base 100 (norm) คำนวณผิด** — เป็น regression จากตอนแก้ MA/YoY/MoM ใน
+  v5.2c: ตอนนั้นสลับลำดับเป็น "apply function ก่อน cut period" เพื่อให้
+  MA20/50 และ YoY/MoM มีข้อมูลย้อนหลังพอ แต่ลืมว่า `norm`/`cumret` ต้องการ
+  base เป็น**จุดแรกของช่วงที่เลือกดู** ไม่ใช่จุดแรกสุดของประวัติทั้งหมด — ผลคือ
+  เลือกดู period สั้น ๆ (เช่น 3M) แล้ว Cum% กลับเทียบกับราคาเมื่อหลายปีก่อน
+  (จุดเริ่มต้นของ full series) แทนที่จะเทียบกับราคาต้นช่วง 3M ทำให้ตัวเลข % ที่
+  แสดงผิดเพี้ยนไปมาก
+  **แก้:** แยก logic ตาม fn — `norm`/`cumret` ยังคง cut ก่อนแล้วค่อย apply
+  (base = จุดแรกของช่วงที่เลือก) ส่วน `ma20`/`ma50`/`yoy`/`mom` ยังคง apply
+  ก่อนแล้วค่อย cut เหมือนเดิม (ต้องการ lookback ข้ามช่วง)
+
+### push_meta_only.R
+
+- **Metadata popup (ปุ่ม ℹ) แสดงแค่ "Updated" ไม่มี Full name/Unit/Source ฯลฯ**
+  สำหรับ series กลุ่ม EPPO — สาเหตุคือ `CATALOG` ใน `push_meta_only.R` (ที่ดึง
+  metadata จาก Yahoo/FRED แล้ว patch เข้า Firestore) **ไม่เคยมี EPPO_* อยู่เลย**
+  ทำให้ field `meta` ของ series พวกนี้ไม่เคยถูกเขียนใน Firestore (เห็นแค่
+  `updated` เพราะเป็นคนละ field ที่ทุกสคริปต์ fetch เขียนอยู่แล้ว)
+  **แก้:** เพิ่ม `EPPO_PRODUCTS` + `STATIC_CATALOG` — hardcode metadata
+  (fullName, unit, source="EPPO (old.eppo.go.th)") ให้ทุก EPPO series (ทั้ง
+  field หลักและ Oil Fund ของทั้ง 9 ผลิตภัณฑ์ใน `EPPO_ORDER`) แล้ว patch เข้า
+  Firestore ต่อจาก CATALOG เดิม — ต้อง trigger workflow "Push Series Metadata"
+  ใหม่ (เป็น `workflow_dispatch` ต้องกดรันเอง) เพื่อให้ข้อมูลจริงอัพเดท
+
 ## v5.5.3 — 2026-07-07
 
 ### fetch_eppo.R

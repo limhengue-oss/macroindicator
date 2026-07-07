@@ -168,6 +168,40 @@ CATALOG <- tribble(
   "EUCPI",        "fred",  "CP0000EZ17M086NEST"
 )
 
+# ── EPPO (ไม่มี API ภายนอก — hardcode metadata เอง) ──────────────
+# base/field ต้องตรงกับ EPPO_ORDER + eppoDocId() ใน index.html และ
+# fetch_eppo.R ไม่งั้น doc id จะไม่ตรงกับของจริงใน Firestore
+make_eppo_doc_id <- function(base, field) {
+  p <- toupper(gsub("^_|_$", "", gsub("_+", "_", gsub("[^A-Za-z0-9]+", "_", base))))
+  paste0("EPPO_", p, "_", field)
+}
+
+EPPO_PRODUCTS <- tribble(
+  ~base,             ~label,         ~unit,       ~field,
+  "DIESEL",          "Diesel",       "บาท/ลิตร",  "RETAIL",
+  "GASOHOL 95",      "Gasohol 95",   "บาท/ลิตร",  "RETAIL",
+  "GASOHOL 91",      "Gasohol 91",   "บาท/ลิตร",  "RETAIL",
+  "GASOHOL95 E20",   "Gasohol E20",  "บาท/ลิตร",  "RETAIL",
+  "GASOHOL95 E85",   "Gasohol E85",  "บาท/ลิตร",  "RETAIL",
+  "ULG 95",          "ULG 95",       "บาท/ลิตร",  "RETAIL",
+  "LPG",             "LPG",          "บาท/กก.",   "RETAIL",
+  "FO 1500",         "FO 1500",      "บาท/ลิตร",  "WHOLESALE",
+  "FO 600",          "FO 600",       "บาท/ลิตร",  "WHOLESALE",
+)
+
+EPPO_SOURCE <- "EPPO (old.eppo.go.th)"
+STATIC_CATALOG <- bind_rows(lapply(seq_len(nrow(EPPO_PRODUCTS)), function(i) {
+  p <- EPPO_PRODUCTS[i, ]
+  bind_rows(
+    tibble(doc_id = make_eppo_doc_id(p$base, p$field),
+           fullName = sprintf("EPPO %s — %s", p$label, tolower(p$field)),
+           unit = p$unit, source = EPPO_SOURCE),
+    tibble(doc_id = make_eppo_doc_id(p$base, "OIL_FUND"),
+           fullName = sprintf("EPPO %s — Oil Fund", p$label),
+           unit = "บาท/ลิตร", source = EPPO_SOURCE)
+  )
+}))
+
 # ── Main ──────────────────────────────────────────────────────────
 message("── Authenticating...")
 token <- get_token(sa)
@@ -190,4 +224,23 @@ for (i in seq_len(nrow(CATALOG))) {
   Sys.sleep(0.15)
 }
 
-message(sprintf("\n✓ Done — %d/%d series updated", ok, nrow(CATALOG)))
+message(sprintf("── EPPO static metadata (%d series)...", nrow(STATIC_CATALOG)))
+for (i in seq_len(nrow(STATIC_CATALOG))) {
+  row <- STATIC_CATALOG[i, ]
+  message(sprintf("  [%d/%d] %s...", i, nrow(STATIC_CATALOG), row$doc_id))
+
+  meta <- list(fullName = row$fullName, currency = "THB", unit = row$unit,
+               freq = "Daily", source = row$source)
+  status <- patch_meta(token, row$doc_id, meta)
+
+  if (status < 300) {
+    message(sprintf("    ✓ %s | %s | %s", meta$fullName, meta$unit, meta$source))
+    ok <- ok + 1
+  } else {
+    message(sprintf("    ✗ HTTP %d", status))
+  }
+  Sys.sleep(0.15)
+}
+
+total <- nrow(CATALOG) + nrow(STATIC_CATALOG)
+message(sprintf("\n✓ Done — %d/%d series updated", ok, total))
