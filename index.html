@@ -1,3 +1,4 @@
+<!-- patch v5.2g: TH Energy print — 1-column layout + taller chart so 12-month labels don't overlap and don't look shrunk -->
 <!-- patch v5.2f: TH Energy print shows full year (Jan-Dec) instead of zoomed ~6mo window -->
 <!-- patch v5.2e: fix chart overflow on print (resize charts on beforeprint, add layout padding, clamp canvas width) -->
 <!-- patch v5.2d: add print support (@media print + Print button) -->
@@ -170,8 +171,10 @@ input[type=range] { width:80px; accent-color:var(--blue); }
   .chart-grid { display:block !important; }
   .chart-grid .card { margin-bottom:12px; }
   .cb > div[style] { height:260px !important; }
-  .energy-grid { grid-template-columns:1fr 1fr !important; gap:10px !important; }
+  /* เต็มปีมี 12 label บนแกน x — ให้ card กว้างเต็มหน้าแทน 2 คอลัมน์ ไม่งั้น label ชนกัน */
+  .energy-grid { grid-template-columns:1fr !important; gap:10px !important; }
   .energy-grid .card { break-inside:avoid; page-break-inside:avoid; max-width:100%; }
+  .energy-chart-box { height:220px !important; }
   canvas { max-width:100% !important; }
   .skeleton { display:none !important; }
   a { color:#000 !important; text-decoration:none !important; }
@@ -181,7 +184,7 @@ input[type=range] { width:80px; accent-color:var(--blue); }
 <body>
 
 <div id="topbar">
-  <div class="brand">Macro<span class="patch">v5.2f</span></div>
+  <div class="brand">Macro<span class="patch">v5.2g</span></div>
   <div class="topbar-right">
     <span class="sdot" id="sdot"></span>
     <span id="stxt">loading…</span>
@@ -905,7 +908,7 @@ async function renderEnergyPage() {
       </div>
       <div style="padding:6px 12px 10px">
 
-        <div style="position:relative;height:140px"><canvas id="${canvasId}"></canvas></div>
+        <div class="energy-chart-box" style="position:relative;height:140px"><canvas id="${canvasId}"></canvas></div>
       </div>
       ${breakdownHtml}`;
 
