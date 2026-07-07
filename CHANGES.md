@@ -1,5 +1,31 @@
 # Changelog
 
+## v5.7 — 2026-07-07
+
+### index.html
+
+- **Export PDF จำกัดเหลือแค่ Diesel + Gasohol 95** — เพิ่ม `PDF_EXPORT_BASES`
+  และ `box.dataset.base` (ตั้งตอนสร้างการ์ดใน `renderEnergyPage()`) เพื่อระบุ
+  ว่าการ์ดไหนคือสินค้าอะไร ตอน export จะซ่อนการ์ดอื่นที่ไม่อยู่ใน list ไว้
+  ชั่วคราว (`display:none`) แล้วคืนกลับหลัง export เสร็จ
+- **บังคับเปิด "โครงสร้างราคา" (breakdown)** ของทั้ง 2 การ์ดก่อน capture — เรียก
+  `toggleBreakdown()` ให้เปิดถ้ายังปิดอยู่ แล้ว toggle ปิดกลับหลัง export
+  (ถ้าตอนกดปุ่มมันเปิดอยู่แล้วจะไม่ไปยุ่งกับมัน)
+- **Layout เปลี่ยนเป็น A4 แนวนอน (landscape)** — `new jsPDF('l','mm','a4')`
+  แทน `'p'` เดิม, `#energy-boxes.pdf-export` เปลี่ยนจาก 1 คอลัมน์เป็น 2
+  คอลัมน์ (`grid-template-columns:1fr 1fr`) ให้ Diesel กับ Gasohol 95 อยู่
+  คู่กันในหน้าเดียว
+
+## v5.6 — 2026-07-07
+
+### index.html
+
+- **3M/6M: ไม่แสดง label เดือนที่ข้อมูลเริ่มหลังวันที่ 4** — ถ้าวันแรกที่มี
+  ข้อมูลของเดือนนั้น (`firstDayIdx`) เป็นวันที่ > 4 (เช่น series เริ่มมีข้อมูล
+  กลางเดือน) จะไม่เพิ่มเข้า major set เลย (ไม่มีทั้ง grid เข้มและ label)
+- **6M: format label เอาปีออก** — เดิมแสดง `1-Jan-2026` ตอนนี้แสดง `1-Jan`
+  เหมือน 3M
+
 ## v5.5.4 — 2026-07-07
 
 ### index.html
