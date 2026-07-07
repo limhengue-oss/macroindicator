@@ -1,8 +1,19 @@
-# Changelog — v5.2c bugfix pass
+# Changelog
 
-วันที่: 2026-07-05
+## v5.2d — 2026-07-07
 
-## index.html
+### index.html
+
+- **เพิ่มการรองรับ print** — เพิ่ม `@media print` block ซ่อน nav, ปุ่ม action
+  ทั้งหมด (edit/delete/info/timeframe/options), modal และ skeleton ตอนพิมพ์
+  เหลือแต่หน้าที่กำลัง active, บังคับพื้นหลังขาว/ตัวหนังสือดำ, กันไม่ให้ card
+  ถูกตัดกลางหน้า (`break-inside:avoid`), ขยายความสูงกราฟให้เห็นชัดตอนพิมพ์
+  และเพิ่มปุ่ม **🖨 Print** ใน topbar ข้าง ๆ ปุ่ม refresh เพื่อเรียก
+  `window.print()` ตรง ๆ
+
+## v5.2c bugfix pass — 2026-07-05
+
+### index.html
 
 1. **MA20/MA50/YoY/MoM ขาดข้อมูลช่วงต้นเมื่อเลือก period สั้น**
    `drawChart()` เดิม cut ข้อมูลตาม period ก่อนแล้วค่อย apply function ทำให้ moving
@@ -25,7 +36,7 @@
    `forEach` return ทันทีโดยไม่ทำอะไร
    **แก้:** ลบ block นี้ทิ้ง (ยังไม่มี logic ที่ใช้งานจริง)
 
-## fetch_eppo.R / fetch_and_push.R
+### fetch_eppo.R / fetch_and_push.R
 
 5. **ไม่มีการ dedup/sort จุดข้อมูลก่อน push ขึ้น Firestore**
    `append_series()` / `push_series()` เดิมต่อ `existing_points` กับ `new_points`

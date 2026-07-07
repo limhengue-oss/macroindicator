@@ -1,3 +1,4 @@
+<!-- patch v5.2d: add print support (@media print + Print button) -->
 <!-- patch v5.2c: fix MA/YoY/MoM period-cut order, QTD timezone off-by-one, norm/cumret div-by-zero, remove dead setFont code -->
 <!DOCTYPE html>
 <html lang="en">
@@ -15,7 +16,7 @@
 
 /* ── Theme variables ── */
 :root {
-  --bg:#000000; --bg2:#0e0e10; --bg3:#1c1c1e; --bg4:#2c2c2e;
+  --bg:#000000; --bg2:#0e0e10; --bg3:#1d1e1c; --bg4:#2c2c2e;
   --chart-h: 180px;
   --border:#2c2c2e; --border2:#3a3a3c;
   --text:#f5f5f7; --text2:#98989d; --text3:#636366;
@@ -150,16 +151,38 @@ input[type=range] { width:80px; accent-color:var(--blue); }
 .add-series-btn:hover{border-color:var(--blue)}
 .hint { font-size:0.68em; color:var(--text3); margin-top:3px; }
 .modal-actions { display:flex; gap:7px; justify-content:flex-end; margin-top:16px; }
+
+/* ── Print ── */
+@media print {
+  @page { margin: 12mm; }
+  html, body { background:#fff !important; color:#000 !important; }
+  #nav, .btn, .ch-actions, .tfs, .page-actions, .icon-btn,
+  #opt-panel, .modal-bg, #meta-popup, #structure-modal,
+  .nb-add, #sdot, #stxt { display:none !important; }
+  #topbar { border-bottom:1px solid #000; position:static; }
+  .page { display:none; padding:0; }
+  .page.active { display:block !important; }
+  .card { border:1px solid #999; background:#fff; break-inside:avoid; page-break-inside:avoid; }
+  .ct, .ekpi-price, .ekpi-name, .cs, .li, .ekpi-group, .ekpi-unit, .ekpi-date,
+  .news-title, .news-summary, .news-source, .news-why { color:#000 !important; }
+  .chart-grid { display:block !important; }
+  .chart-grid .card { margin-bottom:12px; }
+  .cb > div[style] { height:260px !important; }
+  .energy-grid { grid-template-columns:1fr 1fr !important; }
+  .skeleton { display:none !important; }
+  a { color:#000 !important; text-decoration:none !important; }
+}
 </style>
 </head>
 <body>
 
 <div id="topbar">
-  <div class="brand">Macro<span class="patch">v5.2c</span></div>
+  <div class="brand">Macro<span class="patch">v5.2d</span></div>
   <div class="topbar-right">
     <span class="sdot" id="sdot"></span>
     <span id="stxt">loading…</span>
     <button class="btn" onclick="loadData()">↻</button>
+    <button class="btn" onclick="window.print()">🖨 Print</button>
     <div style="position:relative">
       <button class="btn" id="opt-btn" onclick="toggleOptions()">⚙ Options</button>
       <div id="opt-panel" style="display:none;position:absolute;right:0;top:calc(100% + 6px);background:var(--bg2);border:1px solid var(--border2);border-radius:4px;padding:14px 16px;min-width:220px;z-index:50;display:none;flex-direction:column;gap:12px;">
