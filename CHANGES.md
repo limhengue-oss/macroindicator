@@ -1,5 +1,21 @@
 # Changelog
 
+## v5.7.1 — 2026-07-07
+
+### index.html
+
+- **Chart ตกขอบขวาบางหน้าจอ** — Chart.js คำนวณขนาด canvas ครั้งเดียวตอน
+  สร้างกราฟ (ตอน `renderEnergyPage()`/`drawChart()`) แล้วไม่มีอะไรบังคับให้
+  คำนวณใหม่ถ้า viewport เปลี่ยนขนาดหลังจากนั้น (ย่อ-ขยาย browser, หมุนจอ,
+  เปิดจากหน้าจอ/ความละเอียดอื่น) ทำให้ canvas ค้างความกว้างเดิมแล้วล้นออกนอก
+  การ์ด/หน้าจอ
+  - เพิ่ม `window.addEventListener('resize', ...)` (debounce 150ms) เรียก
+    `chart.resize()` ทั้ง `charts` (หน้า chart ทั่วไป) และ `energyCharts`
+    (TH Energy) ทุกครั้งที่ resize
+  - เพิ่ม CSS safeguard: `canvas { max-width:100% }` และ
+    `html { overflow-x:hidden }` กันไม่ให้ canvas หรือ layout ดันความกว้าง
+    ของทั้งหน้าเกิน viewport ไม่ว่าจอจะขนาดไหน
+
 ## v5.7 — 2026-07-07
 
 ### index.html

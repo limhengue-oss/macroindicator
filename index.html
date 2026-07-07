@@ -1,3 +1,4 @@
+<!-- patch v5.7.1: fix chart canvases overflowing/cut off at right edge on window resize — canvas max-width:100%, html overflow-x:hidden, resize listener recalculates chart.js canvas size -->
 <!-- patch v5.7: Export PDF now limited to Diesel + Gasohol 95 with breakdown expanded, laid out 2-column A4 landscape -->
 <!-- patch v5.6: 3M/6M x-axis skips month label if first data point of that month is after the 4th; 6M label format drops year, matches 3M "1-Jan" -->
 <!-- patch v5.5.4: fix Cum%/norm base using full-history first point instead of period-start point (regression from v5.2c fix); EPPO metadata now covered via push_meta_only.R static catalog -->
@@ -23,6 +24,8 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { overflow-x: hidden; }
+canvas { max-width: 100%; }
 
 /* ── Theme variables ── */
 :root {
@@ -169,7 +172,7 @@ input[type=range] { width:80px; accent-color:var(--blue); }
 <body>
 
 <div id="topbar">
-  <div class="brand">Macro<span class="patch">v5.7</span></div>
+  <div class="brand">Macro<span class="patch">v5.7.1</span></div>
   <div class="topbar-right">
     <span class="sdot" id="sdot"></span>
     <span id="stxt">loading…</span>
@@ -1815,6 +1818,18 @@ function restoreEnergyChartsZoomAfterExport() {
 function resizeEnergyCharts() {
   Object.values(energyCharts).forEach(c => c.resize());
 }
+
+// ── Responsive: บังคับ chart คำนวณขนาดใหม่ทุกครั้งที่หน้าจอ/หน้าต่าง resize ──
+// กัน canvas ค้างขนาดเดิมจากตอน render ครั้งแรกแล้วล้น/ตกขอบขวาเวลาย่อ-ขยาย
+// browser หรือเปิดจากหน้าจอขนาดอื่น
+let _resizeTimer = null;
+window.addEventListener('resize', () => {
+  clearTimeout(_resizeTimer);
+  _resizeTimer = setTimeout(() => {
+    Object.values(charts).forEach(c => c.resize());
+    resizeEnergyCharts();
+  }, 150);
+});
 
 // เฉพาะ product เหล่านี้ที่ export ลง PDF (base ต้องตรงกับ EPPO_ORDER)
 const PDF_EXPORT_BASES = ['DIESEL', 'GASOHOL 95'];
