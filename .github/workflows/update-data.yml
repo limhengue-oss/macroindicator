@@ -53,14 +53,28 @@ jobs:
         id: summary
         run: |
           SKIPPED=$(grep -E "skip ทั้งไฟล์|missing products" run.log || true)
+          CHANGES=$(grep -E "^PRICE_CHANGE:" run.log || true)
           {
             echo "skipped<<EOF"
             if [ -n "$SKIPPED" ]; then echo "$SKIPPED"; else echo "(none)"; fi
             echo "EOF"
+            echo "changes<<EOF"
+            if [ -n "$CHANGES" ]; then echo "$CHANGES"; else echo "(none)"; fi
+            echo "EOF"
           } >> "$GITHUB_OUTPUT"
+          if [ -n "$SKIPPED" ]; then
+            echo "has_skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_skip=false" >> "$GITHUB_OUTPUT"
+          fi
+          if [ -n "$CHANGES" ]; then
+            echo "has_change=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_change=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Send notification email
-        if: always()
+        if: always() && (steps.run.outcome != 'success' || steps.summary.outputs.has_skip == 'true' || steps.summary.outputs.has_change == 'true')
         uses: dawidd6/action-send-mail@v3
         with:
           server_address: smtp.gmail.com
@@ -73,9 +87,13 @@ jobs:
           body: |
             fetch_and_push.R / fetch_eppo.R run: ${{ steps.run.outcome }}
 
+            Price changes (DIESEL RETAIL / GASOHOL 95 RETAIL):
+            ${{ steps.summary.outputs.changes }}
+
             EPPO skipped files (missing products):
             ${{ steps.summary.outputs.skipped }}
 
+            Dashboard: https://limhengue-oss.github.io/macroindicator/
             Full run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
 
       - name: Fail job if run failed

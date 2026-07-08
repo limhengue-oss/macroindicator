@@ -42,7 +42,7 @@ sa <- fromJSON(sa_json)
 
 PRODUCT_TO_BASE <- list(
   "H-DIESEL"="DIESEL","H-DIESEL B7"="DIESEL","H-DIESEL  B7"="DIESEL",
-  "ULG95"="ULG 95","ULG 95"="ULG 95","ULG95R : UNL"="ULG 95",
+  "ULG95"="ULG 95","ULG 95"="ULG 95","ULG95R : UNL"="ULG 95","ULG"="ULG 95",
   "GASOHOL95 E10"="GASOHOL 95","GASOHOL 95"="GASOHOL 95","GASOHOL95"="GASOHOL 95",
   "GASOHOL91"="GASOHOL 91","GASOHOL 91"="GASOHOL 91",
   "GASOHOL95 E20"="GASOHOL95 E20","GASOHOL95 E85"="GASOHOL95 E85",
@@ -99,7 +99,9 @@ get_token <- function(sa) {
 }
 
 # upsert: GET existing → merge (new overwrite existing by date) → PATCH
-upsert_series <- function(token, doc_id, name, new_df) {
+# track_change: ถ้า TRUE จะเทียบค่าล่าสุดใน new_df กับค่าของวันก่อนหน้าที่มีอยู่เดิม
+# ใน Firestore แล้ว ถ้าต่างกันจะคืนค่ามาใน $change เพื่อเอาไป log/แจ้งเตือน
+upsert_series <- function(token, doc_id, name, new_df, track_change = FALSE) {
   url <- sprintf(
     "https://firestore.googleapis.com/v1/projects/%s/databases/(default)/documents/%s/%s",
     PROJECT_ID, COLLECTION, doc_id
@@ -118,6 +120,16 @@ upsert_series <- function(token, doc_id, name, new_df) {
       } else tibble(date=character(), value=numeric())
     } else tibble(date=character(), value=numeric())
   }, error=function(e) tibble(date=character(), value=numeric()))
+
+  change <- NULL
+  if (track_change && nrow(new_df) > 0) {
+    latest_date <- max(new_df$date)
+    latest_val  <- new_df$value[new_df$date == latest_date][1]
+    prior <- existing_df |> filter(date < latest_date) |> arrange(desc(date)) |> slice(1)
+    if (nrow(prior) == 1 && !is.na(prior$value) && prior$value != latest_val) {
+      change <- list(date=latest_date, old=prior$value, new=latest_val)
+    }
+  }
 
   # merge: new_df overwrite existing on same date
   merged <- bind_rows(
@@ -145,10 +157,10 @@ upsert_series <- function(token, doc_id, name, new_df) {
 
   if (resp_status(resp) >= 300) {
     warning(sprintf("  ✗ %s HTTP %d", doc_id, resp_status(resp)))
-    return(FALSE)
+    return(list(ok=FALSE, change=NULL))
   }
   message(sprintf("  ✓ %s (+%d pts upserted)", doc_id, nrow(new_df)))
-  TRUE
+  list(ok=TRUE, change=change)
 }
 
 # parse xlsx → df rows (shared by OFFO and EPPO)
@@ -290,6 +302,9 @@ download_and_parse <- function(pending, meta_products = NULL, strict = TRUE) {
   list(df=if (length(all_rows)>0) bind_rows(all_rows) else NULL, latest=latest)
 }
 
+# base product + field ที่อยากได้แจ้งเตือนทางเมลเมื่อราคาล่าสุดเปลี่ยนจากวันก่อนหน้า
+PRICE_ALERT <- list(DIESEL="RETAIL", `GASOHOL 95`="RETAIL")
+
 # push df to Firestore via upsert
 push_df <- function(token, df) {
   ok <- 0
@@ -302,7 +317,13 @@ push_df <- function(token, df) {
         filter(!is.na(value), is.finite(value)) |> distinct(date, .keep_all=TRUE) |> arrange(date)
       if (nrow(df_s) == 0) next
       doc_id <- make_doc_id(base, field)
-      if (upsert_series(token, doc_id, paste0("EPPO ", base, " — ", field), df_s)) ok <- ok+1
+      track  <- !is.null(PRICE_ALERT[[base]]) && identical(PRICE_ALERT[[base]], field)
+      res <- upsert_series(token, doc_id, paste0("EPPO ", base, " — ", field), df_s, track_change = track)
+      if (res$ok) ok <- ok+1
+      if (!is.null(res$change)) {
+        message(sprintf("PRICE_CHANGE: %s %s: %s -> %s (%s)",
+                        base, field, res$change$old, res$change$new, res$change$date))
+      }
       Sys.sleep(0.1)
     }
   }
