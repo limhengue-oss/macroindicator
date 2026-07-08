@@ -50,7 +50,7 @@ PRODUCT_TO_BASE <- list(
   "FO 1500 (2) 2%S"="FO 1500","FO 1500 2%S"="FO 1500",
   "FO 600 (1) 2%S"="FO 600","FO 600 2%S"="FO 600"
 )
-SKIP_PRODUCTS <- c("H-DIESEL B20","H-DIESEL 20")
+SKIP_PRODUCTS <- c("H-DIESEL B20","H-DIESEL 20","H-DIESEL B 20")
 
 make_doc_id <- function(base_product, field) {
   p <- base_product |> str_replace_all("[^A-Za-z0-9]+","_") |>
@@ -152,10 +152,11 @@ upsert_series <- function(token, doc_id, name, new_df) {
 }
 
 # parse xlsx → df rows (shared by OFFO and EPPO)
-# meta_products: base product ทั้งหมดที่ควรมีในไฟล์ (จาก meta/eppo_status) —
-# ใช้เช็คว่า parse ได้ครบไหม กัน EPPO เปลี่ยนชื่อ/ลำดับ/จำนวนแถว product แล้ว
-# ข้อมูลหายไปเงียบ ๆ โดยไม่มีใครสังเกต (all-or-nothing ต่อวัน ไม่ push บางส่วน)
-parse_xlsx <- function(tmp, web_date, meta_products = NULL) {
+# meta_products: base product ทั้งหมดที่เคยเจอ (จาก meta/eppo_status)
+# strict: EPPO (authoritative) ต้องมีครบ ไม่งั้น skip ทั้งไฟล์เหมือนเดิม
+#         OFFO (fast source) ไม่ต้องครบก็ได้ — บางวันปรับราคาเฉพาะบางผลิตภัณฑ์
+#         (เช่น ไม่รวม LPG/FO) จึง push เท่าที่มีในไฟล์ พร้อม warn เฉย ๆ
+parse_xlsx <- function(tmp, web_date, meta_products = NULL, strict = TRUE) {
   ws <- tryCatch(
     read_xlsx(tmp, col_names=FALSE, col_types="text", sheet="Oil Price Structure"),
     error=function(e) tryCatch(
@@ -189,14 +190,17 @@ parse_xlsx <- function(tmp, web_date, meta_products = NULL) {
   if (length(rows) == 0) return(NULL)
   df <- bind_rows(rows)
 
-  # เช็คว่า product ที่ resolve ได้ครบตาม meta_products ไหม — ถ้าขาด ไม่ push
-  # เลยทั้งไฟล์ (กันข้อมูลครึ่ง ๆ กลาง ๆ หลุดเข้า production ตอน format เปลี่ยน)
+  # เช็คว่า product ที่ resolve ได้ครบตาม meta_products ไหม
   if (!is.null(meta_products)) {
     missing <- setdiff(meta_products, unique(df$BASE_PRODUCT))
     if (length(missing) > 0) {
-      message(sprintf("  ✗ [%s] missing products: %s — skip ทั้งไฟล์",
+      if (strict) {
+        message(sprintf("  ✗ [%s] missing products: %s — skip ทั้งไฟล์",
+                        web_date, paste(missing, collapse=", ")))
+        return(NULL)
+      }
+      message(sprintf("  ⚠ [%s] products not in this file (partial update, ok): %s",
                       web_date, paste(missing, collapse=", ")))
-      return(NULL)
     }
   }
 
@@ -266,7 +270,7 @@ offo_extractor <- list(
 )
 
 # download pending → parse → df
-download_and_parse <- function(pending, meta_products = NULL) {
+download_and_parse <- function(pending, meta_products = NULL, strict = TRUE) {
   all_rows <- list()
   latest   <- NULL
   for (item in pending) {
@@ -275,7 +279,7 @@ download_and_parse <- function(pending, meta_products = NULL) {
     if (resp_status(resp) != 200) { message("  ✗ HTTP ", resp_status(resp)); next }
     tmp <- tempfile(fileext=".xlsx")
     writeBin(resp_body_raw(resp), tmp)
-    df <- parse_xlsx(tmp, item$date, meta_products)
+    df <- parse_xlsx(tmp, item$date, meta_products, strict = strict)
     unlink(tmp)
     if (is.null(df)) next
     all_rows <- c(all_rows, list(df))
@@ -351,7 +355,7 @@ message(sprintf("  %d new file(s) from OFFO", length(offo_pending)))
 
 offo_latest <- last_date
 if (length(offo_pending) > 0) {
-  result <- download_and_parse(offo_pending, meta_products)
+  result <- download_and_parse(offo_pending, meta_products, strict = FALSE)
   if (!is.null(result$df)) {
     ok <- push_df(token, result$df)
     message(sprintf("── OFFO pushed %d series", ok))

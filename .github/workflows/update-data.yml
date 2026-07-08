@@ -20,10 +20,13 @@ jobs:
           use-public-rspm: true
 
       - name: Install and run
+        id: run
+        continue-on-error: true
         env:
           FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
           GCP_SA_KEY:   ${{ secrets.GCP_SA_KEY }}
         run: |
+          set -o pipefail
           Rscript -e '
           lib <- "/home/runner/R-pkgs"
           dir.create(lib, showWarnings = FALSE)
@@ -43,4 +46,38 @@ jobs:
           .libPaths(c(lib, .libPaths()))
           source("fetch_and_push.R")
           source("fetch_eppo.R")
-          '
+          ' 2>&1 | tee run.log
+
+      - name: Summarize EPPO skips
+        if: always()
+        id: summary
+        run: |
+          SKIPPED=$(grep -E "skip ทั้งไฟล์|missing products" run.log || true)
+          {
+            echo "skipped<<EOF"
+            if [ -n "$SKIPPED" ]; then echo "$SKIPPED"; else echo "(none)"; fi
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Send notification email
+        if: always()
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          username: ${{ secrets.GMAIL_USER }}
+          password: ${{ secrets.GMAIL_APP_PASSWORD }}
+          from: ${{ secrets.GMAIL_USER }}
+          to: limhengue@gmail.com, wasinr@bot.or.th
+          subject: "[macroindicator] Update Data — ${{ steps.run.outcome == 'success' && 'SUCCESS' || 'FAILED' }}"
+          body: |
+            fetch_and_push.R / fetch_eppo.R run: ${{ steps.run.outcome }}
+
+            EPPO skipped files (missing products):
+            ${{ steps.summary.outputs.skipped }}
+
+            Full run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+      - name: Fail job if run failed
+        if: steps.run.outcome != 'success'
+        run: exit 1
