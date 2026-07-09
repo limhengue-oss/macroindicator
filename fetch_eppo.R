@@ -169,7 +169,11 @@ upsert_series <- function(token, doc_id, name, new_df, track_change = FALSE) {
     data    = list(arrayValue=list(values=pts))
   ))
 
-  resp <- request(url) |> req_method("PATCH") |>
+  # updateMask จำกัดเฉพาะ name/updated/data — กัน field "meta" (ตั้งโดย
+  # push_meta_only.R แยกต่างหาก) ไม่ให้ถูกลบทิ้งเวลา PATCH ทับทั้ง document
+  resp <- request(url) |>
+    req_url_query(`updateMask.fieldPaths`=c("name","updated","data"), .multi="explode") |>
+    req_method("PATCH") |>
     req_auth_bearer_token(token) |>
     req_body_json(body, auto_unbox=TRUE) |>
     req_error(is_error=\(r) FALSE) |> req_perform()
