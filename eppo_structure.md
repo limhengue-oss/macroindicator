@@ -70,19 +70,24 @@ VAT (MM) = 7% ของค่าการตลาด
 
 ## ตารางสรุป
 
-| ลำดับ | คำย่อ | ชื่อเต็ม (EN) | ความหมาย |
-|---|---|---|---|
-| 1 | EX-REFIN | Ex-Refinery Price | ราคา ณ โรงกลั่น |
-| 2 | EXCISE TAX | Excise Tax | ภาษีสรรพสามิต |
-| 3 | M. TAX | Municipal Tax | ภาษีมหาดไทย |
-| 4 | OIL FUND | Oil Fund | กองทุนน้ำมันเชื้อเพลิง |
-| 5 | CONSV. FUND | Energy Conservation Fund | กองทุนอนุรักษ์พลังงาน |
-| 6 | WHOLESALE (WS) | Wholesale Price | ราคาขายส่ง = (1)+(2)+(3)+(4)+(5) |
-| 7 | VAT (WS) | VAT on Wholesale Price | VAT ของราคาขายส่ง = 7% × (6) |
-| 8 | WS & VAT | Wholesale + VAT | (6) + (7) |
-| 9 | MARKETING MARGIN (MM) | Marketing Margin | ค่าการตลาด = RETAIL/1.07 − (6) |
-| 10 | VAT (MM) | VAT on Marketing Margin | VAT ของค่าการตลาด = 7% × (9) |
-| 11 | RETAIL | Retail Price | ราคาขายปลีกหน้าสถานีบริการ |
+| ลำดับ | คำย่อ | ชื่อเต็ม (EN) | ความหมาย | Display component (หน้า TH Energy) |
+|---|---|---|---|---|
+| 1 | EX-REFIN | Ex-Refinery Price | ราคา ณ โรงกลั่น | **ราคาหน้าโรงกลั่น** (บรรทัดแรก) |
+| 2 | EXCISE TAX | Excise Tax | ภาษีสรรพสามิต | **Tax + Cons. Fund** (รวมกับข้อ 3, 5) |
+| 3 | M. TAX | Municipal Tax | ภาษีมหาดไทย | **Tax + Cons. Fund** (รวมกับข้อ 2, 5) |
+| 4 | OIL FUND | Oil Fund | กองทุนน้ำมันเชื้อเพลิง | **Oil Fund** |
+| 5 | CONSV. FUND | Energy Conservation Fund | กองทุนอนุรักษ์พลังงาน | **Tax + Cons. Fund** (รวมกับข้อ 2, 3) |
+| 6 | WHOLESALE (WS) | Wholesale Price | ราคาขายส่ง = (1)+(2)+(3)+(4)+(5) | ไม่แสดงแยก (ค่ากลาง) — ยกเว้น FO 1500/FO 600 ใช้เป็น **Wholesale Price** บรรทัดสุดท้ายแทน RETAIL |
+| 7 | VAT (WS) | VAT on Wholesale Price | VAT ของราคาขายส่ง = 7% × (6) | **VAT** (รวมกับข้อ 10) |
+| 8 | WS & VAT | Wholesale + VAT | (6) + (7) | ไม่แสดง (ค่ากลาง) |
+| 9 | MARKETING MARGIN (MM) | Marketing Margin | ค่าการตลาด = RETAIL/1.07 − (6) | **Marketing Margin** |
+| 10 | VAT (MM) | VAT on Marketing Margin | VAT ของค่าการตลาด = 7% × (9) | **VAT** (รวมกับข้อ 7) |
+| 11 | RETAIL | Retail Price | ราคาขายปลีกหน้าสถานีบริการ | **Retail Price** (บรรทัดสุดท้าย — ยกเว้น FO 1500/FO 600 ที่ไม่มีราคาขายปลีก) |
+
+> หน้า TH Energy ในเว็บ ("โครงสร้างราคา" ใต้กราฟแต่ละสินค้า) ย่อ 11 field ข้างบน
+> เหลือ 6 บรรทัด: ราคาหน้าโรงกลั่น → Tax + Cons. Fund → Marketing Margin → VAT
+> → Oil Fund → Retail/Wholesale Price — field ที่เหลือ (WHOLESALE สำหรับสินค้า
+> ที่ไม่ใช่ FO, และ WS & VAT) เป็นค่ากลางที่ใช้คำนวณเท่านั้น ไม่แสดงในตาราง
 
 **สูตรโดยรวม**: ราคาขายปลีก (RETAIL) = ราคา ณ โรงกลั่น + ภาษีสรรพสามิต + ภาษีเทศบาล + กองทุนน้ำมัน + กองทุนอนุรักษ์พลังงาน + VAT ขายส่ง + ค่าการตลาด + VAT ค่าการตลาด
 
