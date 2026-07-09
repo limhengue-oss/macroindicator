@@ -1,5 +1,41 @@
 # Changelog
 
+## v5.9 — 2026-07-07
+
+### index.html
+
+- **Card visual refresh** — เพิ่ม `--card-bg`/`--card-shadow` (theme-aware, ทั้ง
+  dark และ light) แล้วให้ `.card` ใช้แทน `background:var(--bg2)` เดิม:
+  - พื้นหลังการ์ดเป็นสีฟ้าอ่อน ๆ (`#10192b` โทนมืดฟ้าเข้มใน dark theme,
+    `#eef6ff` ฟ้าอ่อนใน light theme) แทนสีเทาเรียบเดิม
+  - เพิ่ม `box-shadow` จาง ๆ ให้การ์ดดูลอยเด่นขึ้นจากพื้นหลัง
+  - เพิ่ม `border-radius` จาก 4px → 8px ให้ดูนุ่มนวลขึ้นรับกับเงา
+  - เพิ่ม gap ระหว่างการ์ด: `.energy-grid` 16px→22px, `.chart-grid` 10px→16px
+    ให้มีช่องไฟ/breathing room รอบขอบการ์ดมากขึ้น
+
+## v5.8 — 2026-07-07
+
+### index.html
+
+- **โครงสร้างราคาย่อจากทุก field เหลือ 4 component** — `BREAKDOWN_FIELDS`
+  เปลี่ยนจาก list field ดิบ (Ex-Refinery, Excise Tax, Municipal Tax, Oil Fund,
+  Conservation Fund, Wholesale, VAT(WS), Marketing Margin, VAT(MM), Retail)
+  เป็น 4 กลุ่ม:
+  1. **Tax + Cons. Fund** = Excise Tax + Municipal Tax + Conservation Fund
+  2. **Marketing Margin**
+  3. **VAT** = VAT(WS) + VAT(MM)
+  4. **Oil Fund**
+  - `getBreakdownAtDate()` รวมค่า sub-field ตาม `keys` ของแต่ละกลุ่มให้แล้ว
+    (ถ้าทุก sub-field เป็น null จะได้ `null`, ถ้ามีบางตัว null จะรวมเฉพาะที่
+    มีค่า)
+  - เอา row "Retail"/"Wholesale" (total) ออก เพราะไม่ใช่ 1 ใน 4 component ที่
+    ขอ — ตัวเลข Retail/Wholesale ยังดูได้จากช่อง "ล่าสุด" ด้านบนการ์ดตามปกติ
+- **Diesel/Gasohol 95 เปิดโครงสร้างราคาไว้ default + ผูก state กัน** —
+  `BREAKDOWN_DEFAULT_OPEN_BASES` กำหนดให้ 2 การ์ดนี้ render เป็น expand ตั้งแต่
+  แรก, `toggleBreakdown()` เช็คว่า id ที่กดอยู่ใน `BREAKDOWN_LINKED_IDS`
+  (ของ Diesel/Gasohol 95) ไหม ถ้าใช่จะ toggle ทั้งคู่พร้อมกันเสมอ (เปิดพร้อมกัน
+  ปิดพร้อมกัน ไม่ว่าจะกดจากการ์ดไหน)
+
 ## v5.7.2 — 2026-07-07
 
 ### index.html

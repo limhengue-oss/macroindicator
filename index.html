@@ -1,3 +1,5 @@
+<!-- patch v5.9: card visual refresh — more spacing between cards, subtle drop shadow, light-blue tinted background (theme-aware) -->
+<!-- patch v5.8: price structure breakdown collapsed to 4 grouped components (Tax+Cons.Fund, Marketing Margin, VAT, Oil Fund); Diesel/Gasohol95 breakdown open by default and linked (collapsing one collapses both) -->
 <!-- patch v5.7.2: fix TH Energy chart zoom range wrapping across year boundary (min>max) when latest month is near Jan or Dec — clamp to 1-12 instead of modulo wrap -->
 <!-- patch v5.7.1: fix chart canvases overflowing/cut off at right edge on window resize — canvas max-width:100%, html overflow-x:hidden, resize listener recalculates chart.js canvas size -->
 <!-- patch v5.7: Export PDF now limited to Diesel + Gasohol 95 with breakdown expanded, laid out 2-column A4 landscape -->
@@ -37,6 +39,8 @@ canvas { max-width: 100%; }
   --up:#30d158; --dn:#ff453a;
   --blue:#0a84ff; --red:#ff453a; --amber:#ffd60a; --green:#30d158; --purple:#bf5af2;
   --fs: 1rem;
+  --card-bg: #10192b;
+  --card-shadow: 0 4px 16px rgba(0,0,0,0.45);
 }
 [data-theme="light"] {
   --bg:#ffffff; --bg2:#ffffff; --bg3:#f2f2f7; --bg4:#e5e5ea;
@@ -44,6 +48,8 @@ canvas { max-width: 100%; }
   --text:#1d1d1f; --text2:#6e6e73; --text3:#aeaeb2;
   --up:#34c759; --dn:#ff3b30;
   --blue:#007aff; --red:#ff3b30; --amber:#ff9500; --green:#34c759; --purple:#af52de;
+  --card-bg: #eef6ff;
+  --card-shadow: 0 4px 16px rgba(0,0,0,0.08);
 }
 
 body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display','SF Pro Text','Sarabun',sans-serif; font-size:var(--fs); line-height:1.4; transition: background 0.2s, color 0.2s; }
@@ -52,7 +58,7 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkM
 /* ── News page ──────────────────────────────────────── */
 .news-day { margin-bottom:18px; }
 .news-day-header { font-size:0.72em; color:var(--text3); text-transform:uppercase; letter-spacing:0.06em; padding:4px 0; border-bottom:1px solid var(--border); margin-bottom:10px; }
-.energy-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:16px; max-width:1200px; margin:0 auto; padding:0 16px; }
+.energy-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:22px; max-width:1200px; margin:0 auto; padding:0 16px; }
 @media (max-width:700px), (orientation:portrait) and (max-width:1024px) { .energy-grid { grid-template-columns:1fr; } }
 /* ตอน export PDF: เหลือแค่ 2 การ์ด (Diesel, Gasohol 95) วาง 2 คอลัมน์ให้พอดี A4 แนวนอน 1 หน้า */
 #energy-boxes.pdf-export { grid-template-columns:1fr 1fr; }
@@ -132,10 +138,10 @@ input[type=range] { width:80px; accent-color:var(--blue); }
 .page-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; gap:8px; flex-wrap:wrap; }
 .page-actions { display:flex; gap:5px; flex-wrap:wrap; }
 
-.chart-grid { display:grid; gap:10px; }
+.chart-grid { display:grid; gap:16px; }
 
 /* ── Cards ── */
-.card { border:1px solid var(--border); border-radius:4px; overflow:hidden; background:var(--bg2); }
+.card { border:1px solid var(--border); border-radius:8px; overflow:hidden; background:var(--card-bg); box-shadow:var(--card-shadow); }
 .ch { padding:9px 11px 3px; display:flex; align-items:flex-start; justify-content:space-between; gap:6px; }
 .ct { font-size:0.82em; font-weight:600; text-transform:uppercase; letter-spacing:0.03em; }
 .cs { font-size:0.72em; color:var(--text3); margin-top:2px; line-height:1.3; }
@@ -185,7 +191,7 @@ input[type=range] { width:80px; accent-color:var(--blue); }
 <body>
 
 <div id="topbar">
-  <div class="brand">Macro<span class="patch">v5.7.2</span></div>
+  <div class="brand">Macro<span class="patch">v5.9</span></div>
   <div class="topbar-right">
     <span class="sdot" id="sdot"></span>
     <span id="stxt">loading…</span>
@@ -570,27 +576,28 @@ EPPO_ORDER.forEach(prod => {
   SERIES_GROUPS['EPPO'].push(eppoDocId(prod.base, 'OIL_FUND'));   // Oil Fund
 });
 
-// fields ที่ใช้แสดง breakdown โครงสร้างราคา (ตามลำดับ EPPO)
+// การ์ดที่ให้ expand โครงสร้างราคา by default — กด collapse อันไหนก็ collapse
+// ทั้งคู่ (ดู toggleBreakdown / BREAKDOWN_LINKED_IDS)
+const BREAKDOWN_DEFAULT_OPEN_BASES = ['DIESEL', 'GASOHOL 95'];
+const BREAKDOWN_LINKED_IDS = BREAKDOWN_DEFAULT_OPEN_BASES.map(b => 'bd-' + b.replace(/[^A-Za-z0-9]/g,'_'));
+
+// breakdown โครงสร้างราคา — ย่อจากทุก field เหลือ 4 component (รวมกลุ่ม)
 const BREAKDOWN_FIELDS = [
-  { key:'EX_REFIN',         label:'Ex-Refinery'        },
-  { key:'EXCISE_TAX',       label:'Excise Tax'         },
-  { key:'M_TAX',            label:'Municipal Tax'      },
-  { key:'OIL_FUND',         label:'Oil Fund'           },
-  { key:'CONSV_FUND',       label:'Conservation Fund'  },
-  { key:'WHOLESALE',        label:'Wholesale (WS)'     },
-  { key:'VAT_WS',           label:'VAT (WS)'           },
-  { key:'MARKETING_MARGIN', label:'Marketing Margin'   },
-  { key:'VAT_MM',           label:'VAT (MM)'           },
-  { key:'RETAIL',           label:'Retail'             },
+  { key:'TAX_CONSV',        label:'Tax + Cons. Fund', keys:['EXCISE_TAX','M_TAX','CONSV_FUND'] },
+  { key:'MARKETING_MARGIN', label:'Marketing Margin', keys:['MARKETING_MARGIN'] },
+  { key:'VAT',              label:'VAT',              keys:['VAT_WS','VAT_MM'] },
+  { key:'OIL_FUND',         label:'Oil Fund',         keys:['OIL_FUND'] },
 ];
 
-// ดึงค่าทุก field ของ product ณ วันที่ <= dateStr ล่าสุด
+// ดึงค่าแต่ละ component (รวมย่อยตาม keys) ของ product ณ วันที่ <= dateStr ล่าสุด
 function getBreakdownAtDate(base, dateStr) {
   if (!dateStr) return null;
   return BREAKDOWN_FIELDS.map(f => {
-    const s = getEppoSeries(base, f.key);
-    const v = s ? priceAtDate(s.data, dateStr) : null;
-    return { ...f, value: v };
+    const vals = f.keys
+      .map(k => { const s = getEppoSeries(base, k); return s ? priceAtDate(s.data, dateStr) : null; })
+      .filter(v => v !== null);
+    const value = vals.length ? vals.reduce((a,b) => a+b, 0) : null;
+    return { key:f.key, label:f.label, value };
   });
 }
 
@@ -776,11 +783,19 @@ function openMetaChart(chartId) {
 
 function toggleBreakdown(id) {
   const el = document.getElementById(id);
-  const arrow = document.getElementById(id + '-arrow');
   if (!el) return;
   const isHidden = el.style.display === 'none';
-  el.style.display = isHidden ? 'block' : 'none';
-  if (arrow) arrow.textContent = isHidden ? '▴' : '▾';
+  const newDisplay = isHidden ? 'block' : 'none';
+  const newArrow   = isHidden ? '▴' : '▾';
+
+  // Diesel/Gasohol 95 ผูก state กัน — toggle อันไหนก็ toggle ทั้งคู่พร้อมกัน
+  const ids = BREAKDOWN_LINKED_IDS.includes(id) ? BREAKDOWN_LINKED_IDS : [id];
+  ids.forEach(i => {
+    const e = document.getElementById(i);
+    const a = document.getElementById(i + '-arrow');
+    if (e) e.style.display = newDisplay;
+    if (a) a.textContent = newArrow;
+  });
 }
 
 function closeMeta() { document.getElementById('meta-popup').style.display = 'none'; }
@@ -881,14 +896,10 @@ async function renderEnergyPage() {
     const breakdownLast = getBreakdownAtDate(prod.base, lastDateStr);
     const breakdownRef  = refStr ? getBreakdownAtDate(prod.base, refStr) : null;
 
-    const isFO = prod.base === 'FO 600' || prod.base === 'FO 1500';
     const breakdownRows = BREAKDOWN_FIELDS
-      .filter(f => f.key !== 'WHOLESALE' || isFO)
-      .map(f => {
-        const i = BREAKDOWN_FIELDS.indexOf(f);
+      .map((f, i) => {
         const vLast = breakdownLast[i].value;
         const vRef  = breakdownRef ? breakdownRef[i].value : null;
-        const isTotal = f.key === 'RETAIL' || f.key === 'WHOLESALE';
 
         // flag สีตาม direction เทียบ ref date
         let flagColor = '', arrow = '';
@@ -899,7 +910,7 @@ async function renderEnergyPage() {
         const numStyle  = `padding:5px 4px 5px 8px;text-align:right${flagColor ? `;color:${flagColor};font-weight:600` : ''}`;
         const arrowStyle = `padding:5px 8px 5px 2px;width:14px;color:${flagColor}`;
 
-        return `<tr style="${isTotal ? 'font-weight:600;border-top:1px solid var(--border)' : ''}">
+        return `<tr>
           <td style="padding:5px 8px;color:var(--text2)">${f.label}</td>
           <td style="${numStyle}">${vLast !== null ? vLast.toFixed(4) : '—'}</td>
           <td style="${arrowStyle}">${arrow}</td>
@@ -919,13 +930,14 @@ async function renderEnergyPage() {
     const arrowHeader = `<th style="width:14px"></th>`;
 
     const breakdownId = 'bd-' + prod.base.replace(/[^A-Za-z0-9]/g,'_');
+    const isDefaultOpen = BREAKDOWN_DEFAULT_OPEN_BASES.includes(prod.base);
     const breakdownHtml = `
       <div style="border-top:1px solid var(--border)">
         <button class="btn" style="width:100%;border:none;border-radius:0;text-align:left;font-size:0.75em;padding:7px 12px;display:flex;justify-content:space-between;align-items:center" onclick="toggleBreakdown('${breakdownId}')">
           <span>โครงสร้างราคา</span>
-          <span id="${breakdownId}-arrow">▾</span>
+          <span id="${breakdownId}-arrow">${isDefaultOpen ? '▴' : '▾'}</span>
         </button>
-        <div id="${breakdownId}" style="display:none;padding:0 12px 10px">
+        <div id="${breakdownId}" style="display:${isDefaultOpen ? 'block' : 'none'};padding:0 12px 10px">
           <table style="width:100%;border-collapse:collapse;font-size:0.78em">
             <thead><tr>
               <th style="padding:5px 8px;text-align:left;font-weight:400;color:var(--text3)"></th>
