@@ -52,11 +52,23 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkM
 /* ── News page ──────────────────────────────────────── */
 .news-day { margin-bottom:18px; }
 .news-day-header { font-size:0.72em; color:var(--text3); text-transform:uppercase; letter-spacing:0.06em; padding:4px 0; border-bottom:1px solid var(--border); margin-bottom:10px; }
-.energy-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:16px; max-width:1200px; margin:0 auto; padding:0 16px; }
+.energy-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:16px; max-width:1200px; margin:0 auto; padding:0 16px; }
 @media (max-width:700px), (orientation:portrait) and (max-width:1024px) { .energy-grid { grid-template-columns:1fr; } }
 /* ตอน export PDF: เหลือแค่ 2 การ์ด (Diesel, Gasohol 95) วาง 2 คอลัมน์ให้พอดี A4 แนวนอน 1 หน้า */
 #energy-boxes.pdf-export { grid-template-columns:1fr 1fr; }
-#energy-boxes.pdf-export .energy-chart-box { height:220px !important; }
+#energy-boxes.pdf-export .energy-chart-box, #energy-hero.pdf-export .energy-chart-box { height:220px !important; }
+
+/* ── TH Energy hero: Diesel / Gasohol95 / Oil Fund เด่นด้านบนสุด ── */
+.energy-hero { border:1px solid var(--blue); border-radius:6px; max-width:1200px; margin:0 auto 16px; padding:0 16px; }
+.energy-hero-grid { display:grid; grid-template-columns:repeat(3,1fr); }
+.energy-hero-grid > .card { border:none; border-radius:0; border-right:1px solid var(--border); background:transparent; }
+.energy-hero-grid > .card:last-child { border-right:none; }
+#energy-hero.pdf-export .energy-hero-grid { grid-template-columns:1fr 1fr; }
+@media (max-width:700px), (orientation:portrait) and (max-width:1024px) {
+  .energy-hero-grid { grid-template-columns:1fr; }
+  .energy-hero-grid > .card { border-right:none; border-bottom:1px solid var(--border); }
+  .energy-hero-grid > .card:last-child { border-bottom:none; }
+}
 .news-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-bottom:18px; }
 @media (max-width: 700px) { .news-grid { grid-template-columns:1fr; } }
 .news-source { font-size:0.68em; color:var(--blue); text-transform:uppercase; letter-spacing:0.04em; margin-bottom:4px; }
@@ -244,6 +256,7 @@ input[type=range] { width:80px; accent-color:var(--blue); }
     <div class="li"><span class="ls" style="background:#f5a623"></span><span id="energy-year-this">ปีนี้</span></div>
     <div class="li"><span class="ls" style="background:rgba(128,128,128,0.5)"></span><span id="energy-year-last">ปีก่อน</span></div>
   </div>
+  <div id="energy-hero" class="energy-hero"><div id="energy-hero-grid" class="energy-hero-grid"></div></div>
   <div id="energy-boxes" class="energy-grid"></div>
 </div>
 
@@ -796,15 +809,20 @@ function closeStructureModal() {
 
 async function renderEnergyPage() {
   const container = document.getElementById('energy-boxes');
-  if (!container) return;
+  const heroGrid  = document.getElementById('energy-hero-grid');
+  if (!container || !heroGrid) return;
   if (Object.keys(SERIES).length === 0) {
     container.innerHTML = `<div class="ld" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px">
       ${Array(9).fill('<div class="skeleton skel-card"></div>').join('')}
+    </div>`;
+    heroGrid.innerHTML = `<div class="ld" style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px">
+      ${Array(3).fill('<div class="skeleton skel-card"></div>').join('')}
     </div>`;
     return;
   }
 
   container.innerHTML = '';
+  heroGrid.innerHTML = '';
   Object.values(energyCharts).forEach(c => c.destroy());
   energyCharts = {};
 
@@ -954,7 +972,8 @@ async function renderEnergyPage() {
       </div>
       ${breakdownHtml}`;
 
-    container.appendChild(box);
+    const isHeroProd = prod.base === 'DIESEL' || prod.base === 'GASOHOL 95';
+    (isHeroProd ? heroGrid : container).appendChild(box);
 
     const thisData = mapToYearAxis(data, thisYear, yearLabels);
     const lastData = mapToYearAxis(data, lastYear, yearLabels);
@@ -1057,14 +1076,32 @@ async function renderEnergyPage() {
   }
 
   // ── Oil Fund Status (ฐานะกองทุนน้ำมันเชื้อเพลิงสุทธิ) ───────────
-  // ต่อท้าย card ราคาน้ำมันเดิม — plot net_total เป็น timeseries เต็มช่วงประวัติ
-  // (ไม่ใช่ year-over-year overlay เหมือน card อื่น เพราะเป็นข้อมูลรายสัปดาห์
-  // ต่อเนื่องยาวหลายปี ไม่ได้ reset รายปี)
+  // hero card คู่กับ Diesel/Gasohol95 — area chart ย้อนหลัง 18 เดือน + คาดการณ์
+  // ไปข้างหน้า 6 เดือน (เส้นประ) โดยประมาณจาก flow เฉลี่ยต่อวันล่าสุด
   const sOilFundTotal = SERIES['OFFO_OILFUND_NET_TOTAL'];
   if (sOilFundTotal && sOilFundTotal.data.length) {
     const ofData = sOilFundTotal.data;
     const ofLast = ofData[ofData.length - 1];
+    const ofPrev = ofData.length > 1 ? ofData[ofData.length - 2] : null;
     const ofCanvasId = 'ec-oilfund-net-total';
+
+    const daysBetweenISO = (a,b) => (new Date(b+'T00:00:00Z') - new Date(a+'T00:00:00Z')) / 86400000;
+    const gapDays   = ofPrev ? daysBetweenISO(ofPrev.x, ofLast.x) : null;
+    const dailyFlow = (ofPrev && gapDays > 0) ? (ofLast.y - ofPrev.y) / gapDays : 0;
+
+    // คาดการณ์: ฐานะสิ้นปีนี้ = ล่าสุด + วันที่เหลือของปี × flow เฉลี่ยต่อวันล่าสุด
+    //           ฐานะสิ้นปีหน้า = ฐานะสิ้นปีนี้ + flow เฉลี่ยต่อวันล่าสุด × 365
+    const lastD = new Date(ofLast.x + 'T00:00:00Z');
+    const ofThisYear = lastD.getUTCFullYear();
+    const ofNextYear = ofThisYear + 1;
+    const thisYearEndD    = new Date(Date.UTC(ofThisYear, 11, 31));
+    const remDaysThisYear = Math.max(0, (thisYearEndD - lastD) / 86400000);
+    const projThisYearEnd = ofLast.y + remDaysThisYear * dailyFlow;
+    const projNextYearEnd = projThisYearEnd + dailyFlow * 365;
+
+    const fmtSigned = n => (n >= 0 ? '+' : '') + Math.round(n).toLocaleString('en-US');
+    const fmtPlain  = n => Math.round(n).toLocaleString('en-US');
+    const colorOf   = n => n >= 0 ? 'var(--up)' : 'var(--dn)';
 
     const ofBox = document.createElement('div');
     ofBox.className = 'card';
@@ -1075,31 +1112,112 @@ async function renderEnergyPage() {
           <div class="cs">ฐานะกองทุนน้ำมันสุทธิ · ล้านบาท</div>
         </div>
       </div>
-      <div style="display:grid;grid-template-columns:1fr;border-top:1px solid var(--border);border-bottom:1px solid var(--border)">
-        <div style="padding:8px 12px">
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);border-top:1px solid var(--border);border-bottom:1px solid var(--border)">
+        <div style="padding:8px 10px;border-right:1px solid var(--border)">
           <div style="font-size:0.68em;color:var(--text3);margin-bottom:2px">ล่าสุด · ${ofLast.x.slice(0,10)}</div>
-          <div style="font-size:1.4em;font-weight:600;color:${ofLast.y >= 0 ? '#4d9fff' : '#f05252'}">${ofLast.y.toFixed(0)}</div>
+          <div style="font-size:1.25em;font-weight:600;color:${ofLast.y >= 0 ? '#4d9fff' : '#f05252'}">${fmtPlain(ofLast.y)}</div>
+        </div>
+        <div style="padding:8px 10px;border-right:1px solid var(--border)">
+          <div style="font-size:0.68em;color:var(--text3);margin-bottom:2px">Flow/วัน ล่าสุด</div>
+          <div style="font-size:1.05em;font-weight:600;color:${colorOf(dailyFlow)}">${fmtSigned(dailyFlow)}</div>
+        </div>
+        <div style="padding:8px 10px;border-right:1px solid var(--border)">
+          <div style="font-size:0.68em;color:var(--text3);margin-bottom:2px">คาดสิ้นปี ${ofThisYear}</div>
+          <div style="font-size:1.05em;font-weight:600;color:${colorOf(projThisYearEnd)}">${fmtPlain(projThisYearEnd)}</div>
+        </div>
+        <div style="padding:8px 10px">
+          <div style="font-size:0.68em;color:var(--text3);margin-bottom:2px">คาดสิ้นปี ${ofNextYear}</div>
+          <div style="font-size:1.05em;font-weight:600;color:${colorOf(projNextYearEnd)}">${fmtPlain(projNextYearEnd)}</div>
         </div>
       </div>
       <div style="padding:6px 12px 10px">
         <div class="energy-chart-box" style="position:relative;height:140px"><canvas id="${ofCanvasId}"></canvas></div>
       </div>`;
-    container.appendChild(ofBox);
+    heroGrid.appendChild(ofBox);
 
     const ofCanvas = document.getElementById(ofCanvasId);
     if (ofCanvas) {
       await new Promise(r => requestAnimationFrame(r));
-      const ofLabels = ofData.map(p => p.x.slice(0,10));
+
+      // ช่วงแสดงผล: ย้อนหลัง 18 เดือนจากจุดข้อมูลล่าสุด + คาดการณ์ไปข้างหน้า 6 เดือน
+      const startD = new Date(lastD); startD.setUTCMonth(startD.getUTCMonth() - 18);
+      const endD   = new Date(lastD); endD.setUTCMonth(endD.getUTCMonth() + 6);
+
+      const actualPts = ofData.filter(p => {
+        const d = new Date(p.x + 'T00:00:00Z');
+        return d >= startD && d <= lastD;
+      });
+
+      // เส้นคาดการณ์รายสัปดาห์ต่อจากจุดล่าสุด (linear ตาม dailyFlow)
+      const projPts = [{ x: ofLast.x, y: ofLast.y }];
+      {
+        let d = new Date(lastD);
+        while (d < endD) {
+          d = new Date(d.getTime() + 7*86400000);
+          const days = (d - lastD) / 86400000;
+          projPts.push({ x: d.toISOString().slice(0,10), y: ofLast.y + dailyFlow*days });
+        }
+      }
+
+      const ofLabels   = [...new Set([...actualPts.map(p=>p.x), ...projPts.map(p=>p.x)])].sort();
+      const mapActual  = Object.fromEntries(actualPts.map(p=>[p.x,p.y]));
+      const mapProj    = Object.fromEntries(projPts.map(p=>[p.x,p.y]));
+      const dataActual = ofLabels.map(l => mapActual[l] ?? null);
+      const dataProj   = ofLabels.map(l => mapProj[l] ?? null);
+
+      // วาดเส้น y=0 เองให้ชัดเจน (ไม่พึ่ง gridline ซึ่งอาจไม่ตรง tick พอดี)
+      const zeroLinePlugin = {
+        id: 'ofZeroLine',
+        afterDraw(chart) {
+          const yScale = chart.scales.y;
+          if (!yScale) return;
+          const yZero = yScale.getPixelForValue(0);
+          if (yZero < chart.chartArea.top || yZero > chart.chartArea.bottom) return;
+          const ctx2 = chart.ctx;
+          ctx2.save();
+          ctx2.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue('--text2').trim() || '#888';
+          ctx2.lineWidth = 1;
+          ctx2.beginPath();
+          ctx2.moveTo(chart.chartArea.left, yZero);
+          ctx2.lineTo(chart.chartArea.right, yZero);
+          ctx2.stroke();
+          ctx2.restore();
+        }
+      };
+      // เส้นประคั่นระหว่างข้อมูลจริงกับช่วงคาดการณ์ ที่จุดข้อมูลล่าสุด
+      const todayLinePlugin = {
+        id: 'ofTodayLine',
+        afterDraw(chart) {
+          const idx = ofLabels.indexOf(ofLast.x);
+          const meta = chart.getDatasetMeta(0);
+          if (idx < 0 || !meta.data[idx]) return;
+          const x = meta.data[idx].x;
+          const ctx2 = chart.ctx;
+          ctx2.save();
+          ctx2.strokeStyle = 'rgba(128,128,128,0.5)';
+          ctx2.setLineDash([3,3]);
+          ctx2.lineWidth = 1;
+          ctx2.beginPath();
+          ctx2.moveTo(x, chart.chartArea.top);
+          ctx2.lineTo(x, chart.chartArea.bottom);
+          ctx2.stroke();
+          ctx2.restore();
+        }
+      };
+
       energyCharts[ofCanvasId] = new Chart(ofCanvas, {
         type: 'line',
+        plugins: [zeroLinePlugin, todayLinePlugin],
         data: {
           labels: ofLabels,
-          datasets: [{
-            label: 'Net Total',
-            data: ofData.map(p => p.y),
-            borderColor: '#4d9fff', borderWidth:1.8,
-            pointRadius:0, tension:0.15, fill:false, spanGaps:true
-          }]
+          datasets: [
+            { label: 'Net Total', data: dataActual,
+              borderColor: '#4d9fff', backgroundColor: 'rgba(77,159,255,0.18)',
+              borderWidth:1.8, pointRadius:0, tension:0.15, fill:{ target:'origin' }, spanGaps:true },
+            { label: 'คาดการณ์', data: dataProj,
+              borderColor: 'rgba(245,166,35,0.85)', borderDash:[5,3],
+              borderWidth:1.5, pointRadius:0, tension:0, fill:false, spanGaps:true }
+          ]
         },
         options: {
           responsive:true, maintainAspectRatio:false, animation:false,
@@ -1115,13 +1233,18 @@ async function renderEnergyPage() {
               bodyColor: ()=>getComputedStyle(document.documentElement).getPropertyValue('--text').trim()||'#e8e8e8',
               titleFont:{family:'monospace',size:11},bodyFont:{family:'monospace',size:12},
               callbacks:{
-                label: item => item.raw === null ? null : ' Net Total: ' + Number(item.raw).toFixed(0)
+                label: item => item.raw === null ? null : ' ' + item.dataset.label + ': ' + Number(item.raw).toFixed(0)
               }
             }
           },
           scales:{
             x:{ type:'category', ticks:{ color:tickColor, font:{family:'monospace',size:9},
-                maxRotation:0, autoSkip:true, maxTicksLimit:8 },
+                maxRotation:0, autoSkip:true, maxTicksLimit:8,
+                callback:(val,idx) => {
+                  const l = ofLabels[idx]; if (!l) return '';
+                  const d = new Date(l+'T00:00:00Z');
+                  return d.toLocaleDateString('en-US',{month:'short',year:'2-digit',timeZone:'UTC'});
+                } },
               grid:{ display:false },
               border:{color:'rgba(128,128,128,0.15)'} },
             y:{ position:'left',
@@ -1929,8 +2052,9 @@ const PDF_EXPORT_BASES = ['DIESEL', 'GASOHOL 95'];
 window.exportEnergyPDF = async function() {
   const btn = document.getElementById('energy-export-btn');
   const boxes = document.getElementById('energy-boxes');
+  const hero = document.getElementById('energy-hero');
   const target = document.getElementById('page-th-energy');
-  if (!boxes || !target || !Object.keys(SERIES).length) { alert('ข้อมูลยังโหลดไม่เสร็จ ลองใหม่อีกครั้ง'); return; }
+  if (!boxes || !hero || !target || !Object.keys(SERIES).length) { alert('ข้อมูลยังโหลดไม่เสร็จ ลองใหม่อีกครั้ง'); return; }
   if (typeof html2canvas === 'undefined' || !window.jspdf) { alert('โหลด PDF library ไม่สำเร็จ ลอง refresh หน้า'); return; }
 
   const originalLabel = btn.textContent;
@@ -1941,7 +2065,8 @@ window.exportEnergyPDF = async function() {
   const openedBreakdowns = [];
 
   try {
-    const cards = [...boxes.querySelectorAll('.card')];
+    // Diesel/Gasohol95 ย้ายไปอยู่ hero row แล้ว ต้องรวม card จากทั้งสอง container
+    const cards = [...hero.querySelectorAll('.card'), ...boxes.querySelectorAll('.card')];
 
     // ซ่อนการ์ดที่ไม่ใช่ target ไว้ชั่วคราว
     cards.forEach(card => {
@@ -1963,6 +2088,7 @@ window.exportEnergyPDF = async function() {
 
     // ขยาย layout เป็น 2 คอลัมน์ + กราฟเต็มปี ให้ label ไม่ชนกันตอน export
     boxes.classList.add('pdf-export');
+    hero.classList.add('pdf-export');
     expandEnergyChartsForExport();
     resizeEnergyCharts();
     await new Promise(r => setTimeout(r, 350)); // รอ layout + chart วาดใหม่
@@ -1994,6 +2120,7 @@ window.exportEnergyPDF = async function() {
     hiddenCards.forEach(card => card.style.display = '');
     openedBreakdowns.forEach(id => toggleBreakdown(id));
     boxes.classList.remove('pdf-export');
+    hero.classList.remove('pdf-export');
     restoreEnergyChartsZoomAfterExport();
     resizeEnergyCharts();
     btn.disabled = false;
