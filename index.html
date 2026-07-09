@@ -485,6 +485,15 @@ async function fetchEppo() {
   snap.forEach(storeDoc);
 }
 
+// Phase 1b: Oil Fund status docs (OFFO_) — ใช้ในหน้า TH Energy เหมือน EPPO
+async function fetchOilFund() {
+  const q = query(collection(db, 'series'),
+    where(documentId(), '>=', 'OFFO_'),
+    where(documentId(), '<', 'OFFO`'));  // ` คือ char ถัดจาก _ ใน ASCII
+  const snap = await getDocs(q);
+  snap.forEach(storeDoc);
+}
+
 // Phase 2: series ที่เหลือ (โหลด background หลัง render หน้าแรกแล้ว)
 async function fetchRest() {
   const snap = await getDocs(collection(db, 'series'));
@@ -1046,6 +1055,84 @@ async function renderEnergyPage() {
     });
     energyCharts[canvasId].$zoomRange = { min: zoomMinIdx, max: zoomMaxIdx };
   }
+
+  // ── Oil Fund Status (ฐานะกองทุนน้ำมันเชื้อเพลิงสุทธิ) ───────────
+  // ต่อท้าย card ราคาน้ำมันเดิม — plot net_total เป็น timeseries เต็มช่วงประวัติ
+  // (ไม่ใช่ year-over-year overlay เหมือน card อื่น เพราะเป็นข้อมูลรายสัปดาห์
+  // ต่อเนื่องยาวหลายปี ไม่ได้ reset รายปี)
+  const sOilFundTotal = SERIES['OFFO_OILFUND_NET_TOTAL'];
+  if (sOilFundTotal && sOilFundTotal.data.length) {
+    const ofData = sOilFundTotal.data;
+    const ofLast = ofData[ofData.length - 1];
+    const ofCanvasId = 'ec-oilfund-net-total';
+
+    const ofBox = document.createElement('div');
+    ofBox.className = 'card';
+    ofBox.innerHTML = `
+      <div class="ch" style="padding:10px 12px 6px">
+        <div style="display:flex;align-items:center;flex-wrap:wrap;gap:6px">
+          <div class="ct" style="color:#4d9fff">Oil Fund Status</div>
+          <div class="cs">ฐานะกองทุนน้ำมันสุทธิ · ล้านบาท</div>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr;border-top:1px solid var(--border);border-bottom:1px solid var(--border)">
+        <div style="padding:8px 12px">
+          <div style="font-size:0.68em;color:var(--text3);margin-bottom:2px">ล่าสุด · ${ofLast.x.slice(0,10)}</div>
+          <div style="font-size:1.4em;font-weight:600;color:${ofLast.y >= 0 ? '#4d9fff' : '#f05252'}">${ofLast.y.toFixed(0)}</div>
+        </div>
+      </div>
+      <div style="padding:6px 12px 10px">
+        <div class="energy-chart-box" style="position:relative;height:140px"><canvas id="${ofCanvasId}"></canvas></div>
+      </div>`;
+    container.appendChild(ofBox);
+
+    const ofCanvas = document.getElementById(ofCanvasId);
+    if (ofCanvas) {
+      await new Promise(r => requestAnimationFrame(r));
+      const ofLabels = ofData.map(p => p.x.slice(0,10));
+      energyCharts[ofCanvasId] = new Chart(ofCanvas, {
+        type: 'line',
+        data: {
+          labels: ofLabels,
+          datasets: [{
+            label: 'Net Total',
+            data: ofData.map(p => p.y),
+            borderColor: '#4d9fff', borderWidth:1.8,
+            pointRadius:0, tension:0.15, fill:false, spanGaps:true
+          }]
+        },
+        options: {
+          responsive:true, maintainAspectRatio:false, animation:false,
+          layout:{ padding:{ right:6, left:2 } },
+          interaction:{mode:'index',intersect:false},
+          plugins:{
+            legend:{display:false},
+            tooltip:{
+              backgroundColor: ()=>getComputedStyle(document.documentElement).getPropertyValue('--bg2').trim()||'#1a1a1a',
+              borderColor: ()=>getComputedStyle(document.documentElement).getPropertyValue('--border2').trim()||'#444',
+              borderWidth:1,
+              titleColor: ()=>getComputedStyle(document.documentElement).getPropertyValue('--text2').trim()||'#aaa',
+              bodyColor: ()=>getComputedStyle(document.documentElement).getPropertyValue('--text').trim()||'#e8e8e8',
+              titleFont:{family:'monospace',size:11},bodyFont:{family:'monospace',size:12},
+              callbacks:{
+                label: item => item.raw === null ? null : ' Net Total: ' + Number(item.raw).toFixed(0)
+              }
+            }
+          },
+          scales:{
+            x:{ type:'category', ticks:{ color:tickColor, font:{family:'monospace',size:9},
+                maxRotation:0, autoSkip:true, maxTicksLimit:8 },
+              grid:{ display:false },
+              border:{color:'rgba(128,128,128,0.15)'} },
+            y:{ position:'left',
+              ticks:{color:tickColor,font:{family:'monospace',size:10},maxTicksLimit:5},
+              grid:{color:'rgba(128,128,128,0.08)'},
+              border:{color:'rgba(128,128,128,0.15)'} }
+          }
+        }
+      });
+    }
+  }
 }
 
 window.renderEnergyPage = renderEnergyPage;
@@ -1115,7 +1202,7 @@ window.loadData = async function() {
   setStatus('load','loading…');
   try {
     // Phase 1: EPPO + news — พอสำหรับหน้าแรก (TH Energy)
-    await Promise.all([fetchEppo(), fetchNews()]);
+    await Promise.all([fetchEppo(), fetchOilFund(), fetchNews()]);
     window._SERIES = SERIES;
     render();
     if (activePageId === '__energy__') renderEnergyPage();
