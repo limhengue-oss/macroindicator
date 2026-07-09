@@ -1,3 +1,4 @@
+<!-- patch v5.11: Oil Fund Status chart colors segments red/pink when negative, green/light-green when positive; fix dark-theme card shadow being invisible (black-on-black) by adding a subtle light rim layer -->
 <!-- patch v5.10: Export PDF now includes Oil Fund Status card alongside Diesel/Gasohol95; hero grid stays 3-column during export -->
 <!-- patch v5.9.3: relabel first breakdown row to "ราคาหน้าโรงกลั่น" -->
 <!-- patch v5.9.2: price breakdown adds Ex-Refinery as first row and Retail/Wholesale price as last row; revert card background to original (--bg2), drop the blue tint -->
@@ -43,7 +44,7 @@ canvas { max-width: 100%; }
   --up:#30d158; --dn:#ff453a;
   --blue:#0a84ff; --red:#ff453a; --amber:#ffd60a; --green:#30d158; --purple:#bf5af2;
   --fs: 1rem;
-  --card-shadow: 0 4px 16px rgba(0,0,0,0.45);
+  --card-shadow: 0 6px 20px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.06);
 }
 [data-theme="light"] {
   --bg:#ffffff; --bg2:#ffffff; --bg3:#f2f2f7; --bg4:#e5e5ea;
@@ -193,7 +194,7 @@ input[type=range] { width:80px; accent-color:var(--blue); }
 <body>
 
 <div id="topbar">
-  <div class="brand">Macro<span class="patch">v5.10</span></div>
+  <div class="brand">Macro<span class="patch">v5.11</span></div>
   <div class="topbar-right">
     <span class="sdot" id="sdot"></span>
     <span id="stxt">loading…</span>
@@ -1233,6 +1234,22 @@ async function renderEnergyPage() {
         }
       };
 
+      // สีเส้น/พื้นที่ตามเครื่องหมาย: ติดลบ = แดง/ชมพู, บวก = เขียว/เขียวอ่อน
+      const ofNegColor  = getComputedStyle(document.documentElement).getPropertyValue('--dn').trim() || '#ff453a';
+      const ofPosColor  = getComputedStyle(document.documentElement).getPropertyValue('--up').trim() || '#34c759';
+      const ofNegFill   = 'rgba(255,99,132,0.22)';   // ชมพู
+      const ofPosFill   = 'rgba(52,199,89,0.18)';    // เขียวอ่อน
+      const ofSegColor = ctx => {
+        const y0 = ctx.p0?.parsed?.y, y1 = ctx.p1?.parsed?.y;
+        const neg = (y0 !== null && y0 !== undefined && y0 < 0) || (y1 !== null && y1 !== undefined && y1 < 0);
+        return neg ? ofNegColor : ofPosColor;
+      };
+      const ofSegFill = ctx => {
+        const y0 = ctx.p0?.parsed?.y, y1 = ctx.p1?.parsed?.y;
+        const neg = (y0 !== null && y0 !== undefined && y0 < 0) || (y1 !== null && y1 !== undefined && y1 < 0);
+        return neg ? ofNegFill : ofPosFill;
+      };
+
       energyCharts[ofCanvasId] = new Chart(ofCanvas, {
         type: 'line',
         plugins: [zeroLinePlugin, todayLinePlugin],
@@ -1240,10 +1257,11 @@ async function renderEnergyPage() {
           labels: ofLabels,
           datasets: [
             { label: 'Net Total', data: dataActual,
-              borderColor: '#4d9fff', backgroundColor: 'rgba(77,159,255,0.18)',
+              segment: { borderColor: ofSegColor, backgroundColor: ofSegFill },
               borderWidth:1.8, pointRadius:0, tension:0.15, fill:{ target:'origin' }, spanGaps:true },
             { label: 'คาดการณ์', data: dataProj,
-              borderColor: 'rgba(245,166,35,0.85)', borderDash:[5,3],
+              segment: { borderColor: ofSegColor },
+              borderDash:[5,3],
               borderWidth:1.5, pointRadius:0, tension:0, fill:false, spanGaps:true }
           ]
         },
