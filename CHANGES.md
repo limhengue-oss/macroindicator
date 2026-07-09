@@ -1,5 +1,18 @@
 # Changelog
 
+## v5.14 — 2026-07-07
+
+### index.html
+
+- **Format วันที่ช่อง "ล่าสุด" เปลี่ยนจาก MM-DD เป็น D-Mon** (เช่น `07-08` →
+  `8-Jul`) — เพิ่มฟังก์ชัน `fmtDMon(dateStr, withYear)` ใช้ร่วมกันทั้งการ์ด
+  product ปกติและการ์ด Oil Fund Status
+- **วันที่ข้อมูลล่าสุดข้าง legend เปลี่ยนเป็น D-Mon-YYYY** (เช่น
+  `8-Jul-2026`) — เรียก `fmtDMon(latestPriceDate, true)`
+- **Shared legend จัด center ของหน้าแทนการ indent ชิดซ้าย** — เอา
+  `padding-left:12px` ที่เพิ่มไว้ก่อนหน้า (v5.13) ออก เปลี่ยนเป็น
+  `justify-content:center` บน `#energy-shared-legend`
+
 ## v5.13 — 2026-07-07
 
 ### index.html

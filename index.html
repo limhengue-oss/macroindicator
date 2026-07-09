@@ -1,3 +1,4 @@
+<!-- patch v5.14: date format "D-Mon" (e.g. 8-Jul) for all card "ล่าสุด" fields, "D-Mon-YYYY" for the legend latest-date; shared legend now centered instead of left-indented -->
 <!-- patch v5.13: fix shared legend "ปีนี้/ปีก่อน" not actually matching the +10%/bold styling (overridden by .li class font-size); indent legend to align with DIESEL card text -->
 <!-- patch v5.12: Oil Fund Status "ล่าสุด" date shows MM-DD only; add latest oil price date next to shared legend, both legend + date bumped +10% font and bold -->
 <!-- patch v5.11: Oil Fund Status chart colors segments red/pink when negative, green/light-green when positive; fix dark-theme card shadow being invisible (black-on-black) by adding a subtle light rim layer -->
@@ -196,7 +197,7 @@ input[type=range] { width:80px; accent-color:var(--blue); }
 <body>
 
 <div id="topbar">
-  <div class="brand">Macro<span class="patch">v5.13</span></div>
+  <div class="brand">Macro<span class="patch">v5.14</span></div>
   <div class="topbar-right">
     <span class="sdot" id="sdot"></span>
     <span id="stxt">loading…</span>
@@ -263,7 +264,7 @@ input[type=range] { width:80px; accent-color:var(--blue); }
     </div>
   </div>
   <!-- Shared legend -->
-  <div style="display:flex;gap:16px;align-items:center;margin-bottom:10px;padding-left:12px;font-size:0.88em;font-weight:600" id="energy-shared-legend">
+  <div style="display:flex;gap:16px;align-items:center;justify-content:center;margin-bottom:10px;font-size:0.88em;font-weight:600" id="energy-shared-legend">
     <div class="li" style="font-size:1em;font-weight:600"><span class="ls" style="background:#f5a623"></span><span id="energy-year-this">ปีนี้</span></div>
     <div class="li" style="font-size:1em;font-weight:600"><span class="ls" style="background:rgba(128,128,128,0.5)"></span><span id="energy-year-last">ปีก่อน</span></div>
     <span style="color:var(--text3)">·</span>
@@ -643,6 +644,14 @@ function updateRefDateStatus(val) {
 }
 
 
+// format วันที่แบบ "8-Jul" หรือ "8-Jul-2026" (withYear=true)
+function fmtDMon(dateStr, withYear) {
+  const d = new Date(dateStr.slice(0,10) + 'T00:00:00Z');
+  const day = d.getUTCDate();
+  const mon = d.toLocaleDateString('en-GB', { month:'short', timeZone:'UTC' });
+  return withYear ? `${day}-${mon}-${d.getUTCFullYear()}` : `${day}-${mon}`;
+}
+
 // หาราคา ณ ref date (วันที่ตรงหรือใกล้ที่สุดก่อน ref date)
 function priceAtDate(data, dateStr) {
   if (!dateStr || !data.length) return null;
@@ -987,7 +996,7 @@ async function renderEnergyPage() {
       </div>
       <div style="display:grid;grid-template-columns:${rtdHtml ? 'repeat(4,1fr)' : 'repeat(3,1fr)'};border-top:1px solid var(--border);border-bottom:1px solid var(--border)">
         <div style="padding:8px 12px;border-right:1px solid var(--border)">
-          <div style="font-size:0.68em;color:var(--text3);margin-bottom:2px">ล่าสุด · ${last.x.slice(5)}</div>
+          <div style="font-size:0.68em;color:var(--text3);margin-bottom:2px">ล่าสุด · ${fmtDMon(last.x)}</div>
           <div style="font-size:1.4em;font-weight:600;color:${prod.color}">${last.y.toFixed(2)}</div>
         </div>
         <div style="padding:8px 12px;border-right:1px solid var(--border)">
@@ -1150,7 +1159,7 @@ async function renderEnergyPage() {
       </div>
       <div style="display:grid;grid-template-columns:repeat(4,1fr);border-top:1px solid var(--border);border-bottom:1px solid var(--border)">
         <div style="padding:8px 10px;border-right:1px solid var(--border)">
-          <div style="font-size:0.68em;color:var(--text3);margin-bottom:2px">ล่าสุด · ${ofLast.x.slice(5,10)}</div>
+          <div style="font-size:0.68em;color:var(--text3);margin-bottom:2px">ล่าสุด · ${fmtDMon(ofLast.x)}</div>
           <div style="font-size:1.25em;font-weight:600;color:${ofLast.y >= 0 ? '#4d9fff' : '#f05252'}">${fmtPlain(ofLast.y)}</div>
         </div>
         <div style="padding:8px 10px;border-right:1px solid var(--border)">
@@ -1312,7 +1321,7 @@ async function renderEnergyPage() {
 
   // อัพเดทวันที่ข้อมูลราคาน้ำมันล่าสุด ข้าง legend
   const ldEl = document.getElementById('energy-latest-date');
-  if (ldEl) ldEl.textContent = latestPriceDate ? latestPriceDate.slice(5) : '';
+  if (ldEl) ldEl.textContent = latestPriceDate ? fmtDMon(latestPriceDate, true) : '';
 }
 
 window.renderEnergyPage = renderEnergyPage;
