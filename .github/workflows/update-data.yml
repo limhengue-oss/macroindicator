@@ -19,6 +19,11 @@ jobs:
           r-version: 'release'
           use-public-rspm: true
 
+      - name: Install system deps (pdftools)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libpoppler-cpp-dev
+
       - name: Install and run
         id: run
         continue-on-error: true
@@ -36,7 +41,7 @@ jobs:
           pkgs <- c("curl","httr","httr2","jsonlite","jose",
                     "quantmod","TTR","timetk","xts","zoo",
                     "tidyquant","fredr",
-                    "dplyr","tidyr","purrr","tibble","stringr","lubridate","xml2","readxl","rvest")
+                    "dplyr","tidyr","purrr","tibble","stringr","lubridate","xml2","readxl","rvest","pdftools")
           miss <- pkgs[!pkgs %in% installed.packages(lib.loc = lib)[,"Package"]]
           if (length(miss) > 0) {
             message("Installing: ", paste(miss, collapse=", "))

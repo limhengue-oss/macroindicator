@@ -8,7 +8,7 @@
 .libPaths(c("/home/runner/R-pkgs", .libPaths()))
 
 suppressPackageStartupMessages({
-  library(httr2); library(rvest); library(readxl)
+  library(httr2); library(rvest); library(readxl); library(pdftools)
   library(jsonlite); library(jose)
   library(dplyr); library(stringr); library(purrr)
 })
@@ -19,6 +19,7 @@ COLLECTION   <- "series"
 EPPO_BASE    <- "https://old.eppo.go.th"
 EPPO_LIST    <- paste0(EPPO_BASE, "/index.php/th/petroleum/price/structure-oil-price")
 OFFO_LIST    <- "https://www.offo.or.th/th/oil-price-structure-adjusted"
+FUND_STATUS_LIST <- "https://www.offo.or.th/th/estimate/fuelfund-status"
 MAX_PAGES    <- 3
 DELAY        <- 1.0
 
@@ -74,6 +75,24 @@ parse_thai_date <- function(txt) {
   m <- str_match(str_trim(txt), "(\\d{1,2})\\s+([ก-์]+)\\s+(\\d{4})")
   if (is.na(m[1])) return(NA_character_)
   day <- as.integer(m[2]); mon <- thai_month[m[3]]; year <- as.integer(m[4]) - 543
+  if (is.na(mon) || is.na(year)) return(NA_character_)
+  as.character(as.Date(sprintf("%04d-%02d-%02d", year, mon, day)))
+}
+
+# วันที่ในไฟล์ ฐานะกองทุน อาจเป็นเดือนเต็ม ("5 กรกฎาคม 2569") หรือย่อมีจุด ("5 ก.ค. 69")
+# และปี พ.ศ. อาจเป็น 2 หรือ 4 หลัก
+THAI_MONTH_SHORT <- c(
+  "ม.ค."=1,"ก.พ."=2,"มี.ค."=3,"เม.ย."=4,"พ.ค."=5,"มิ.ย."=6,
+  "ก.ค."=7,"ส.ค."=8,"ก.ย."=9,"ต.ค."=10,"พ.ย."=11,"ธ.ค."=12
+)
+parse_thai_date_flex <- function(txt) {
+  m <- str_match(str_squish(txt), "(\\d{1,2})\\s+([ก-๙\\.]+)\\s+(\\d{2,4})")
+  if (is.na(m[1])) return(NA_character_)
+  day     <- as.integer(m[2])
+  mon     <- thai_month[m[3]] %||% NA_integer_
+  if (is.na(mon)) mon <- THAI_MONTH_SHORT[m[3]] %||% NA_integer_
+  year_be <- as.integer(m[4])
+  year    <- (if (year_be < 100) year_be + 2500 else year_be) - 543
   if (is.na(mon) || is.na(year)) return(NA_character_)
   as.character(as.Date(sprintf("%04d-%02d-%02d", year, mon, day)))
 }
@@ -302,6 +321,43 @@ download_and_parse <- function(pending, meta_products = NULL, strict = TRUE) {
   list(df=if (length(all_rows)>0) bind_rows(all_rows) else NULL, latest=latest)
 }
 
+# ── Oil Fund status (ฐานะกองทุนน้ำมันเชื้อเพลิง) ────────────────────
+# หน้านี้ไม่มี pagination — แสดงรายการของปีปัจจุบันทั้งหมดในหน้าเดียว
+# วันที่ (ณ วันที่ ...) อยู่ใน text ของ <a> เอง ไม่ต้องงมหา parent node
+fund_scrape_pending <- function(last_date) {
+  resp <- do_get(FUND_STATUS_LIST)
+  if (resp_status(resp) != 200) { message("  HTTP ", resp_status(resp), " — stop"); return(list()) }
+  html  <- resp_body_string(resp) |> read_html()
+  nodes <- html |> html_elements("a[href*='.pdf'], a[href*='.png'], a[href*='.jpg'], a[href*='.jpeg']")
+  pending <- list()
+  for (node in nodes) {
+    wd_str <- parse_thai_date_flex(html_text(node, trim=TRUE))
+    if (is.na(wd_str)) next
+    wd <- as.Date(wd_str)
+    if (is.na(wd) || wd <= last_date) next
+    pending[[length(pending)+1]] <- list(date=wd, href=html_attr(node, "href"))
+  }
+  pending[order(map_dbl(pending, \(x) as.numeric(x$date)))]
+}
+
+# ดาวน์โหลด pdf → อ่านค่า ฐานะกองทุนสุทธิ (net_oil, net_lpg, net_total)
+parse_fund_pdf <- function(href) {
+  resp <- do_get(href)
+  if (resp_status(resp) != 200) { message("  ✗ HTTP ", resp_status(resp)); return(NULL) }
+  tmp <- tempfile(fileext=".pdf")
+  writeBin(resp_body_raw(resp), tmp)
+  text <- tryCatch(pdf_text(tmp) |> paste(collapse="\n"), error=function(e) NA_character_)
+  unlink(tmp)
+  if (is.na(text)) { message("  ✗ pdf_text failed"); return(NULL) }
+  m <- str_match(text, "ฐานะกองทุน\\s*สุทธิ\\s+(-?[\\d,]+)\\s+(-?[\\d,]+)\\s+(-?[\\d,]+)")
+  if (is.na(m[1])) { message("  ✗ net fund pattern not found"); return(NULL) }
+  list(
+    net_oil   = as.numeric(str_remove_all(m[2], ",")),
+    net_lpg   = as.numeric(str_remove_all(m[3], ",")),
+    net_total = as.numeric(str_remove_all(m[4], ","))
+  )
+}
+
 # base product + field ที่อยากได้แจ้งเตือนทางเมลเมื่อราคาล่าสุดเปลี่ยนจากวันก่อนหน้า
 PRICE_ALERT <- list(DIESEL="RETAIL", `GASOHOL 95`="RETAIL")
 
@@ -405,6 +461,68 @@ if (length(eppo_pending) > 0) {
     # last_date = max ของทั้งสอง
     true_latest <- max(offo_latest, eppo_latest %||% offo_latest)
     update_meta_last_date(token, meta_url, meta, true_latest)
+  }
+}
+
+# ── Step 3: Oil Fund status ──────────────────────────────────────
+message("\n── Oil Fund status scrape (ฐานะกองทุนน้ำมันเชื้อเพลิง)...")
+FUND_SERIES <- list(
+  net_oil   = list(doc_id="OFFO_OILFUND_NET_OIL",   name="OFFO Oil Fund — Net Oil (net_oil)"),
+  net_lpg   = list(doc_id="OFFO_OILFUND_NET_LPG",   name="OFFO Oil Fund — Net LPG (net_lpg)"),
+  net_total = list(doc_id="OFFO_OILFUND_NET_TOTAL", name="OFFO Oil Fund — Net Total (net_total)")
+)
+
+fund_meta_url  <- sprintf(
+  "https://firestore.googleapis.com/v1/projects/%s/databases/(default)/documents/meta/oilfund_status",
+  PROJECT_ID
+)
+fund_meta_resp <- request(fund_meta_url) |> req_auth_bearer_token(token) |>
+  req_error(is_error=\(r) FALSE) |> req_perform()
+fund_last_date <- if (resp_status(fund_meta_resp) == 200) {
+  as.Date(resp_body_json(fund_meta_resp)$fields$last_date$stringValue)
+} else {
+  message("  meta/oilfund_status ไม่พบ — จะสร้างใหม่ (default last_date = 2000-01-01)")
+  as.Date("2000-01-01")
+}
+message(sprintf("  last_date = %s", fund_last_date))
+
+fund_pending <- fund_scrape_pending(fund_last_date)
+message(sprintf("  %d new file(s)", length(fund_pending)))
+
+if (length(fund_pending) > 0) {
+  fund_rows  <- list()
+  fund_latest <- fund_last_date
+  for (item in fund_pending) {
+    message(sprintf("  [%s]", item$date))
+    vals <- parse_fund_pdf(item$href)
+    if (is.null(vals)) next
+    fund_rows[[length(fund_rows)+1]] <- data.frame(
+      date=as.character(item$date), net_oil=vals$net_oil,
+      net_lpg=vals$net_lpg, net_total=vals$net_total
+    )
+    fund_latest <- item$date
+    message("  ✓ parsed")
+    Sys.sleep(DELAY)
+  }
+  if (length(fund_rows) > 0) {
+    fund_df <- bind_rows(fund_rows)
+    for (field in names(FUND_SERIES)) {
+      s <- FUND_SERIES[[field]]
+      df_s <- fund_df |> select(date, value = all_of(field)) |>
+        filter(!is.na(value), is.finite(value)) |> distinct(date, .keep_all=TRUE) |> arrange(date)
+      if (nrow(df_s) == 0) next
+      upsert_series(token, s$doc_id, s$name, df_s)
+    }
+    fund_meta_body <- list(fields=list(
+      last_date = list(stringValue=as.character(fund_latest)),
+      updated   = list(stringValue=format(Sys.time(),"%Y-%m-%dT%H:%M:%SZ",tz="UTC"))
+    ))
+    fund_meta_patch <- request(fund_meta_url) |> req_method("PATCH") |>
+      req_auth_bearer_token(token) |>
+      req_body_json(fund_meta_body, auto_unbox=TRUE) |>
+      req_error(is_error=\(r) FALSE) |> req_perform()
+    if (resp_status(fund_meta_patch) < 300) message(sprintf("  ✓ oilfund last_date → %s", fund_latest))
+    else message(sprintf("  ✗ meta patch HTTP %d", resp_status(fund_meta_patch)))
   }
 }
 
