@@ -1,3 +1,6 @@
+<!-- patch v5.10: Export PDF now includes Oil Fund Status card alongside Diesel/Gasohol95; hero grid stays 3-column during export -->
+<!-- patch v5.9.3: relabel first breakdown row to "ราคาหน้าโรงกลั่น" -->
+<!-- patch v5.9.2: price breakdown adds Ex-Refinery as first row and Retail/Wholesale price as last row; revert card background to original (--bg2), drop the blue tint -->
 <!-- patch v5.9.1: move card shadow from per-chart hero children to the hero container itself; drop blue hero border for a neutral one; more padding above/below chart canvas -->
 <!-- patch v5.9: card visual refresh — more spacing between cards, subtle drop shadow, light-blue tinted background (theme-aware) -->
 <!-- patch v5.8: price structure breakdown collapsed to 4 grouped components (Tax+Cons.Fund, Marketing Margin, VAT, Oil Fund); Diesel/Gasohol95 breakdown open by default and linked (collapsing one collapses both) -->
@@ -40,7 +43,6 @@ canvas { max-width: 100%; }
   --up:#30d158; --dn:#ff453a;
   --blue:#0a84ff; --red:#ff453a; --amber:#ffd60a; --green:#30d158; --purple:#bf5af2;
   --fs: 1rem;
-  --card-bg: #10192b;
   --card-shadow: 0 4px 16px rgba(0,0,0,0.45);
 }
 [data-theme="light"] {
@@ -49,7 +51,6 @@ canvas { max-width: 100%; }
   --text:#1d1d1f; --text2:#6e6e73; --text3:#aeaeb2;
   --up:#34c759; --dn:#ff3b30;
   --blue:#007aff; --red:#ff3b30; --amber:#ff9500; --green:#34c759; --purple:#af52de;
-  --card-bg: #eef6ff;
   --card-shadow: 0 4px 16px rgba(0,0,0,0.08);
 }
 
@@ -70,7 +71,7 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkM
 .energy-hero-grid { display:grid; grid-template-columns:repeat(3,1fr); }
 .energy-hero-grid > .card { border:none; border-radius:0; border-right:1px solid var(--border); background:transparent; box-shadow:none; }
 .energy-hero-grid > .card:last-child { border-right:none; }
-#energy-hero.pdf-export .energy-hero-grid { grid-template-columns:1fr 1fr; }
+#energy-hero.pdf-export .energy-hero-grid { grid-template-columns:repeat(3,1fr); }
 @media (max-width:700px), (orientation:portrait) and (max-width:1024px) {
   .energy-hero-grid { grid-template-columns:1fr; }
   .energy-hero-grid > .card { border-right:none; border-bottom:1px solid var(--border); }
@@ -142,7 +143,7 @@ input[type=range] { width:80px; accent-color:var(--blue); }
 .chart-grid { display:grid; gap:16px; }
 
 /* ── Cards ── */
-.card { border:1px solid var(--border); border-radius:8px; overflow:hidden; background:var(--card-bg); box-shadow:var(--card-shadow); }
+.card { border:1px solid var(--border); border-radius:8px; overflow:hidden; background:var(--bg2); box-shadow:var(--card-shadow); }
 .ch { padding:9px 11px 3px; display:flex; align-items:flex-start; justify-content:space-between; gap:6px; }
 .ct { font-size:0.82em; font-weight:600; text-transform:uppercase; letter-spacing:0.03em; }
 .cs { font-size:0.72em; color:var(--text3); margin-top:2px; line-height:1.3; }
@@ -192,7 +193,7 @@ input[type=range] { width:80px; accent-color:var(--blue); }
 <body>
 
 <div id="topbar">
-  <div class="brand">Macro<span class="patch">v5.9.1</span></div>
+  <div class="brand">Macro<span class="patch">v5.10</span></div>
   <div class="topbar-right">
     <span class="sdot" id="sdot"></span>
     <span id="stxt">loading…</span>
@@ -897,27 +898,41 @@ async function renderEnergyPage() {
     const breakdownLast = getBreakdownAtDate(prod.base, lastDateStr);
     const breakdownRef  = refStr ? getBreakdownAtDate(prod.base, refStr) : null;
 
-    const breakdownRows = BREAKDOWN_FIELDS
-      .map((f, i) => {
-        const vLast = breakdownLast[i].value;
-        const vRef  = breakdownRef ? breakdownRef[i].value : null;
+    // สร้าง 1 แถวของตาราง breakdown (ใช้ร่วมกันทั้ง Ex-Refin / 4 component / Retail)
+    const makeBreakdownRow = (label, vLast, vRef, bold) => {
+      let flagColor = '', arrow = '';
+      if (vLast !== null && vRef !== null && Math.abs(vLast - vRef) > 0.0001) {
+        if (vLast > vRef) { flagColor = '#e53935'; arrow = '↑'; }
+        else              { flagColor = '#43a047'; arrow = '↓'; }
+      }
+      const boldStyle = bold ? 'font-weight:600;' : '';
+      const numStyle  = `padding:5px 4px 5px 8px;text-align:right;${boldStyle}${flagColor ? `color:${flagColor};font-weight:600` : ''}`;
+      const arrowStyle = `padding:5px 8px 5px 2px;width:14px;color:${flagColor}`;
 
-        // flag สีตาม direction เทียบ ref date
-        let flagColor = '', arrow = '';
-        if (vLast !== null && vRef !== null && Math.abs(vLast - vRef) > 0.0001) {
-          if (vLast > vRef) { flagColor = '#e53935'; arrow = '↑'; }
-          else              { flagColor = '#43a047'; arrow = '↓'; }
-        }
-        const numStyle  = `padding:5px 4px 5px 8px;text-align:right${flagColor ? `;color:${flagColor};font-weight:600` : ''}`;
-        const arrowStyle = `padding:5px 8px 5px 2px;width:14px;color:${flagColor}`;
+      return `<tr style="${bold ? 'font-weight:600' : ''}">
+        <td style="padding:5px 8px;color:var(--text2)">${label}</td>
+        <td style="${numStyle}">${vLast !== null ? vLast.toFixed(4) : '—'}</td>
+        <td style="${arrowStyle}">${arrow}</td>
+        ${refStr ? `<td style="padding:5px 8px;text-align:right;color:var(--text3)">${vRef !== null ? vRef.toFixed(4) : '—'}</td>` : ''}
+      </tr>`;
+    };
 
-        return `<tr>
-          <td style="padding:5px 8px;color:var(--text2)">${f.label}</td>
-          <td style="${numStyle}">${vLast !== null ? vLast.toFixed(4) : '—'}</td>
-          <td style="${arrowStyle}">${arrow}</td>
-          ${refStr ? `<td style="padding:5px 8px;text-align:right;color:var(--text3)">${vRef !== null ? vRef.toFixed(4) : '—'}</td>` : ''}
-        </tr>`;
-      }).join('');
+    // บรรทัดแรก: ราคาหน้าโรงกลั่น (Ex-Refinery)
+    const sExRefin    = getEppoSeries(prod.base, 'EX_REFIN');
+    const exRefinLast  = sExRefin ? priceAtDate(sExRefin.data, lastDateStr) : null;
+    const exRefinRef   = sExRefin && refStr ? priceAtDate(sExRefin.data, refStr) : null;
+
+    // บรรทัดสุดท้าย: ราคาหน้าปั๊ม/หน้าคลัง (Retail หรือ Wholesale ตามแต่ละสินค้า)
+    const endLabel = prod.field === 'RETAIL' ? 'Retail Price (หน้าปั๊ม)' : 'Wholesale Price (หน้าคลัง)';
+    const endLast   = last.y;
+    const endRef    = refStr ? priceAtDate(data, refStr) : null;
+
+    const breakdownRows =
+      makeBreakdownRow('ราคาหน้าโรงกลั่น', exRefinLast, exRefinRef, true) +
+      BREAKDOWN_FIELDS.map((f, i) =>
+        makeBreakdownRow(f.label, breakdownLast[i].value, breakdownRef ? breakdownRef[i].value : null, false)
+      ).join('') +
+      makeBreakdownRow(endLabel, endLast, endRef, true);
 
     const fmtDate = (iso) => {
       const d = new Date(iso + 'T00:00:00Z');
@@ -1117,6 +1132,7 @@ async function renderEnergyPage() {
 
     const ofBox = document.createElement('div');
     ofBox.className = 'card';
+    ofBox.dataset.base = 'OIL_FUND_STATUS';
     ofBox.innerHTML = `
       <div class="ch" style="padding:10px 12px 6px">
         <div style="display:flex;align-items:center;flex-wrap:wrap;gap:6px">
@@ -2058,8 +2074,8 @@ window.addEventListener('resize', () => {
   }, 150);
 });
 
-// เฉพาะ product เหล่านี้ที่ export ลง PDF (base ต้องตรงกับ EPPO_ORDER)
-const PDF_EXPORT_BASES = ['DIESEL', 'GASOHOL 95'];
+// เฉพาะการ์ดเหล่านี้ที่ export ลง PDF (base ต้องตรงกับ EPPO_ORDER หรือ 'OIL_FUND_STATUS' สำหรับการ์ด Oil Fund Status)
+const PDF_EXPORT_BASES = ['DIESEL', 'GASOHOL 95', 'OIL_FUND_STATUS'];
 
 window.exportEnergyPDF = async function() {
   const btn = document.getElementById('energy-export-btn');

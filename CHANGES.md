@@ -1,5 +1,43 @@
 # Changelog
 
+## v5.10 — 2026-07-07
+
+### index.html
+
+- **Export PDF เพิ่มการ์ด Oil Fund Status** — เดิม `PDF_EXPORT_BASES` มีแค่
+  `['DIESEL', 'GASOHOL 95']` เพิ่ม `'OIL_FUND_STATUS'` เข้าไปด้วย พร้อมตั้ง
+  `ofBox.dataset.base = 'OIL_FUND_STATUS'` ให้การ์ด Oil Fund Status (เดิมไม่มี
+  `data-base` เลยไม่ถูกนับเป็น target มาก่อน)
+- **ปรับ layout hero ตอน export เป็น 3 คอลัมน์** (จากเดิม 2 คอลัมน์ที่ออกแบบ
+  ไว้ตอนมีแค่ 2 การ์ด) — `#energy-hero.pdf-export .energy-hero-grid` เปลี่ยน
+  จาก `1fr 1fr` เป็น `repeat(3,1fr)` ให้ Diesel/Gasohol95/Oil Fund Status
+  เรียงแถวเดียวกันพอดีในหน้า A4 แนวนอน
+
+## v5.9.3 — 2026-07-07
+
+### index.html
+
+- **แก้ label บรรทัดแรกของโครงสร้างราคา** จาก "Ex-Refinery (หน้าโรงกลั่น)"
+  เป็น "ราคาหน้าโรงกลั่น"
+
+## v5.9.2 — 2026-07-07
+
+### index.html
+
+- **โครงสร้างราคาเพิ่มบรรทัดแรก/สุดท้ายกลับมา** — เดิม v5.8 ย่อเหลือแค่ 4
+  component (Tax+Cons.Fund, Marketing Margin, VAT, Oil Fund) ตอนนี้เพิ่ม:
+  - บรรทัดแรก: **Ex-Refinery (หน้าโรงกลั่น)** — ดึงจาก field `EX_REFIN` ตรง ๆ
+  - บรรทัดสุดท้าย: **Retail Price (หน้าปั๊ม)** หรือ **Wholesale Price
+    (หน้าคลัง)** ตามแต่ละสินค้า (ใช้ field เดียวกับที่การ์ดใช้แสดง "ล่าสุด"
+    ด้านบน — RETAIL สำหรับส่วนใหญ่, WHOLESALE สำหรับ FO 1500/FO 600)
+  - ทั้งสองบรรทัดนี้ตัวหนา (bold) แยกจาก 4 component กลาง เพื่อให้เห็นเป็น
+    "จุดเริ่ม/จุดจบ" ของโครงสร้างราคาชัดเจน
+  - รีแฟกเตอร์ logic สร้างแถวตารางเป็นฟังก์ชันร่วม `makeBreakdownRow()` ใช้ซ้ำ
+    ได้ทั้ง Ex-Refin, 4 component, และ Retail/Wholesale
+- **เอาพื้นหลังสีฟ้าของการ์ดออก กลับเป็นสีเดิม** — ลบ `--card-bg` (ที่เพิ่มใน
+  v5.9) ออก `.card` ใช้ `background:var(--bg2)` แบบเดิมก่อนแก้ — ยังคง
+  `--card-shadow` และ spacing/border-radius ที่ปรับไว้ก่อนหน้า
+
 ## v5.9.1 — 2026-07-07
 
 ### index.html
