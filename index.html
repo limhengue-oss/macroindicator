@@ -1,3 +1,4 @@
+<!-- patch v5.9.1: move card shadow from per-chart hero children to the hero container itself; drop blue hero border for a neutral one; more padding above/below chart canvas -->
 <!-- patch v5.9: card visual refresh — more spacing between cards, subtle drop shadow, light-blue tinted background (theme-aware) -->
 <!-- patch v5.8: price structure breakdown collapsed to 4 grouped components (Tax+Cons.Fund, Marketing Margin, VAT, Oil Fund); Diesel/Gasohol95 breakdown open by default and linked (collapsing one collapses both) -->
 <!-- patch v5.7.2: fix TH Energy chart zoom range wrapping across year boundary (min>max) when latest month is near Jan or Dec — clamp to 1-12 instead of modulo wrap -->
@@ -65,9 +66,9 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkM
 #energy-boxes.pdf-export .energy-chart-box, #energy-hero.pdf-export .energy-chart-box { height:220px !important; }
 
 /* ── TH Energy hero: Diesel / Gasohol95 / Oil Fund เด่นด้านบนสุด ── */
-.energy-hero { border:1px solid var(--blue); border-radius:6px; max-width:1200px; margin:0 auto 16px; padding:0 16px; }
+.energy-hero { border:1px solid var(--border); border-radius:8px; max-width:1200px; margin:0 auto 16px; padding:0 16px; box-shadow:var(--card-shadow); }
 .energy-hero-grid { display:grid; grid-template-columns:repeat(3,1fr); }
-.energy-hero-grid > .card { border:none; border-radius:0; border-right:1px solid var(--border); background:transparent; }
+.energy-hero-grid > .card { border:none; border-radius:0; border-right:1px solid var(--border); background:transparent; box-shadow:none; }
 .energy-hero-grid > .card:last-child { border-right:none; }
 #energy-hero.pdf-export .energy-hero-grid { grid-template-columns:1fr 1fr; }
 @media (max-width:700px), (orientation:portrait) and (max-width:1024px) {
@@ -191,7 +192,7 @@ input[type=range] { width:80px; accent-color:var(--blue); }
 <body>
 
 <div id="topbar">
-  <div class="brand">Macro<span class="patch">v5.9</span></div>
+  <div class="brand">Macro<span class="patch">v5.9.1</span></div>
   <div class="topbar-right">
     <span class="sdot" id="sdot"></span>
     <span id="stxt">loading…</span>
@@ -978,8 +979,7 @@ async function renderEnergyPage() {
         </div>
         ${rtdHtml}
       </div>
-      <div style="padding:6px 12px 10px">
-
+      <div style="padding:14px 12px 16px">
         <div class="energy-chart-box" style="position:relative;height:140px"><canvas id="${canvasId}"></canvas></div>
       </div>
       ${breakdownHtml}`;
@@ -1142,7 +1142,7 @@ async function renderEnergyPage() {
           <div style="font-size:1.05em;font-weight:600;color:${colorOf(projNextYearEnd)}">${fmtPlain(projNextYearEnd)}</div>
         </div>
       </div>
-      <div style="padding:6px 12px 10px">
+      <div style="padding:14px 12px 16px">
         <div class="energy-chart-box" style="position:relative;height:140px"><canvas id="${ofCanvasId}"></canvas></div>
       </div>`;
     heroGrid.appendChild(ofBox);

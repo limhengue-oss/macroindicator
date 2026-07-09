@@ -1,5 +1,22 @@
 # Changelog
 
+## v5.9.1 — 2026-07-07
+
+### index.html
+
+- **เอาเงาออกจากการ์ดย่อยแต่ละ chart ในหมวด hero (Diesel/Gasohol95/Oil Fund)**
+  — `.energy-hero-grid > .card` เพิ่ม `box-shadow:none` (เดิมพื้นหลังโปร่งใส
+  แต่ยังมีเงาติดมาจาก `.card` ทำให้ดูเหมือนเงาลอยไม่มีกล่อง)
+- **ย้ายเงาไปไว้ที่ card แม่ (`.energy-hero`) แทน** — เพิ่ม
+  `box-shadow:var(--card-shadow)` ให้ container ใหญ่ที่ครอบทั้ง 3 chart
+- **เอาเส้นขอบสีน้ำเงินของ `.energy-hero` ออก** — เปลี่ยนจาก
+  `border:1px solid var(--blue)` เป็น `border:1px solid var(--border)`
+  (สีเดียวกับการ์ดทั่วไป) พร้อมปรับ `border-radius` เป็น 8px ให้เข้าชุดกับ
+  การ์ดอื่น
+- **เพิ่มช่องไฟด้านบน/ล่างของ chart ในการ์ด** — padding ของ div ที่ครอบ
+  `.energy-chart-box` จาก `6px 12px 10px` เป็น `14px 12px 16px` (ทั้งการ์ด
+  product ปกติและการ์ด Oil Fund Status)
+
 ## v5.9 — 2026-07-07
 
 ### index.html
