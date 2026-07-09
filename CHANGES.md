@@ -1,5 +1,20 @@
 # Changelog
 
+## v5.13 — 2026-07-07
+
+### index.html
+
+- **Legend "ปีนี้/ปีก่อน" ไม่ได้ขนาด/bold ตามที่ตั้งไว้จริง** — v5.12 เพิ่ม
+  `font-size:0.88em;font-weight:600` ที่ container `#energy-shared-legend`
+  แต่ `.li` class (ใช้ครอบ "ปีนี้"/"ปีก่อน") มี `font-size:0.72em` ของตัวเอง
+  ซึ่ง override ค่าที่ inherit มาจาก parent (font-size ของ element ตัวเองชนะ
+  เสมอไม่ว่า parent จะประกาศไว้เท่าไหร่) ทำให้สองคำนี้ยังเป็นขนาดเดิม ไม่โต
+  ตามที่ขอ — **แก้:** เพิ่ม inline `font-size:1em;font-weight:600` ที่ตัว
+  `.li` div ทั้งสองตัวโดยตรง (1em = สืบต่อขนาดจาก parent 0.88em พอดี)
+- **Indent legend ให้ตรงกับแนวข้อความ DIESEL** — เพิ่ม `padding-left:12px`
+  ให้ `#energy-shared-legend` (16px จาก `.page` + 12px นี้ = 28px ตรงกับ
+  16px ของ `.energy-hero` + 12px ของ `.ch` ที่ครอบชื่อ "DIESEL")
+
 ## v5.12 — 2026-07-07
 
 ### index.html

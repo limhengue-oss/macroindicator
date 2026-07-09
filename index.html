@@ -1,3 +1,4 @@
+<!-- patch v5.13: fix shared legend "ปีนี้/ปีก่อน" not actually matching the +10%/bold styling (overridden by .li class font-size); indent legend to align with DIESEL card text -->
 <!-- patch v5.12: Oil Fund Status "ล่าสุด" date shows MM-DD only; add latest oil price date next to shared legend, both legend + date bumped +10% font and bold -->
 <!-- patch v5.11: Oil Fund Status chart colors segments red/pink when negative, green/light-green when positive; fix dark-theme card shadow being invisible (black-on-black) by adding a subtle light rim layer -->
 <!-- patch v5.10: Export PDF now includes Oil Fund Status card alongside Diesel/Gasohol95; hero grid stays 3-column during export -->
@@ -195,7 +196,7 @@ input[type=range] { width:80px; accent-color:var(--blue); }
 <body>
 
 <div id="topbar">
-  <div class="brand">Macro<span class="patch">v5.12</span></div>
+  <div class="brand">Macro<span class="patch">v5.13</span></div>
   <div class="topbar-right">
     <span class="sdot" id="sdot"></span>
     <span id="stxt">loading…</span>
@@ -262,9 +263,9 @@ input[type=range] { width:80px; accent-color:var(--blue); }
     </div>
   </div>
   <!-- Shared legend -->
-  <div style="display:flex;gap:16px;align-items:center;margin-bottom:10px;font-size:0.88em;font-weight:600" id="energy-shared-legend">
-    <div class="li"><span class="ls" style="background:#f5a623"></span><span id="energy-year-this">ปีนี้</span></div>
-    <div class="li"><span class="ls" style="background:rgba(128,128,128,0.5)"></span><span id="energy-year-last">ปีก่อน</span></div>
+  <div style="display:flex;gap:16px;align-items:center;margin-bottom:10px;padding-left:12px;font-size:0.88em;font-weight:600" id="energy-shared-legend">
+    <div class="li" style="font-size:1em;font-weight:600"><span class="ls" style="background:#f5a623"></span><span id="energy-year-this">ปีนี้</span></div>
+    <div class="li" style="font-size:1em;font-weight:600"><span class="ls" style="background:rgba(128,128,128,0.5)"></span><span id="energy-year-last">ปีก่อน</span></div>
     <span style="color:var(--text3)">·</span>
     <span>ข้อมูลล่าสุด <span id="energy-latest-date"></span></span>
   </div>
