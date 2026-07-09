@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(powershell -Command \"Get-Item fetch_and_push.R, push_meta_only.R, index.html, fetch_eppo.R | Select-Object Name, LastWriteTime\")"
+      "Bash(powershell -Command \"Get-Item fetch_and_push.R, push_meta_only.R, index.html, fetch_eppo.R | Select-Object Name, LastWriteTime\")",
+      "Bash(awk 'NR==864,NR==1290{print NR\": \"$0}' index.html)"
     ]
   }
 }

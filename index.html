@@ -1,3 +1,4 @@
+<!-- patch v5.12: Oil Fund Status "ล่าสุด" date shows MM-DD only; add latest oil price date next to shared legend, both legend + date bumped +10% font and bold -->
 <!-- patch v5.11: Oil Fund Status chart colors segments red/pink when negative, green/light-green when positive; fix dark-theme card shadow being invisible (black-on-black) by adding a subtle light rim layer -->
 <!-- patch v5.10: Export PDF now includes Oil Fund Status card alongside Diesel/Gasohol95; hero grid stays 3-column during export -->
 <!-- patch v5.9.3: relabel first breakdown row to "ราคาหน้าโรงกลั่น" -->
@@ -194,7 +195,7 @@ input[type=range] { width:80px; accent-color:var(--blue); }
 <body>
 
 <div id="topbar">
-  <div class="brand">Macro<span class="patch">v5.11</span></div>
+  <div class="brand">Macro<span class="patch">v5.12</span></div>
   <div class="topbar-right">
     <span class="sdot" id="sdot"></span>
     <span id="stxt">loading…</span>
@@ -261,9 +262,11 @@ input[type=range] { width:80px; accent-color:var(--blue); }
     </div>
   </div>
   <!-- Shared legend -->
-  <div style="display:flex;gap:16px;align-items:center;margin-bottom:10px;font-size:0.8em" id="energy-shared-legend">
+  <div style="display:flex;gap:16px;align-items:center;margin-bottom:10px;font-size:0.88em;font-weight:600" id="energy-shared-legend">
     <div class="li"><span class="ls" style="background:#f5a623"></span><span id="energy-year-this">ปีนี้</span></div>
     <div class="li"><span class="ls" style="background:rgba(128,128,128,0.5)"></span><span id="energy-year-last">ปีก่อน</span></div>
+    <span style="color:var(--text3)">·</span>
+    <span>ข้อมูลล่าสุด <span id="energy-latest-date"></span></span>
   </div>
   <div id="energy-hero" class="energy-hero"><div id="energy-hero-grid" class="energy-hero-grid"></div></div>
   <div id="energy-boxes" class="energy-grid"></div>
@@ -861,6 +864,8 @@ async function renderEnergyPage() {
   yearLabels.forEach((l,i) => { if (l.endsWith('-01')) tickSet.add(i); });
   const tickColor = getComputedStyle(document.documentElement).getPropertyValue('--text3').trim() || '#555';
 
+  let latestPriceDate = '';
+
   for (const prod of EPPO_ORDER) {
     const sRetail   = getEppoSeries(prod.base, prod.field);
     const sOilFund  = getEppoSeries(prod.base, 'OIL_FUND');
@@ -868,6 +873,7 @@ async function renderEnergyPage() {
 
     const data    = sRetail.data;
     const last    = data[data.length-1];
+    if (last.x > latestPriceDate) latestPriceDate = last.x;
     const mtd     = calcMTD(data);
     const qtd     = calcQTD(data);
     const oilFund = sOilFund ? sOilFund.data[sOilFund.data.length-1]?.y : null;
@@ -1143,7 +1149,7 @@ async function renderEnergyPage() {
       </div>
       <div style="display:grid;grid-template-columns:repeat(4,1fr);border-top:1px solid var(--border);border-bottom:1px solid var(--border)">
         <div style="padding:8px 10px;border-right:1px solid var(--border)">
-          <div style="font-size:0.68em;color:var(--text3);margin-bottom:2px">ล่าสุด · ${ofLast.x.slice(0,10)}</div>
+          <div style="font-size:0.68em;color:var(--text3);margin-bottom:2px">ล่าสุด · ${ofLast.x.slice(5,10)}</div>
           <div style="font-size:1.25em;font-weight:600;color:${ofLast.y >= 0 ? '#4d9fff' : '#f05252'}">${fmtPlain(ofLast.y)}</div>
         </div>
         <div style="padding:8px 10px;border-right:1px solid var(--border)">
@@ -1302,6 +1308,10 @@ async function renderEnergyPage() {
       });
     }
   }
+
+  // อัพเดทวันที่ข้อมูลราคาน้ำมันล่าสุด ข้าง legend
+  const ldEl = document.getElementById('energy-latest-date');
+  if (ldEl) ldEl.textContent = latestPriceDate ? latestPriceDate.slice(5) : '';
 }
 
 window.renderEnergyPage = renderEnergyPage;

@@ -1,5 +1,19 @@
 # Changelog
 
+## v5.12 — 2026-07-07
+
+### index.html
+
+- **Oil Fund Status "ล่าสุด" ตัดปีออก** — เปลี่ยนจาก `ofLast.x.slice(0,10)`
+  (YYYY-MM-DD) เป็น `ofLast.x.slice(5,10)` (MM-DD) ให้ตรงกับ format ที่การ์ด
+  product อื่นใช้อยู่แล้ว
+- **เพิ่มวันที่ข้อมูลราคาน้ำมันล่าสุดข้าง shared legend** — เก็บ
+  `latestPriceDate` (ค่าสูงสุดของ `last.x` ที่เจอระหว่างวนลูป `EPPO_ORDER`)
+  แล้วแสดงเป็น MM-DD ใน span `#energy-latest-date` ต่อจาก legend "ปีนี้/ปีก่อน"
+- **ขยาย font legend + วันที่ล่าสุด +10% และ bold** — `#energy-shared-legend`
+  เปลี่ยนจาก `font-size:0.8em` เป็น `0.88em` (+10%) พร้อมเพิ่ม
+  `font-weight:600`
+
 ## v5.11 — 2026-07-07
 
 ### index.html
