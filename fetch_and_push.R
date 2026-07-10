@@ -134,7 +134,14 @@ push_series <- function(token, doc_id, name, df, is_incremental, meta = NULL) {
 
   body <- list(fields = fields)
 
+  # updateMask จำกัดเฉพาะ field ที่ส่งจริงใน body — กัน PATCH ทับทั้ง document
+  # แล้วลบ field "meta" ที่ตั้งไว้ก่อนหน้า (โดย backfill ครั้งแรก หรือโดย
+  # push_meta_only.R แยกต่างหาก) ทิ้งไปตอน incremental update ที่ไม่ได้ส่ง meta
+  mask_fields <- c("name", "updated", "data")
+  if (!is.null(meta)) mask_fields <- c(mask_fields, "meta")
+
   resp <- request(url) |>
+    req_url_query(`updateMask.fieldPaths` = mask_fields, .multi = "explode") |>
     req_method("PATCH") |>
     req_auth_bearer_token(token) |>
     req_body_json(body, auto_unbox = TRUE) |>

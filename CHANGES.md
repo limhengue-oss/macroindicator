@@ -1,5 +1,38 @@
 # Changelog
 
+## v5.15 — 2026-07-10 (bugfix)
+
+### fetch_and_push.R
+
+- **สาเหตุที่ metadata ไม่เสถียร (แสดงแค่ "Updated" หายไปเรื่อย ๆ)** —
+  `push_series()` เขียนเข้า Firestore ด้วย `PATCH` แบบไม่มี `updateMask` เลย
+  ซึ่งตาม semantics ของ Firestore REST API ถ้า PATCH โดยไม่ระบุ updateMask
+  จะ**ทับทั้ง document** ด้วย field ที่ส่งไปเท่านั้น field เดิมที่ไม่ได้ส่งมา
+  ก็จะถูกลบทิ้งไปเลย
+  - `meta` (fullName/unit/source ฯลฯ) จะถูกดึงมาส่งด้วยก็ตอน **backfill ครั้ง
+    แรกของ series นั้นเท่านั้น** (`if (!is_incremental) fetch_meta_yf(...)`)
+    ส่วนการรันแบบ **incremental** ทุกครั้งถัดไป (ซึ่งคือการรันปกติเกือบทั้งหมด
+    เช่นรันทุกวันผ่าน GitHub Actions) จะส่ง `meta = NULL` — พอ PATCH ทับทั้ง
+    document โดยไม่มี field `meta` อยู่ใน body และไม่มี updateMask ป้องกันไว้
+    **field `meta` ที่เคยตั้งไว้ (ทั้งจาก backfill ครั้งแรกและจาก
+    `push_meta_only.R` ที่รันแยกทีหลัง) จะถูกลบทิ้งทันทีในรอบ fetch ถัดไป**
+    เหลือแค่ `name`/`updated`/`data` — ตรงกับอาการที่เห็น (metadata list
+    เหลือแค่วันอัพเดท ไม่มี Full name/Unit/Source)
+  - ปัญหานี้เกิดกับ**ทุก series ใน `CATALOG`** ของ `fetch_and_push.R` (SPX,
+    Mag7, FX, Commodities, US/EU Macro ฯลฯ) ไม่ใช่แค่ EPPO — และเกิดซ้ำทุก
+    รอบที่สคริปต์รัน (ไม่ใช่ครั้งเดียว) ทำให้ดูเหมือน "ไม่เสถียร"
+  - `fetch_eppo.R` ไม่มีปัญหานี้อยู่แล้ว เพราะมี
+    `updateMask.fieldPaths=c("name","updated","data")` ป้องกันไว้ตั้งแต่ก่อน
+    หน้านี้ (ไม่รู้ว่าใครแก้ไว้ตั้งแต่เมื่อไหร่ แต่ pattern ถูกแล้ว)
+  **แก้:** เพิ่ม `updateMask.fieldPaths` ให้ `push_series()` แบบไดนามิก —
+  ปกติจำกัดแค่ `name/updated/data`, แต่ถ้ารอบนั้นมี `meta` ส่งมาด้วย (backfill
+  ครั้งแรก) จะรวม `meta` เข้า mask ด้วย ป้องกันไม่ให้ PATCH ทับ field ที่ไม่ได้
+  ตั้งใจจะแก้
+  - **ต้องทำต่อ**: รัน `push_meta_only.R` (workflow "Push Series Metadata")
+    ใหม่อีกครั้งหลัง deploy fix นี้ เพื่อเติม metadata ที่หายไปกลับเข้า
+    Firestore — ครั้งนี้จะไม่ถูกลบซ้ำแล้วเพราะ `fetch_and_push.R` เขียนแบบ
+    scoped ไม่ทับทั้ง document อีกต่อไป
+
 ## v5.14 — 2026-07-07
 
 ### index.html
