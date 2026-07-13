@@ -1,3 +1,4 @@
+<!-- patch v6.0: DIESEL breakdown adds DISCOUNT row ("ส่วนลดจากราคาหน้าโรงกลั่น", history defaults to 0); breakdown table header dates drop year (D-Mon only); breakdown label column widened (table-layout:fixed, 42%) to stop long labels wrapping oddly; card header no longer shows the "กองทุน ±x.xx" badge (Oil Fund now lives in its own hero card) -->
 <!-- patch v5.14: date format "D-Mon" (e.g. 8-Jul) for all card "ล่าสุด" fields, "D-Mon-YYYY" for the legend latest-date; shared legend now centered instead of left-indented -->
 <!-- patch v5.13: fix shared legend "ปีนี้/ปีก่อน" not actually matching the +10%/bold styling (overridden by .li class font-size); indent legend to align with DIESEL card text -->
 <!-- patch v5.12: Oil Fund Status "ล่าสุด" date shows MM-DD only; add latest oil price date next to shared legend, both legend + date bumped +10% font and bold -->
@@ -197,7 +198,7 @@ input[type=range] { width:80px; accent-color:var(--blue); }
 <body>
 
 <div id="topbar">
-  <div class="brand">Macro<span class="patch">v5.14</span></div>
+  <div class="brand">Macro<span class="patch">v6.0</span></div>
   <div class="topbar-right">
     <span class="sdot" id="sdot"></span>
     <span id="stxt">loading…</span>
@@ -878,7 +879,6 @@ async function renderEnergyPage() {
 
   for (const prod of EPPO_ORDER) {
     const sRetail   = getEppoSeries(prod.base, prod.field);
-    const sOilFund  = getEppoSeries(prod.base, 'OIL_FUND');
     if (!sRetail || !sRetail.data.length) continue;
 
     const data    = sRetail.data;
@@ -886,7 +886,6 @@ async function renderEnergyPage() {
     if (last.x > latestPriceDate) latestPriceDate = last.x;
     const mtd     = calcMTD(data);
     const qtd     = calcQTD(data);
-    const oilFund = sOilFund ? sOilFund.data[sOilFund.data.length-1]?.y : null;
 
     // RTD — ref date เปรียบเทียบกับราคา ณ วันนั้น
     let rtdHtml = '';
@@ -904,11 +903,6 @@ async function renderEnergyPage() {
         </div>`;
       }
     }
-
-    // OIL FUND badge
-    const oilFundHtml = oilFund !== null
-      ? `<span style="font-size:0.7em;color:var(--text3);margin-left:8px">กองทุน ${oilFund >= 0 ? '+' : ''}${oilFund.toFixed(2)}</span>`
-      : '';
 
     // Breakdown โครงสร้างราคา ณ วันล่าสุด และ ณ ref date
     const lastDateStr = last.x;
@@ -939,6 +933,23 @@ async function renderEnergyPage() {
     const exRefinLast  = sExRefin ? priceAtDate(sExRefin.data, lastDateStr) : null;
     const exRefinRef   = sExRefin && refStr ? priceAtDate(sExRefin.data, refStr) : null;
 
+    // ส่วนลดจากราคาหน้าโรงกลั่น (DISCOUNT) — เฉพาะ DIESEL เท่านั้นที่มีค่านี้จริง
+    // (product อื่นไม่มีคอลัมน์นี้เลย/ไม่เคยลด) ย้อนหลังก่อนที่ field นี้จะถูกเก็บ
+    // (ก่อน ก.ค. 2569) ให้ถือเป็น 0 แทนที่จะเป็นค่าว่าง
+    const isDiesel = prod.base === 'DIESEL';
+    const sDiscount = isDiesel ? getEppoSeries(prod.base, 'DISCOUNT') : null;
+    const discountAtDateOrZero = (dateStr) => {
+      if (!dateStr) return null;
+      if (!sDiscount || !sDiscount.data.length) return 0;
+      const v = priceAtDate(sDiscount.data, dateStr);
+      return v !== null ? v : 0;
+    };
+    const discountLast = isDiesel ? discountAtDateOrZero(lastDateStr) : null;
+    const discountRef  = isDiesel && refStr ? discountAtDateOrZero(refStr) : null;
+    const discountRowHtml = isDiesel
+      ? makeBreakdownRow('ส่วนลดจากราคาหน้าโรงกลั่น', discountLast, discountRef, false)
+      : '';
+
     // บรรทัดสุดท้าย: ราคาหน้าปั๊ม/หน้าคลัง (Retail หรือ Wholesale ตามแต่ละสินค้า)
     const endLabel = prod.field === 'RETAIL' ? 'Retail Price (หน้าปั๊ม)' : 'Wholesale Price (หน้าคลัง)';
     const endLast   = last.y;
@@ -946,6 +957,7 @@ async function renderEnergyPage() {
 
     const breakdownRows =
       makeBreakdownRow('ราคาหน้าโรงกลั่น', exRefinLast, exRefinRef, true) +
+      discountRowHtml +
       BREAKDOWN_FIELDS.map((f, i) =>
         makeBreakdownRow(f.label, breakdownLast[i].value, breakdownRef ? breakdownRef[i].value : null, false)
       ).join('') +
@@ -953,7 +965,7 @@ async function renderEnergyPage() {
 
     const fmtDate = (iso) => {
       const d = new Date(iso + 'T00:00:00Z');
-      return d.toLocaleDateString('en-GB', {day:'numeric', month:'short', year:'numeric', timeZone:'UTC'});
+      return d.toLocaleDateString('en-GB', {day:'numeric', month:'short', timeZone:'UTC'});
     };
 
     const lastHeader = `ล่าสุด · ${fmtDate(lastDateStr)}`;
@@ -971,9 +983,9 @@ async function renderEnergyPage() {
           <span id="${breakdownId}-arrow">${isDefaultOpen ? '▴' : '▾'}</span>
         </button>
         <div id="${breakdownId}" style="display:${isDefaultOpen ? 'block' : 'none'};padding:0 12px 10px">
-          <table style="width:100%;border-collapse:collapse;font-size:0.78em">
+          <table style="width:100%;border-collapse:collapse;font-size:0.78em;table-layout:fixed">
             <thead><tr>
-              <th style="padding:5px 8px;text-align:left;font-weight:400;color:var(--text3)"></th>
+              <th style="width:42%;padding:5px 8px;text-align:left;font-weight:400;color:var(--text3)"></th>
               <th style="padding:5px 4px 5px 8px;text-align:right;font-weight:400;color:var(--text3)">${lastHeader}</th>
               ${arrowHeader}
               ${refColHeader}
@@ -991,7 +1003,7 @@ async function renderEnergyPage() {
       <div class="ch" style="padding:10px 12px 6px">
         <div style="display:flex;align-items:center;flex-wrap:wrap;gap:6px">
           <div class="ct" style="color:${prod.color}">${prod.label}</div>
-          <div class="cs">${prod.unit}${oilFundHtml}</div>
+          <div class="cs">${prod.unit}</div>
         </div>
       </div>
       <div style="display:grid;grid-template-columns:${rtdHtml ? 'repeat(4,1fr)' : 'repeat(3,1fr)'};border-top:1px solid var(--border);border-bottom:1px solid var(--border)">

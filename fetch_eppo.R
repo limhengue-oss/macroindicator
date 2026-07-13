@@ -31,7 +31,7 @@ DELAY        <- 1.0
 STALE_WEEKDAY_THRESHOLD <- 2  # แจ้งเตือนถ้าข้อมูลล่าสุด lag เกินกี่ "วันทำการ" (ไม่นับ ส-อา)
 
 ALL_FIELDS <- c("EX_REFIN","EXCISE_TAX","M_TAX","OIL_FUND","CONSV_FUND",
-                "VAT_WS","MARKETING_MARGIN","VAT_MM","RETAIL","WHOLESALE","EX_RATE")
+                "VAT_WS","MARKETING_MARGIN","VAT_MM","RETAIL","WHOLESALE","EX_RATE","DISCOUNT")
 
 # ── Credentials ───────────────────────────────────────────────────
 sa_json <- Sys.getenv("GCP_SA_KEY")
@@ -201,6 +201,7 @@ find_field_columns <- function(ws, header_rows = 1:6) {
     txt <- col_text[c]
     if (txt == "") next
     if (is.null(cols$EX_REFIN) && str_detect(txt, "EX.?REFIN"))         { cols$EX_REFIN <- c; next }
+    if (is.null(cols$DISCOUNT) && str_detect(txt, "DISCOUNT"))          { cols$DISCOUNT <- c; next }
     if (is.null(cols$EXCISE_TAX) && str_detect(txt, "EXCISE"))          { cols$EXCISE_TAX <- c; next }
     if (is.null(cols$M_TAX) && str_detect(txt, "M\\.?\\s*TAX"))         { cols$M_TAX <- c; next }
     if (is.null(cols$CONSV_FUND) && str_detect(txt, "CONSV"))           { cols$CONSV_FUND <- c; next }
@@ -393,7 +394,8 @@ eppo_api_to_df <- function(api, web_date) {
     }
     NA_character_
   }
-  k_exrefin <- key_for("EX.?REFIN")
+  k_exrefin  <- key_for("EX.?REFIN")
+  k_discount <- key_for("DISCOUNT")
   k_excise  <- key_for("EXCISE")
   k_mtax    <- key_for("M\\.?\\s*TAX")
   k_oil     <- key_for("\\bOIL\\b", exclude = "WHOLESALE")
@@ -417,7 +419,8 @@ eppo_api_to_df <- function(api, web_date) {
     if (is.null(base)) return(NULL)
     list(
       DATE=as.character(web_date), PRODUCT_CLEAN=product, BASE_PRODUCT=base, EX_RATE=NA_real_,
-      EX_REFIN=getval(row,k_exrefin), EXCISE_TAX=getval(row,k_excise), M_TAX=getval(row,k_mtax),
+      EX_REFIN=getval(row,k_exrefin), DISCOUNT=getval(row,k_discount),
+      EXCISE_TAX=getval(row,k_excise), M_TAX=getval(row,k_mtax),
       OIL_FUND=getval(row,k_oil), CONSV_FUND=getval(row,k_consv), WHOLESALE=getval(row,k_ws),
       VAT_WS=getval(row,k_vatws), MARKETING_MARGIN=getval(row,k_mktmgn), VAT_MM=getval(row,k_vatmm),
       RETAIL=getval(row,k_retail)
