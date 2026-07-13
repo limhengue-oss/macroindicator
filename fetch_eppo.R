@@ -16,20 +16,20 @@ suppressPackageStartupMessages({
 # ── Config ────────────────────────────────────────────────────────
 PROJECT_ID   <- "macroindicator-6b265"
 COLLECTION   <- "series"
-EPPO_BASE    <- "https://old.eppo.go.th"
-EPPO_LIST    <- paste0(EPPO_BASE, "/index.php/th/petroleum/price/structure-oil-price")
-OFFO_LIST    <- "https://www.offo.or.th/th/oil-price-structure-adjusted"
-FUND_STATUS_LIST <- "https://www.offo.or.th/th/estimate/fuelfund-status"
+# EPPO ย้ายจาก old.eppo.go.th (หน้า list + download link) มาที่ www.eppo.go.th
+# ตั้งแต่ ก.ค. 2569 — หน้าใหม่ (data-energy-statistic/energy-price-th/...) ต้องกรอก
+# ฟอร์มค้นหาช่วงวันที่ถึงจะเห็นลิงก์ (scrape หน้าเว็บตรง ๆ ไม่ได้ง่าย ๆ) แต่หน้านั้น
+# เรียกใช้ REST API ของ WordPress เองอยู่แล้วที่ EPPO_API_URL (คืน snapshot ล่าสุด
+# เป็น JSON ตรง ๆ) ใช้ตัวนี้เป็นแหล่งหลักในการเช็ค/ดึงข้อมูลวันล่าสุด ส่วน URL ไฟล์เป็น
+# pattern ตายตัวตามวันที่ (EPPO_FILE_BASE) ใช้ probe ตรงทีละวันเป็น fallback/double-check
+EPPO_API_URL      <- "https://www.eppo.go.th/wp-json/oil-api/v1/oil-structure-prices"
+EPPO_FILE_BASE    <- "https://www.eppo.go.th/wp-content/uploads"
+OFFO_LIST         <- "https://www.offo.or.th/th/oil-price-structure-adjusted"
+FUND_STATUS_LIST  <- "https://www.offo.or.th/th/estimate/fuelfund-status"
 MAX_PAGES    <- 3
 DELAY        <- 1.0
+STALE_WEEKDAY_THRESHOLD <- 2  # แจ้งเตือนถ้าข้อมูลล่าสุด lag เกินกี่ "วันทำการ" (ไม่นับ ส-อา)
 
-DATA_START <- 6; DATA_END <- 15
-EXRATE_ROW <- 17; EXRATE_COL <- 3
-
-FIELDS_COL <- list(
-  EX_REFIN=2, EXCISE_TAX=3, M_TAX=4, OIL_FUND=5, CONSV_FUND=6,
-  WHOLESALE=7, VAT_WS=8, MARKETING_MARGIN=10, VAT_MM=11, RETAIL=12
-)
 ALL_FIELDS <- c("EX_REFIN","EXCISE_TAX","M_TAX","OIL_FUND","CONSV_FUND",
                 "VAT_WS","MARKETING_MARGIN","VAT_MM","RETAIL","WHOLESALE","EX_RATE")
 
@@ -186,6 +186,57 @@ upsert_series <- function(token, doc_id, name, new_df, track_change = FALSE) {
   list(ok=TRUE, change=change)
 }
 
+# ── Dynamic column/row detection ────────────────────────────────────
+# หาตำแหน่งคอลัมน์จาก "หัวตาราง" (label text) แทนการ hardcode index ตายตัว —
+# ทนต่อการที่ต้นทางแทรก/สลับคอลัมน์กลางตาราง (เช่น OFFO เพิ่มคอลัมน์ DISCOUNT
+# กลางตารางตั้งแต่ไฟล์ 9 ก.ค. 2569 ทำให้ทุกคอลัมน์หลังจากนั้นเลื่อนขวา 1 ช่อง)
+find_field_columns <- function(ws, header_rows = 1:6) {
+  hr <- header_rows[header_rows <= nrow(ws)]
+  col_text <- map_chr(seq_len(ncol(ws)), function(c) {
+    vals <- map_chr(hr, function(r) { v <- as.character(ws[r, c]); if (is.na(v)) "" else v })
+    str_to_upper(str_squish(paste(vals, collapse = " ")))
+  })
+  cols <- list(); vat_seen <- 0
+  for (c in seq_along(col_text)) {
+    txt <- col_text[c]
+    if (txt == "") next
+    if (is.null(cols$EX_REFIN) && str_detect(txt, "EX.?REFIN"))         { cols$EX_REFIN <- c; next }
+    if (is.null(cols$EXCISE_TAX) && str_detect(txt, "EXCISE"))          { cols$EXCISE_TAX <- c; next }
+    if (is.null(cols$M_TAX) && str_detect(txt, "M\\.?\\s*TAX"))         { cols$M_TAX <- c; next }
+    if (is.null(cols$CONSV_FUND) && str_detect(txt, "CONSV"))           { cols$CONSV_FUND <- c; next }
+    if (is.null(cols$WHOLESALE) && str_detect(txt, "WHOLESALE"))        { cols$WHOLESALE <- c; next }
+    if (is.null(cols$MARKETING_MARGIN) && str_detect(txt, "MARKETING")) { cols$MARKETING_MARGIN <- c; next }
+    if (is.null(cols$RETAIL) && str_detect(txt, "RETAIL"))              { cols$RETAIL <- c; next }
+    if (is.null(cols$OIL_FUND) && str_detect(txt, "\\bOIL\\b") && !str_detect(txt, "WHOLESALE")) {
+      cols$OIL_FUND <- c; next
+    }
+    if (str_detect(txt, "\\bVAT\\b") && !str_detect(txt, "WS.?VAT")) {
+      vat_seen <- vat_seen + 1
+      if (vat_seen == 1) cols$VAT_WS <- c else if (vat_seen == 2) cols$VAT_MM <- c
+      next
+    }
+  }
+  cols
+}
+
+# แถวข้อมูลแรก = แถวแรกที่คอลัมน์ EX_REFIN เป็นตัวเลข และคอลัมน์ 1 (ชื่อสินค้า) ไม่ว่าง
+find_data_start <- function(ws, exrefin_col, max_row = 40) {
+  for (r in 2:min(max_row, nrow(ws))) {
+    v <- suppressWarnings(as.numeric(as.character(ws[r, exrefin_col])))
+    p <- str_squish(as.character(ws[r, 1]))
+    if (!is.na(v) && !is.na(p) && p != "" && p != "NA") return(r)
+  }
+  NA_integer_
+}
+
+find_exrate <- function(ws) {
+  hit <- which(apply(ws, 1, function(row) any(str_detect(row, "(?i)Exchange\\s*Rate|อัตราแลกเปลี่ยน"), na.rm=TRUE)))
+  if (length(hit) == 0) return(NA_real_)
+  row_text <- as.character(ws[hit[1], ])
+  m <- str_extract(row_text, "\\d{2}\\.\\d+")
+  suppressWarnings(as.numeric(m[!is.na(m)][1]))
+}
+
 # parse xlsx → df rows (shared by OFFO and EPPO)
 # meta_products: base product ทั้งหมดที่เคยเจอ (จาก meta/eppo_status)
 # strict: EPPO (authoritative) ต้องมีครบ ไม่งั้น skip ทั้งไฟล์เหมือนเดิม
@@ -200,25 +251,33 @@ parse_xlsx <- function(tmp, web_date, meta_products = NULL, strict = TRUE) {
     )
   )
   if (is.null(ws)) return(NULL)
-  if (is.na(suppressWarnings(as.numeric(as.character(ws[DATA_START, 3]))))) {
-    message("  ✗ col3 not numeric — skip"); return(NULL)
+
+  cols <- find_field_columns(ws)
+  # HEADER_MISMATCH: หาคอลัมน์หลัก (EX_REFIN/RETAIL) จากหัวตารางไม่เจอเลย หรือหา
+  # แถวข้อมูลเริ่มต้นไม่เจอ — แปลว่าต้นทางเปลี่ยน layout เกินกว่าจะเดาอัตโนมัติได้
+  # (ดู log บรรทัดนี้ประกอบ — จะได้อีเมลแจ้งอัตโนมัติ)
+  if (is.null(cols$EX_REFIN) || is.null(cols$RETAIL)) {
+    message(sprintf("  ✗ HEADER_MISMATCH [%s]: หาคอลัมน์ EX_REFIN/RETAIL จากหัวตารางไม่เจอ — skip", web_date))
+    return(NULL)
   }
-  if (ncol(ws) < max(unlist(FIELDS_COL))) {
-    message("  ✗ not enough cols — skip"); return(NULL)
+  data_start <- find_data_start(ws, cols$EX_REFIN)
+  if (is.na(data_start)) {
+    message(sprintf("  ✗ HEADER_MISMATCH [%s]: หาแถวข้อมูลเริ่มต้นไม่เจอ — skip", web_date))
+    return(NULL)
   }
-  exrate <- suppressWarnings(as.numeric(as.character(ws[EXRATE_ROW, EXRATE_COL])))
+  data_end <- min(data_start + 30, nrow(ws))
+  exrate   <- find_exrate(ws)
+
   rows <- list()
-  for (r in DATA_START:min(DATA_END, nrow(ws))) {
+  for (r in data_start:data_end) {
     product <- str_squish(as.character(ws[r, 1]))
     if (is.na(product) || product == "" || product == "NA") next
     base <- resolve_base(product)
     if (is.null(base)) next
     row_data <- list(DATE=as.character(web_date), PRODUCT_CLEAN=product,
                      BASE_PRODUCT=base, EX_RATE=exrate)
-    for (field in names(FIELDS_COL)) {
-      col_idx <- FIELDS_COL[[field]]
-      row_data[[field]] <- if (col_idx <= ncol(ws))
-        suppressWarnings(as.numeric(as.character(ws[r, col_idx]))) else NA_real_
+    for (field in names(cols)) {
+      row_data[[field]] <- suppressWarnings(as.numeric(as.character(ws[r, cols[[field]]])))
     }
     rows[[length(rows)+1]] <- row_data
   }
@@ -270,20 +329,116 @@ scrape_list <- function(base_url, get_pairs_fn, last_date) {
   rev(pending)  # เรียงเก่า → ใหม่
 }
 
-# ── Source-specific extractors ────────────────────────────────────
-eppo_extractor <- list(
-  page_suffix = function(p) paste0("?start=", p * 9),
-  extract = function(html) {
-    dl_nodes <- html |> html_elements("a[href*='download']")
-    map(dl_nodes, function(node) {
-      list(
-        date_txt = node |> xml2::xml_parent() |> xml2::xml_parent() |>
-          html_element("div[style*='float:left']") |> html_text(trim=TRUE) %||% "",
-        href = paste0(EPPO_BASE, html_attr(node, "href"))
-      )
-    })
+# ── EPPO: probe URL ตรงตามวันที่ (www.eppo.go.th ไม่มีหน้า list ให้ scrape แล้ว —
+# ต้องกรอกฟอร์มค้นหาช่วงวันที่ถึงจะเห็นลิงก์ ซึ่งเป็น JS/AJAX scrape ไม่ได้ตรงๆ)
+# URL ไฟล์เป็น pattern คงที่ตามวันที่ ("pt-price-st-{Y}-{M}-{D}.xlsx") — ลองทั้งแบบ
+# ไม่ใส่ศูนย์นำหน้ากับใส่ศูนย์นำหน้าเผื่อ format ไม่คงที่ทุกเดือน
+eppo_candidate_urls <- function(d) {
+  y       <- format(d, "%Y")
+  m_dir   <- format(d, "%m")
+  m_num   <- as.character(as.integer(format(d, "%m")))
+  day_num <- as.character(as.integer(format(d, "%d")))
+  day_pad <- format(d, "%d")
+  unique(c(
+    sprintf("%s/%s/%s/pt-price-st-%s-%s-%s.xlsx", EPPO_FILE_BASE, y, m_dir, y, m_num, day_num),
+    sprintf("%s/%s/%s/pt-price-st-%s-%s-%s.xlsx", EPPO_FILE_BASE, y, m_dir, y, m_dir, day_pad)
+  ))
+}
+
+# ไล่ probe ทีละวันจาก last_date+1 ถึงวันนี้ (ไม่มี pagination ให้ walk เหมือน scrape_list)
+eppo_scrape_pending <- function(last_date, today = Sys.Date()) {
+  pending <- list()
+  d <- last_date + 1
+  while (d <= today) {
+    for (u in eppo_candidate_urls(d)) {
+      resp <- do_get(u)
+      if (resp_status(resp) == 200) {
+        pending[[length(pending)+1]] <- list(date=d, href=u)
+        break
+      }
+    }
+    d <- d + 1
   }
-)
+  pending
+}
+
+# ── EPPO REST API: แหล่งหลัก เช็ค/ดึงวันล่าสุดตรง ๆ เป็น JSON ──────────────
+# API นี้เป็นตัวเดียวกับที่หน้าเว็บ (data-energy-statistic/.../โครงสร้างราคาน้ำมัน-LPG)
+# เรียกใช้ตอนกดค้นหา — คืนแค่ snapshot ล่าสุดวันเดียว (ไม่รองรับ date range/query param)
+fetch_eppo_api_latest <- function() {
+  resp <- do_get(EPPO_API_URL)
+  if (resp_status(resp) != 200) { message("  ✗ EPPO API HTTP ", resp_status(resp)); return(NULL) }
+  d <- tryCatch(resp_body_json(resp), error=function(e) NULL)
+  if (is.null(d) || is.null(d$last_updated)) { message("  ✗ EPPO API response ผิดรูปแบบ"); return(NULL) }
+  list(
+    last_updated = as.Date(d$last_updated),
+    file_path    = d$file_path %||% NA_character_,
+    labels       = d$structure_label,
+    prices       = d$structure_price
+  )
+}
+
+# แปลง structure_label (key→label text) + structure_price (row keyed ด้วย "1".."13")
+# จาก API ให้เป็น df แบบเดียวกับที่ parse_xlsx คืน — หาคอลัมน์จาก label text เหมือนกับ
+# find_field_columns() แต่อ่านจาก JSON labels แทนเซลล์ในตาราง
+eppo_api_to_df <- function(api, web_date) {
+  if (is.null(api$prices) || length(api$prices) == 0) return(NULL)
+  label_map <- map_chr(api$labels, \(x) str_to_upper(str_squish(x$label %||% "")))
+  names(label_map) <- map_chr(api$labels, \(x) as.character(x$key))
+
+  key_for <- function(pattern, exclude = NULL) {
+    for (k in names(label_map)) {
+      txt <- label_map[[k]]
+      if (str_detect(txt, pattern) && (is.null(exclude) || !str_detect(txt, exclude))) return(k)
+    }
+    NA_character_
+  }
+  k_exrefin <- key_for("EX.?REFIN")
+  k_excise  <- key_for("EXCISE")
+  k_mtax    <- key_for("M\\.?\\s*TAX")
+  k_oil     <- key_for("\\bOIL\\b", exclude = "WHOLESALE")
+  k_consv   <- key_for("CONSV")
+  k_ws      <- key_for("WHOLESALE")
+  k_mktmgn  <- key_for("MARKETING")
+  k_retail  <- key_for("RETAIL")
+  vat_keys  <- names(label_map)[str_detect(label_map, "\\bVAT\\b") & !str_detect(label_map, "WS.?VAT")]
+  k_vatws <- vat_keys[1] %||% NA_character_
+  k_vatmm <- vat_keys[2] %||% NA_character_
+
+  getval <- function(row, k) {
+    if (is.na(k) || is.null(row[[k]]) || row[[k]] == "") return(NA_real_)
+    suppressWarnings(as.numeric(row[[k]]))
+  }
+
+  rows <- map(api$prices, function(row) {
+    product <- str_squish(row[["1"]] %||% "")
+    if (product == "") return(NULL)
+    base <- resolve_base(product)
+    if (is.null(base)) return(NULL)
+    list(
+      DATE=as.character(web_date), PRODUCT_CLEAN=product, BASE_PRODUCT=base, EX_RATE=NA_real_,
+      EX_REFIN=getval(row,k_exrefin), EXCISE_TAX=getval(row,k_excise), M_TAX=getval(row,k_mtax),
+      OIL_FUND=getval(row,k_oil), CONSV_FUND=getval(row,k_consv), WHOLESALE=getval(row,k_ws),
+      VAT_WS=getval(row,k_vatws), MARKETING_MARGIN=getval(row,k_mktmgn), VAT_MM=getval(row,k_vatmm),
+      RETAIL=getval(row,k_retail)
+    )
+  })
+  rows <- compact(rows)
+  if (length(rows) == 0) return(NULL)
+  bind_rows(rows)
+}
+
+# นับจำนวน "วันทำการ" (จ-ศ) ตั้งแต่ from_date (ไม่รวม) ถึง to_date (รวม) — ใช้เช็คว่า
+# ข้อมูล lag เกินเกณฑ์จริงไหมโดยไม่นับวันเสาร์-อาทิตย์เป็นวัน lag (EPPO บางทีก็ไม่ลง
+# ข้อมูลวันหยุด ซึ่งยอมรับได้)
+count_weekdays_between <- function(from_date, to_date) {
+  if (is.na(from_date) || is.na(to_date) || to_date <= from_date) return(0)
+  days <- seq(from_date + 1, to_date, by = "day")
+  # ใช้ $wday (0=อาทิตย์..6=เสาร์) แทน weekdays() เพราะ weekdays() ขึ้นกับ locale
+  # ของเครื่อง (เช่น locale ไทยจะได้ "จันทร์" ไม่ใช่ "Monday" — เทียบสตริงพังเงียบๆ)
+  wday <- as.POSIXlt(days)$wday
+  sum(!wday %in% c(0, 6))
+}
 
 offo_extractor <- list(
   page_suffix = function(p) paste0("?page=", p),
@@ -399,12 +554,26 @@ update_meta_last_date <- function(token, meta_url, meta, latest_date) {
     products  = list(arrayValue=list(values=map(as.list(meta_products), \(p) list(stringValue=p)))),
     updated   = list(stringValue=format(Sys.time(),"%Y-%m-%dT%H:%M:%SZ",tz="UTC"))
   ))
-  r <- request(meta_url) |> req_method("PATCH") |>
+  r <- request(meta_url) |>
+    req_url_query(`updateMask.fieldPaths`=c("last_date","fields","products","updated"), .multi="explode") |>
+    req_method("PATCH") |>
     req_auth_bearer_token(token) |>
     req_body_json(body, auto_unbox=TRUE) |>
     req_error(is_error=\(r) FALSE) |> req_perform()
   if (resp_status(r) < 300) message(sprintf("  ✓ last_date → %s", latest_date))
   else message(sprintf("  ✗ HTTP %d", resp_status(r)))
+}
+
+# PATCH field เดียวแบบจำกัด updateMask — ใช้กัน field อื่นในเอกสารเดียวกันหาย
+patch_meta_field <- function(token, url, field_name, value) {
+  body <- list(fields = setNames(list(list(stringValue = as.character(value))), field_name))
+  r <- request(url) |>
+    req_url_query(`updateMask.fieldPaths`=field_name) |>
+    req_method("PATCH") |>
+    req_auth_bearer_token(token) |>
+    req_body_json(body, auto_unbox=TRUE) |>
+    req_error(is_error=\(r) FALSE) |> req_perform()
+  resp_status(r)
 }
 
 # ══════════════════════════════════════════════════════════════════
@@ -451,21 +620,62 @@ if (length(offo_pending) > 0) {
 
 # ── Step 2: EPPO ─────────────────────────────────────────────────
 # EPPO scrape ตั้งแต่ last_date เดิม (ก่อน OFFO) เพื่อ overwrite วันซ้ำด้วย
+# 1) เช็ค EPPO REST API ก่อน (แหล่งหลัก — เป็นตัวเดียวกับที่หน้าเว็บ EPPO ใช้แสดงผล)
+# 2) probe URL ตรงตามวันที่เสมอสำหรับช่วงที่ขาดหาย เป็น double-check เผื่อ API เอง
+#    cache ค้าง/ตอบช้ากว่าไฟล์จริงบนเว็บ
 message("\n── EPPO scrape (authoritative source, overwrite)...")
-eppo_pending <- scrape_list(EPPO_LIST, eppo_extractor, last_date)
-message(sprintf("  %d file(s) from EPPO (may overlap with OFFO)", length(eppo_pending)))
 
+eppo_api <- fetch_eppo_api_latest()
+eppo_rows_list <- list()
 eppo_latest <- NULL
+
+if (!is.null(eppo_api)) {
+  message(sprintf("  EPPO API last_updated = %s (ไฟล์: %s)",
+                  eppo_api$last_updated, basename(eppo_api$file_path %||% "")))
+  if (!is.na(eppo_api$last_updated) && eppo_api$last_updated > last_date) {
+    df_api <- eppo_api_to_df(eppo_api, eppo_api$last_updated)
+    if (!is.null(df_api)) {
+      eppo_rows_list[[length(eppo_rows_list)+1]] <- df_api
+      eppo_latest <- eppo_api$last_updated
+      message(sprintf("  ✓ [%s] จาก EPPO API โดยตรง (%d แถว)", eppo_api$last_updated, nrow(df_api)))
+    }
+  }
+} else {
+  message("  ⚠ EPPO API ใช้ไม่ได้ — ใช้วิธี probe URL ตรงอย่างเดียว")
+}
+
+# double-check ด้วย URL ตรงสำหรับทุกวันที่ขาดหาย (last_date+1 ถึงวันนี้) ไม่ว่า API จะ
+# ตอบสำเร็จหรือไม่ก็ตาม — กันกรณี API ตกหล่นบางวันหรือ cache ช้ากว่าไฟล์จริง
+eppo_pending <- eppo_scrape_pending(last_date)
+if (!is.null(eppo_latest)) eppo_pending <- keep(eppo_pending, \(x) x$date != eppo_latest)
+message(sprintf("  %d file(s) to probe via direct URL (นอกเหนือจาก API)", length(eppo_pending)))
+
 if (length(eppo_pending) > 0) {
   result <- download_and_parse(eppo_pending, meta_products)
   if (!is.null(result$df)) {
-    ok <- push_df(token, result$df)
-    message(sprintf("── EPPO pushed %d series (overwrote OFFO where dates overlap)", ok))
-    eppo_latest <- result$latest
-    # last_date = max ของทั้งสอง
-    true_latest <- max(offo_latest, eppo_latest %||% offo_latest)
-    update_meta_last_date(token, meta_url, meta, true_latest)
+    eppo_rows_list[[length(eppo_rows_list)+1]] <- result$df
+    eppo_latest <- max(c(eppo_latest, result$latest), na.rm = TRUE)
   }
+}
+
+if (length(eppo_rows_list) > 0) {
+  eppo_df <- bind_rows(eppo_rows_list)
+  ok <- push_df(token, eppo_df)
+  message(sprintf("── EPPO pushed %d series (overwrote OFFO where dates overlap)", ok))
+  # last_date = max ของทั้งสอง
+  true_latest <- max(offo_latest, eppo_latest %||% offo_latest)
+  update_meta_last_date(token, meta_url, meta, true_latest)
+}
+
+# ── Data freshness check (ไม่นับวันเสาร์-อาทิตย์เป็นวัน lag) ─────────────
+overall_latest <- max(offo_latest, eppo_latest %||% offo_latest, na.rm = TRUE)
+lag_weekdays <- count_weekdays_between(overall_latest, Sys.Date())
+message(sprintf("STALE_CHECK: ข้อมูลล่าสุด = %s (วันนี้ %s) — lag %d วันทำการ",
+                overall_latest, Sys.Date(), lag_weekdays))
+if (lag_weekdays > STALE_WEEKDAY_THRESHOLD) {
+  message(sprintf(
+    "STALE_ALERT: ข้อมูลราคาน้ำมัน (OFFO/EPPO) ล่าสุดคือ %s ล่าช้ากว่าวันนี้ (%s) เกิน %d วันทำการ (ไม่รวมเสาร์-อาทิตย์) — ตรวจสอบด่วนว่า OFFO/EPPO เปลี่ยนรูปแบบเว็บ/URL อีกหรือไม่",
+    overall_latest, Sys.Date(), STALE_WEEKDAY_THRESHOLD))
 }
 
 # ── Step 3: Oil Fund status ──────────────────────────────────────
@@ -528,6 +738,22 @@ if (length(fund_pending) > 0) {
     if (resp_status(fund_meta_patch) < 300) message(sprintf("  ✓ oilfund last_date → %s", fund_latest))
     else message(sprintf("  ✗ meta patch HTTP %d", resp_status(fund_meta_patch)))
   }
+}
+
+# ── Step 4: Daily report gating ──────────────────────────────────
+# ส่ง summary email (สถานะ OFFO/EPPO + STALE_ALERT ถ้ามี) แค่รอบแรกของแต่ละวัน —
+# เทียบ meta/eppo_status.last_report_date (UTC) กับวันนี้ ถ้าต่างกันคือรอบแรก
+# print marker "DAILY_REPORT_DUE: true/false" ให้ workflow grep ไปตัดสินใจส่งเมล
+message("\n── Daily report check...")
+today_str         <- as.character(Sys.Date())
+last_report_date  <- tryCatch(meta$fields$last_report_date$stringValue, error=function(e) NULL) %||% ""
+is_first_run_today <- last_report_date != today_str
+message(sprintf("DAILY_REPORT_DUE: %s (last_report_date=%s, today=%s)",
+                tolower(as.character(is_first_run_today)), last_report_date, today_str))
+if (is_first_run_today) {
+  status <- patch_meta_field(token, meta_url, "last_report_date", today_str)
+  if (status < 300) message("  ✓ last_report_date → ", today_str)
+  else message(sprintf("  ✗ patch last_report_date HTTP %d", status))
 }
 
 message(sprintf("\n✓ Done"))

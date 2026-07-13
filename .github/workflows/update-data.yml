@@ -57,8 +57,11 @@ jobs:
         if: always()
         id: summary
         run: |
-          SKIPPED=$(grep -E "skip ทั้งไฟล์|missing products" run.log || true)
+          SKIPPED=$(grep -E "skip ทั้งไฟล์|missing products|HEADER_MISMATCH" run.log || true)
           CHANGES=$(grep -E "^PRICE_CHANGE:" run.log || true)
+          FRESH=$(grep -E "^STALE_CHECK:" run.log || true)
+          STALE=$(grep -E "^STALE_ALERT:" run.log || true)
+          DAILY_DUE=$(grep -E "^DAILY_REPORT_DUE: true" run.log || true)
           {
             echo "skipped<<EOF"
             if [ -n "$SKIPPED" ]; then echo "$SKIPPED"; else echo "(none)"; fi
@@ -66,20 +69,19 @@ jobs:
             echo "changes<<EOF"
             if [ -n "$CHANGES" ]; then echo "$CHANGES"; else echo "(none)"; fi
             echo "EOF"
+            echo "freshness<<EOF"
+            if [ -n "$FRESH" ]; then echo "$FRESH"; else echo "(ไม่พบ log — อาจ error ก่อนถึงขั้นตอนนี้)"; fi
+            echo "EOF"
+            echo "stale<<EOF"
+            if [ -n "$STALE" ]; then echo "$STALE"; else echo "(none — ข้อมูลยังไม่ล่าช้าเกินเกณฑ์)"; fi
+            echo "EOF"
           } >> "$GITHUB_OUTPUT"
-          if [ -n "$SKIPPED" ]; then
-            echo "has_skip=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "has_skip=false" >> "$GITHUB_OUTPUT"
-          fi
-          if [ -n "$CHANGES" ]; then
-            echo "has_change=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "has_change=false" >> "$GITHUB_OUTPUT"
-          fi
+          if [ -n "$SKIPPED" ]; then echo "has_skip=true" >> "$GITHUB_OUTPUT"; else echo "has_skip=false" >> "$GITHUB_OUTPUT"; fi
+          if [ -n "$CHANGES" ]; then echo "has_change=true" >> "$GITHUB_OUTPUT"; else echo "has_change=false" >> "$GITHUB_OUTPUT"; fi
+          if [ -n "$DAILY_DUE" ]; then echo "daily_due=true" >> "$GITHUB_OUTPUT"; else echo "daily_due=false" >> "$GITHUB_OUTPUT"; fi
 
       - name: Send notification email
-        if: always() && (steps.run.outcome != 'success' || steps.summary.outputs.has_skip == 'true' || steps.summary.outputs.has_change == 'true')
+        if: always() && (steps.run.outcome != 'success' || steps.summary.outputs.has_skip == 'true' || steps.summary.outputs.has_change == 'true' || steps.summary.outputs.daily_due == 'true')
         uses: dawidd6/action-send-mail@v3
         with:
           server_address: smtp.gmail.com
@@ -92,10 +94,14 @@ jobs:
           body: |
             fetch_and_push.R / fetch_eppo.R run: ${{ steps.run.outcome }}
 
+            รายงานความสด (OFFO/EPPO oil price) — รอบแรกของวันนี้:
+            ${{ steps.summary.outputs.freshness }}
+            ${{ steps.summary.outputs.stale }}
+
             Price changes (DIESEL RETAIL / GASOHOL 95 RETAIL):
             ${{ steps.summary.outputs.changes }}
 
-            EPPO skipped files (missing products):
+            EPPO/OFFO skipped files (missing products, or HEADER_MISMATCH = โครงสร้างคอลัมน์ไฟล์เปลี่ยน ต้องแก้ fetch_eppo.R):
             ${{ steps.summary.outputs.skipped }}
 
             Dashboard: https://limhengue-oss.github.io/macroindicator/
