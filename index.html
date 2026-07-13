@@ -1,3 +1,6 @@
+<!-- patch v6.3: fix breakdown table ref-date column header using colspan="2" while body rows only render 1 <td> for that column — header text was straddling 2 column-widths (arrow col + ref col) so it didn't line up above the right-aligned numbers below it; removed the stray colspan -->
+<!-- patch v6.2: breakdown table ref-date column + "vs {date}" KPI badge now show the ACTUAL date of the matched data point (via new pointAtDate helper) instead of the raw reference date — fixes header showing e.g. "24 Jun" while the price value shown actually came from an earlier fallback date (ref date had no data, e.g. holiday) -->
+<!-- patch v6.1: TH Energy price charts (year-overlay) set tension:0 (was 0.3) — bezier curve smoothing on sparse weekly points plotted against a dense daily category axis was creating unnatural bulges/waves ("เบี้ยว"); DISCOUNT breakdown row label shortened to "ส่วนลดหน้าโรงกลั่น" -->
 <!-- patch v6.0: DIESEL breakdown adds DISCOUNT row ("ส่วนลดจากราคาหน้าโรงกลั่น", history defaults to 0); breakdown table header dates drop year (D-Mon only); breakdown label column widened (table-layout:fixed, 42%) to stop long labels wrapping oddly; card header no longer shows the "กองทุน ±x.xx" badge (Oil Fund now lives in its own hero card) -->
 <!-- patch v5.14: date format "D-Mon" (e.g. 8-Jul) for all card "ล่าสุด" fields, "D-Mon-YYYY" for the legend latest-date; shared legend now centered instead of left-indented -->
 <!-- patch v5.13: fix shared legend "ปีนี้/ปีก่อน" not actually matching the +10%/bold styling (overridden by .li class font-size); indent legend to align with DIESEL card text -->
@@ -198,7 +201,7 @@ input[type=range] { width:80px; accent-color:var(--blue); }
 <body>
 
 <div id="topbar">
-  <div class="brand">Macro<span class="patch">v6.0</span></div>
+  <div class="brand">Macro<span class="patch">v6.3</span></div>
   <div class="topbar-right">
     <span class="sdot" id="sdot"></span>
     <span id="stxt">loading…</span>
@@ -662,6 +665,17 @@ function priceAtDate(data, dateStr) {
   return pts[pts.length-1].y;
 }
 
+// เหมือน priceAtDate แต่คืนวันที่จริงของจุดข้อมูลที่ใช้ด้วย (ไม่ใช่แค่ค่า) — ใช้โชว์
+// label "ณ วันที่" ให้ตรงกับตัวเลขจริงที่แสดง เผื่อวันอ้างอิงไม่มีข้อมูล (เช่น วันหยุด)
+// แล้ว fallback ไปใช้ค่าของวันก่อนหน้าล่าสุดแทน
+function pointAtDate(data, dateStr) {
+  if (!dateStr || !data.length) return null;
+  const ref = dateStr.slice(0,10);
+  const pts = data.filter(p => p.x.slice(0,10) <= ref);
+  if (!pts.length) return null;
+  return pts[pts.length-1];
+}
+
 // ── Averages (+ YoY เทียบค่าเฉลี่ยช่วงเดียวกันปีก่อน) ──
 function ymd(y,m,d) { return `${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`; }
 function daysInMonth(y,m) { return new Date(y,m,0).getDate(); } // m = 1-based
@@ -891,12 +905,15 @@ async function renderEnergyPage() {
     let rtdHtml = '';
     const refStr = savedRef ? savedRef.trim() : '';
     if (refStr) {
-      // หาราคา ณ ref date (วันที่ <= refStr ล่าสุด)
-      const refPrice = priceAtDate(data, refStr);
+      // หาราคา ณ ref date (วันที่ <= refStr ล่าสุด) — ใช้ pointAtDate เพื่อเอา "วันที่จริง"
+      // ของจุดข้อมูลที่ใช้มาโชว์ label ด้วย เผื่อ ref date ไม่มีข้อมูล (เช่นวันหยุด) แล้ว
+      // fallback ไปวันก่อนหน้า — กันตัวเลขกับวันที่ที่โชว์ไม่ตรงกัน
+      const refPoint = pointAtDate(data, refStr);
+      const refPrice = refPoint ? refPoint.y : null;
       if (refPrice !== null && refPrice !== 0 && last.x > refStr) {
         const rtd = (last.y - refPrice) / refPrice * 100;
         const rtdColor = rtd >= 0 ? 'var(--dn)' : 'var(--up)';
-        const refD = new Date(refStr + 'T00:00:00Z').toLocaleDateString('en-US',{day:'numeric',month:'short',timeZone:'UTC'});
+        const refD = new Date(refPoint.x + 'T00:00:00Z').toLocaleDateString('en-US',{day:'numeric',month:'short',timeZone:'UTC'});
         rtdHtml = `<div style="padding:8px 12px">
           <div style="font-size:0.68em;color:var(--text3);margin-bottom:2px">vs ${refD}</div>
           <div style="font-size:1.0em;font-weight:600;color:${rtdColor}">${rtd>=0?'+':''}${rtd.toFixed(1)}%</div>
@@ -947,13 +964,18 @@ async function renderEnergyPage() {
     const discountLast = isDiesel ? discountAtDateOrZero(lastDateStr) : null;
     const discountRef  = isDiesel && refStr ? discountAtDateOrZero(refStr) : null;
     const discountRowHtml = isDiesel
-      ? makeBreakdownRow('ส่วนลดจากราคาหน้าโรงกลั่น', discountLast, discountRef, false)
+      ? makeBreakdownRow('ส่วนลดหน้าโรงกลั่น', discountLast, discountRef, false)
       : '';
 
     // บรรทัดสุดท้าย: ราคาหน้าปั๊ม/หน้าคลัง (Retail หรือ Wholesale ตามแต่ละสินค้า)
     const endLabel = prod.field === 'RETAIL' ? 'Retail Price (หน้าปั๊ม)' : 'Wholesale Price (หน้าคลัง)';
     const endLast   = last.y;
-    const endRef    = refStr ? priceAtDate(data, refStr) : null;
+    // ใช้ pointAtDate เอาทั้งค่าและ "วันที่จริง" ของจุดที่ใช้แสดงหัวคอลัมน์ ref date —
+    // กันกรณี ref date ไม่มีข้อมูล (เช่นวันหยุด) แล้วเลข fallback ไปวันอื่นแต่หัวตาราง
+    // ยังโชว์วันเดิม ทำให้ตัวเลขกับวันที่ไม่ตรงกัน
+    const refPointMain = refStr ? pointAtDate(data, refStr) : null;
+    const endRef       = refPointMain ? refPointMain.y : null;
+    const refEffectiveDateStr = refPointMain ? refPointMain.x : refStr;
 
     const breakdownRows =
       makeBreakdownRow('ราคาหน้าโรงกลั่น', exRefinLast, exRefinRef, true) +
@@ -970,7 +992,7 @@ async function renderEnergyPage() {
 
     const lastHeader = `ล่าสุด · ${fmtDate(lastDateStr)}`;
     const refColHeader = refStr
-      ? `<th style="padding:5px 8px;text-align:right;font-weight:400;color:var(--text3)" colspan="2">${fmtDate(refStr)}</th>`
+      ? `<th style="padding:5px 8px;text-align:right;font-weight:400;color:var(--text3)">${fmtDate(refEffectiveDateStr)}</th>`
       : '';
     const arrowHeader = `<th style="width:14px"></th>`;
 
@@ -1087,10 +1109,10 @@ async function renderEnergyPage() {
         datasets: [
           { label: String(lastYear), data: lastData,
             borderColor:'rgba(128,128,128,0.35)', borderWidth:1.2,
-            pointRadius:0, tension:0.3, fill:false, spanGaps:true },
+            pointRadius:0, tension:0, fill:false, spanGaps:true },
           { label: String(thisYear), data: thisData,
             borderColor: '#f5a623', borderWidth:1.8,
-            pointRadius:0, tension:0.3, fill:false, spanGaps:true }
+            pointRadius:0, tension:0, fill:false, spanGaps:true }
         ]
       },
       options: {
