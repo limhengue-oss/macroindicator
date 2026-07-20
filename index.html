@@ -1,3 +1,6 @@
+<!-- patch v6.6: Oil Fund Status chart x-axis: label format drops the space ("Jan25" not "Jan 25"); ticks + vertical gridlines now placed only at the first data point of each quarter (Q1/Q2/Q3/Q4) instead of Chart.js autoSkip picking arbitrary points -->
+<!-- patch v6.5: "ข้อมูลล่าสุด" legend date now includes weekday abbreviation, e.g. "Mon 20-Jul-2026" (fmtDMon gets new withWeekday param; only this label uses it, card "ล่าสุด" labels unchanged) -->
+<!-- patch v6.4: fix TH Energy price chart x-axis month labels being wrong when zoomed (min/max set) — tick callback used the 2nd arg (idx = position among currently-displayed ticks, re-counted from 0 after zoom) instead of the 1st arg (val = true index into the full-year labels array), so labels showed e.g. Jan-Aug instead of the actual visible Mar-Sep window; same fix applied to grid-line month-boundary highlighting and to the Oil Fund Status chart's autoSkip tick callback -->
 <!-- patch v6.3: fix breakdown table ref-date column header using colspan="2" while body rows only render 1 <td> for that column — header text was straddling 2 column-widths (arrow col + ref col) so it didn't line up above the right-aligned numbers below it; removed the stray colspan -->
 <!-- patch v6.2: breakdown table ref-date column + "vs {date}" KPI badge now show the ACTUAL date of the matched data point (via new pointAtDate helper) instead of the raw reference date — fixes header showing e.g. "24 Jun" while the price value shown actually came from an earlier fallback date (ref date had no data, e.g. holiday) -->
 <!-- patch v6.1: TH Energy price charts (year-overlay) set tension:0 (was 0.3) — bezier curve smoothing on sparse weekly points plotted against a dense daily category axis was creating unnatural bulges/waves ("เบี้ยว"); DISCOUNT breakdown row label shortened to "ส่วนลดหน้าโรงกลั่น" -->
@@ -201,7 +204,7 @@ input[type=range] { width:80px; accent-color:var(--blue); }
 <body>
 
 <div id="topbar">
-  <div class="brand">Macro<span class="patch">v6.3</span></div>
+  <div class="brand">Macro<span class="patch">v6.6</span></div>
   <div class="topbar-right">
     <span class="sdot" id="sdot"></span>
     <span id="stxt">loading…</span>
@@ -649,11 +652,14 @@ function updateRefDateStatus(val) {
 
 
 // format วันที่แบบ "8-Jul" หรือ "8-Jul-2026" (withYear=true)
-function fmtDMon(dateStr, withYear) {
+function fmtDMon(dateStr, withYear, withWeekday) {
   const d = new Date(dateStr.slice(0,10) + 'T00:00:00Z');
   const day = d.getUTCDate();
   const mon = d.toLocaleDateString('en-GB', { month:'short', timeZone:'UTC' });
-  return withYear ? `${day}-${mon}-${d.getUTCFullYear()}` : `${day}-${mon}`;
+  const dmy = withYear ? `${day}-${mon}-${d.getUTCFullYear()}` : `${day}-${mon}`;
+  if (!withWeekday) return dmy;
+  const wd = d.toLocaleDateString('en-GB', { weekday:'short', timeZone:'UTC' });
+  return `${wd} ${dmy}`;
 }
 
 // หาราคา ณ ref date (วันที่ตรงหรือใกล้ที่สุดก่อน ref date)
@@ -1140,8 +1146,11 @@ async function renderEnergyPage() {
             min: zoomMinIdx, max: zoomMaxIdx,
             ticks:{ color:tickColor, font:{family:'monospace',size:10},
               maxRotation:0, autoSkip:false, maxTicksLimit:9999,
-              callback:(val,idx) => xLabels[idx] || '' },
-            grid:{ color: ctx => tickSet.has(ctx.index) ? 'rgba(128,128,128,0.1)' : 'transparent' },
+              // ใช้ val (index จริงใน yearLabels เต็มปี) ไม่ใช่ idx (ตำแหน่งใน tick ที่
+              // แสดงจริงหลังตัด min/max) — ตอนซูมกราฟ idx จะนับใหม่จาก 0 ทำให้ label
+              // เพี้ยนไปหลายเดือนจากของจริง (เช่น โชว์ Jan แทนที่จะเป็น Mar)
+              callback:(val) => xLabels[val] || '' },
+            grid:{ color: ctx => tickSet.has(ctx.tick?.value ?? ctx.index) ? 'rgba(128,128,128,0.1)' : 'transparent' },
             border:{color:'rgba(128,128,128,0.15)'} },
           y:{ position:'left',
             ticks:{color:tickColor,font:{family:'monospace',size:10},maxTicksLimit:5},
@@ -1244,6 +1253,19 @@ async function renderEnergyPage() {
       const dataActual = ofLabels.map(l => mapActual[l] ?? null);
       const dataProj   = ofLabels.map(l => mapProj[l] ?? null);
 
+      // tick/grid ที่จุดแรกสุดของแต่ละไตรมาส (Q1 ม.ค. / Q2 เม.ย. / Q3 ก.ค. / Q4 ต.ค.)
+      // — หา index แรกใน ofLabels ที่เข้าไตรมาสใหม่ (ข้อมูลจริงเป็นรายสัปดาห์ ไม่ตรง
+      // วันที่ 1 พอดีเป๊ะ เลยใช้ "รายการแรกที่พบในไตรมาสนั้น" แทนวันที่ 1 ตรงๆ)
+      const ofQuarterTickSet = new Set();
+      {
+        let lastQKey = null;
+        ofLabels.forEach((l, i) => {
+          const d = new Date(l + 'T00:00:00Z');
+          const qKey = d.getUTCFullYear() + '-' + Math.floor(d.getUTCMonth() / 3);
+          if (qKey !== lastQKey) { ofQuarterTickSet.add(i); lastQKey = qKey; }
+        });
+      }
+
       // วาดเส้น y=0 เองให้ชัดเจน (ไม่พึ่ง gridline ซึ่งอาจไม่ตรง tick พอดี)
       const zeroLinePlugin = {
         id: 'ofZeroLine',
@@ -1335,13 +1357,18 @@ async function renderEnergyPage() {
           },
           scales:{
             x:{ type:'category', ticks:{ color:tickColor, font:{family:'monospace',size:9},
-                maxRotation:0, autoSkip:true, maxTicksLimit:8,
-                callback:(val,idx) => {
-                  const l = ofLabels[idx]; if (!l) return '';
+                maxRotation:0, autoSkip:false, maxTicksLimit:9999,
+                // val = index จริงใน ofLabels เต็มช่วง ไม่ใช่ idx (ตำแหน่งใน tick ที่
+                // แสดงจริง) — ใช้ idx จะได้ label เดือนผิด แสดง label เฉพาะจุดแรกสุด
+                // ของแต่ละไตรมาส (ofQuarterTickSet) ตัวอื่นเว้นว่างไว้
+                callback:(val) => {
+                  if (!ofQuarterTickSet.has(val)) return '';
+                  const l = ofLabels[val]; if (!l) return '';
                   const d = new Date(l+'T00:00:00Z');
-                  return d.toLocaleDateString('en-US',{month:'short',year:'2-digit',timeZone:'UTC'});
+                  const mon = d.toLocaleDateString('en-US',{month:'short',timeZone:'UTC'});
+                  return mon + String(d.getUTCFullYear()).slice(-2);
                 } },
-              grid:{ display:false },
+              grid:{ color: ctx => ofQuarterTickSet.has(ctx.tick?.value ?? ctx.index) ? 'rgba(128,128,128,0.15)' : 'transparent' },
               border:{color:'rgba(128,128,128,0.15)'} },
             y:{ position:'left',
               ticks:{color:tickColor,font:{family:'monospace',size:10},maxTicksLimit:5},
@@ -1355,7 +1382,7 @@ async function renderEnergyPage() {
 
   // อัพเดทวันที่ข้อมูลราคาน้ำมันล่าสุด ข้าง legend
   const ldEl = document.getElementById('energy-latest-date');
-  if (ldEl) ldEl.textContent = latestPriceDate ? fmtDMon(latestPriceDate, true) : '';
+  if (ldEl) ldEl.textContent = latestPriceDate ? fmtDMon(latestPriceDate, true, true) : '';
 }
 
 window.renderEnergyPage = renderEnergyPage;
