@@ -150,7 +150,7 @@ TARGET_TENORS <- tribble(
   "THAIBMA_YIELD_2Y",     "2Y",   2,
   "THAIBMA_YIELD_5Y",     "5Y",   5,
   "THAIBMA_YIELD_10Y",    "10Y",  10,
-  "THAIBMA_YIELD_20Y",    "20Y",  20,
+  "THAIBMA_YIELD_20Y",    "20Y",  20
 )
 
 # ดึง yield curve ของ 1 วัน (คืน NULL ถ้าล้มเหลว)

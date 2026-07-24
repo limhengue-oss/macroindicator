@@ -101,8 +101,11 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkM
 
 /* ── TH Energy page ─────────────────────────────────── */
 .energy-kpi-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(160px,1fr)); gap:8px; margin-bottom:14px; }
-.dash-section { max-width:1200px; margin:0 auto 22px; }
+.dash-section { max-width:1200px; margin:0 auto 28px; }
 .dash-section-title { font-size:0.78em; color:var(--text2); text-transform:uppercase; letter-spacing:0.06em; margin-bottom:8px; padding-bottom:6px; border-bottom:1px solid var(--border); }
+.dash-section-title-freq { font-size:0.95em; font-weight:600; color:var(--text); border-bottom:2px solid var(--blue); margin-bottom:14px; }
+.dash-subgroup { margin-bottom:16px; }
+.dash-subgroup-title { font-size:0.68em; color:var(--text3); text-transform:uppercase; letter-spacing:0.05em; margin-bottom:6px; }
 .ekpi { background:var(--bg2); border:1px solid var(--border); border-radius:4px; padding:12px 14px; }
 .ekpi-group { font-size:0.7em; color:var(--text3); text-transform:uppercase; letter-spacing:0.06em; margin-bottom:2px; }
 .ekpi-name  { font-size:0.78em; color:var(--text2); margin-bottom:6px; }
@@ -444,6 +447,10 @@ const SERIES_GROUPS = {
   'Commodities':  ['WTI','BRENT','GOLD','SILVER','COPPER','NATGAS'],
   'US Macro':     ['FEDFUNDS','CPI','CORECPI','DGS2','DGS10','UNRATE'],
   'EU Macro':     ['ECBRATE','EUCPI'],
+  'Thailand GDP (NESDC, Quarterly)': [
+    'NESDC_GDP_NOMINAL', 'NESDC_GDP_CVM', 'NESDC_GDP_YOY',
+    'NESDC_GDP_PROD_NOMINAL', 'NESDC_GDP_PROD_CVM', 'NESDC_GDP_PROD_YOY',
+  ],
   'Thailand Macro (BOT)': [
     'BOT_LEI','BOT_BSI','BOT_PCI','BOT_PII','BOT_SET_BOT','BOT_UNEMP',
     'BOT_EXPORT','BOT_IMPORT','BOT_TRADEBAL','BOT_CURACC','BOT_RESERVES','BOT_FWDPOS',
@@ -1661,9 +1668,12 @@ const DASHBOARD_FN = {
 // BOT ออก (ใช้ ThaiBMA รายวันแทน) — ส่วน Mag 7 / SET รายกลุ่ม-sector / EPPO /
 // PTT OR Oil ยังตัดออกเหมือนเดิมเพราะซ้ำกับหน้า TH Energy หรือ granular เกินไป
 const DASHBOARD_GROUP_ORDER = [
-  { title: 'Thailand Macro (BOT)',
-    ids: () => (SERIES_GROUPS['Thailand Macro (BOT)'] || []).filter(id =>
-      !id.startsWith('BOT_YIELD_') && !['BOT_SET_BOT', 'BOT_CASHBAL', 'BOT_USDTHB'].includes(id)) },
+  { title: 'Thailand Macro (BOT + NESDC)',
+    ids: () => [
+      ...(SERIES_GROUPS['Thailand GDP (NESDC, Quarterly)'] || []),
+      ...(SERIES_GROUPS['Thailand Macro (BOT)'] || []).filter(id =>
+        !id.startsWith('BOT_YIELD_') && !['BOT_SET_BOT', 'BOT_CASHBAL', 'BOT_USDTHB'].includes(id)),
+    ] },
   { title: 'Thailand Bond Yield (ThaiBMA, Daily)',
     ids: () => SERIES_GROUPS['Thailand Bond Yield (ThaiBMA, Daily)'] || [] },
   { title: 'Stock Indices',
@@ -1723,6 +1733,28 @@ function cleanDashName(name) {
     .trim();
 }
 
+// จัดกลุ่มบนสุดของ Dashboard ตามความถี่ข้อมูลจริง — วัดจาก gap เฉลี่ย
+// (วัน) ของจุดข้อมูล 5 ช่วงล่าสุด แทนที่จะ hardcode รายชื่อ series ต่อ
+// ความถี่ (แหล่งข้อมูลเพิ่มเรื่อยๆ ไม่อยาก maintain list แยกอีกชุด)
+const FREQ_ORDER = ['daily', 'monthly', 'quarterly'];
+const FREQ_LABEL = { daily: 'รายวัน (Daily)', monthly: 'รายเดือน (Monthly)', quarterly: 'รายไตรมาส (Quarterly)' };
+
+function detectFreq(docId) {
+  const s = SERIES[docId];
+  if (!s || !s.data || s.data.length < 2) return 'monthly';
+  const recent = s.data.slice(-6);
+  let totalGap = 0, n = 0;
+  for (let i = 1; i < recent.length; i++) {
+    const gap = (new Date(recent[i].x) - new Date(recent[i - 1].x)) / 86400000;
+    if (gap > 0) { totalGap += gap; n++; }
+  }
+  if (n === 0) return 'monthly';
+  const avgGap = totalGap / n;
+  if (avgGap <= 5) return 'daily';
+  if (avgGap <= 45) return 'monthly';
+  return 'quarterly';  // รวม annual ไว้ในนี้ด้วย — ผู้ใช้ขอแค่ 3 กลุ่ม
+}
+
 function renderDashCard(docId, opts = {}) {
   const fn = DASHBOARD_FN[docId] || 'raw';
   const v = latestDashValue(docId, fn);
@@ -1774,13 +1806,37 @@ function renderDashboard() {
   }
   clearInterval(_dashPoll);
 
-  let html = '';
+  // จัดกลุ่มบนสุดตาม "ความถี่จริงของข้อมูล" (วัดจาก gap เฉลี่ยของจุดข้อมูล
+  // ล่าสุด ไม่ใช่ hardcode รายชื่อ) แล้วค่อยแบ่งย่อยตามธีม (Stock/FX/Macro
+  // ฯลฯ) ข้างในแต่ละความถี่อีกที — ทำแบบ dynamic เพราะแหล่งข้อมูลเพิ่มขึ้น
+  // เรื่อยๆ (BOT/ThaiBMA/NESDC/FRED/Yahoo ปนกัน) ไม่อยากต้องมานั่งจัดหมวด
+  // ความถี่เองทุกครั้งที่เพิ่ม series ใหม่
+  const buckets = { daily: {}, monthly: {}, quarterly: {} };
   DASHBOARD_GROUP_ORDER.forEach(group => {
-    const cards = group.ids().map(id => renderDashCard(id, { showChange: group.showChange })).filter(Boolean).join('');
-    if (!cards) return;
+    group.ids().forEach(id => {
+      const freq = detectFreq(id);
+      (buckets[freq][group.title] ??= []).push(id);
+    });
+  });
+
+  let html = '';
+  FREQ_ORDER.forEach(freq => {
+    const themeNames = Object.keys(buckets[freq]);
+    if (!themeNames.length) return;
+    let sectionHtml = '';
+    themeNames.forEach(themeTitle => {
+      const groupDef = DASHBOARD_GROUP_ORDER.find(g => g.title === themeTitle);
+      const cards = buckets[freq][themeTitle].map(id => renderDashCard(id, { showChange: groupDef?.showChange })).filter(Boolean).join('');
+      if (!cards) return;
+      sectionHtml += `<div class="dash-subgroup">
+        <div class="dash-subgroup-title">${themeTitle}</div>
+        <div class="energy-kpi-grid">${cards}</div>
+      </div>`;
+    });
+    if (!sectionHtml) return;
     html += `<div class="dash-section">
-      <div class="dash-section-title">${group.title}</div>
-      <div class="energy-kpi-grid">${cards}</div>
+      <div class="dash-section-title dash-section-title-freq">${FREQ_LABEL[freq]}</div>
+      ${sectionHtml}
     </div>`;
   });
   container.innerHTML = html || '<div class="empty">ไม่มีข้อมูล</div>';

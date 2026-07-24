@@ -275,7 +275,7 @@ CATALOG <- tribble(
   "BOT_NPL",              "ECFSDICBCOREQ000036",  "Q",   "2017-01-01",
   "BOT_HHDEBT_GDP",       "ECFSHH00ADDTQ000053",  "Q",   "2017-01-01",
   "BOT_EXTDEBT_GDP",      "XTEDBT0000Q00796",     "Q",   "2005-01-01",
-  "BOT_RESERVES_STDEBT",  "XTEDBT0000Q00797",     "Q",   "2005-01-01",
+  "BOT_RESERVES_STDEBT",  "XTEDBT0000Q00797",     "Q",   "2005-01-01"
 )
 
 # ══════════════════════════════════════════════════════════════════
