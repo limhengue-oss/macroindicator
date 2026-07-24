@@ -41,7 +41,7 @@ Nav bar ด้านบนมี 2 หน้าพิเศษที่มาก
 - **Edit page / Delete** (หัวหน้า): แก้ชื่อ/จำนวนคอลัมน์ หรือลบทั้งหน้า
 - **ℹ (บนการ์ด)**: ดู metadata ของแต่ละ series ในกราฟนั้น (ชื่อเต็ม, หน่วย, สกุลเงิน, ความถี่, แหล่งข้อมูล, วันที่อัปเดตล่าสุด)
 
-Series ที่เลือกได้จัดเป็นหมวดใน dropdown: US Equity, Mag 7, Crypto, EU/Asia Indices, SET Industry/Sector, FX, Commodities, US/EU Macro, EPPO (ราคาขายปลีก/ขายส่ง + กองทุนน้ำมันของแต่ละผลิตภัณฑ์), PTT OR Oil
+Series ที่เลือกได้จัดเป็นหมวดใน dropdown: US Equity, Mag 7, Crypto, EU/Asia Indices, SET Industry/Sector, FX, Commodities, US/EU Macro, Thailand Macro (BOT), Thailand Bond Yield (ThaiBMA, Daily), EPPO (ราคาขายปลีก/ขายส่ง + กองทุนน้ำมันของแต่ละผลิตภัณฑ์), PTT OR Oil
 
 > **หมายเหตุ:** custom pages/charts เก็บไว้ใน `localStorage` ของเบราว์เซอร์เท่านั้น (ไม่ sync ข้ามเครื่อง/อุปกรณ์) ถ้าต้องการย้ายหรือสำรองไว้ ให้ใช้ Export/Import ใน Options (ดูด้านล่าง)
 

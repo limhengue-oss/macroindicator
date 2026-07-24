@@ -411,6 +411,17 @@ const SERIES_GROUPS = {
   'Commodities':  ['WTI','BRENT','GOLD','SILVER','COPPER','NATGAS'],
   'US Macro':     ['FEDFUNDS','CPI','CORECPI','DGS2','DGS10','UNRATE'],
   'EU Macro':     ['ECBRATE','EUCPI'],
+  'Thailand Macro (BOT)': [
+    'BOT_LEI','BOT_BSI','BOT_PCI','BOT_PII','BOT_SET_BOT','BOT_UNEMP',
+    'BOT_EXPORT','BOT_IMPORT','BOT_TRADEBAL','BOT_CURACC','BOT_RESERVES','BOT_FWDPOS',
+    'BOT_TOURIST','BOT_USDTHB','BOT_M2',
+    'BOT_YIELD_1M','BOT_YIELD_3M','BOT_YIELD_6M','BOT_YIELD_1Y','BOT_YIELD_2Y','BOT_YIELD_5Y','BOT_YIELD_10Y','BOT_YIELD_20Y',
+    'BOT_GOVDEBT','BOT_CASHBAL','BOT_NPL','BOT_HHDEBT_GDP','BOT_EXTDEBT_GDP','BOT_RESERVES_STDEBT',
+  ],
+  'Thailand Bond Yield (ThaiBMA, Daily)': [
+    'THAIBMA_YIELD_1M','THAIBMA_YIELD_3M','THAIBMA_YIELD_6M','THAIBMA_YIELD_1Y',
+    'THAIBMA_YIELD_2Y','THAIBMA_YIELD_5Y','THAIBMA_YIELD_10Y','THAIBMA_YIELD_20Y',
+  ],
   // EPPO Diesel/Gasoline/Other ถูกเติมด้านล่างหลังประกาศ EPPO_ORDER — จำกัดให้
   // เลือกได้แค่ Retail/Wholesale + Oil Fund เท่านั้น (ซ่อน field breakdown อื่น
   // เช่น Ex-Refin, Excise Tax, VAT, Marketing Margin จากหน้า chart ทั่วไป)
