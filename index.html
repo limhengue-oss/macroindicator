@@ -1652,18 +1652,39 @@ const DASHBOARD_FN = {
   BOT_EXPORT: 'yoy', BOT_IMPORT: 'yoy',
 };
 
-// หมวดที่โชว์ใน Dashboard = SERIES_GROUPS ทั้งหมด ยกเว้นกลุ่มที่ granular/ซ้ำกับ
-// หน้าอื่นอยู่แล้ว (Mag 7 ราคาหุ้นรายตัว, SET รายกลุ่ม/รายsector, EPPO/PTT OR
-// ราคาน้ำมันที่มีหน้า TH Energy ของตัวเองอยู่แล้ว)
-const DASHBOARD_EXCLUDE_GROUPS = new Set(['Mag 7', 'SET Industry', 'SET Sector', 'PTT OR Oil', 'EPPO']);
+// หมวดที่โชว์ใน Dashboard — จัดเรียง/รวมกลุ่มเองแทนการเดินตาม SERIES_GROUPS
+// ตรงๆ: TH macro ขึ้นก่อน, stock index (US/EU/Asia) รวมเป็นกลุ่มเดียวโชว์
+// %change ด้วย, US+EU macro รวมกัน, ตัด Crypto และ bond yield รายเดือนจาก
+// BOT ออก (ใช้ ThaiBMA รายวันแทน) — ส่วน Mag 7 / SET รายกลุ่ม-sector / EPPO /
+// PTT OR Oil ยังตัดออกเหมือนเดิมเพราะซ้ำกับหน้า TH Energy หรือ granular เกินไป
+const DASHBOARD_GROUP_ORDER = [
+  { title: 'Thailand Macro (BOT)',
+    ids: () => (SERIES_GROUPS['Thailand Macro (BOT)'] || []).filter(id => !id.startsWith('BOT_YIELD_')) },
+  { title: 'Thailand Bond Yield (ThaiBMA, Daily)',
+    ids: () => SERIES_GROUPS['Thailand Bond Yield (ThaiBMA, Daily)'] || [] },
+  { title: 'Stock Indices',
+    ids: () => [
+      ...(SERIES_GROUPS['US Equity']   || []),
+      ...(SERIES_GROUPS['EU Indices']  || []),
+      ...(SERIES_GROUPS['Asia Indices']|| []),
+    ], showChange: true },
+  { title: 'FX',
+    ids: () => SERIES_GROUPS['FX'] || [] },
+  { title: 'Commodities',
+    ids: () => SERIES_GROUPS['Commodities'] || [] },
+  { title: 'Global Macro (US & EU)',
+    ids: () => [...(SERIES_GROUPS['US Macro'] || []), ...(SERIES_GROUPS['EU Macro'] || [])] },
+];
 
-function getDashboardGroups() {
-  const out = {};
-  for (const [name, ids] of Object.entries(SERIES_GROUPS)) {
-    if (DASHBOARD_EXCLUDE_GROUPS.has(name)) continue;
-    out[name] = ids;
-  }
-  return out;
+// % เปลี่ยนแปลงจากจุดข้อมูลล่าสุด vs จุดก่อนหน้า (ใช้กับ Stock Indices —
+// ความถี่เท่าที่ series นั้นมี ไม่จำเป็นต้องเป็นวันต่อวันเป๊ะๆ)
+function dayChangePct(docId) {
+  const s = SERIES[docId];
+  if (!s || !s.data || s.data.length < 2) return null;
+  const last = s.data[s.data.length - 1];
+  const prev = s.data[s.data.length - 2];
+  if (!prev.y) return null;
+  return (last.y / prev.y - 1) * 100;
 }
 
 function formatDashNum(n) {
@@ -1685,7 +1706,7 @@ function latestDashValue(docId, fn) {
   return { x: last.x, y: last.y, name: s.name || docId, unit: s.meta?.unit || s.meta?.currency || '' };
 }
 
-function renderDashCard(docId) {
+function renderDashCard(docId, opts = {}) {
   const fn = DASHBOARD_FN[docId] || 'raw';
   const v = latestDashValue(docId, fn);
   if (!v) return '';
@@ -1694,9 +1715,19 @@ function renderDashCard(docId) {
   const valueStr = isPct ? (v.y >= 0 ? '+' : '') + v.y.toFixed(2) + '%' : formatDashNum(v.y);
   const chgClass = isGrowth ? (v.y >= 0 ? 'ekpi-chg up' : 'ekpi-chg dn') : '';
   const badge = isGrowth ? (fn === 'yoy' ? 'YoY' : 'MoM') : (isPct ? '' : v.unit);
+
+  let changeHtml = '';
+  if (opts.showChange && !isGrowth) {
+    const chg = dayChangePct(docId);
+    if (chg !== null) {
+      const cls = chg >= 0 ? 'up' : 'dn';
+      changeHtml = `<span class="ekpi-chg ${cls}" style="margin-left:6px;font-size:0.72em">${chg >= 0 ? '+' : ''}${chg.toFixed(2)}%</span>`;
+    }
+  }
+
   return `<div class="ekpi">
     <div class="ekpi-name">${v.name}</div>
-    <div class="ekpi-price ${chgClass}">${valueStr}${badge ? `<span class="ekpi-unit">${badge}</span>` : ''}</div>
+    <div class="ekpi-price ${chgClass}">${valueStr}${badge ? `<span class="ekpi-unit">${badge}</span>` : ''}${changeHtml}</div>
     <div class="ekpi-date">${v.x}</div>
   </div>`;
 }
@@ -1706,16 +1737,15 @@ function renderDashboard() {
   if (!container) return;
   if (!seriesFullyLoaded) return;  // overlay ยังบังอยู่ รอ loadData() เรียกซ้ำตอนเสร็จ
 
-  const groups = getDashboardGroups();
   let html = '';
-  for (const [groupName, ids] of Object.entries(groups)) {
-    const cards = ids.map(renderDashCard).filter(Boolean).join('');
-    if (!cards) continue;
+  DASHBOARD_GROUP_ORDER.forEach(group => {
+    const cards = group.ids().map(id => renderDashCard(id, { showChange: group.showChange })).filter(Boolean).join('');
+    if (!cards) return;
     html += `<div class="dash-section">
-      <div class="dash-section-title">${groupName}</div>
+      <div class="dash-section-title">${group.title}</div>
       <div class="energy-kpi-grid">${cards}</div>
     </div>`;
-  }
+  });
   container.innerHTML = html || '<div class="empty">ไม่มีข้อมูล</div>';
 }
 
