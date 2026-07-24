@@ -101,6 +101,8 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkM
 
 /* ── TH Energy page ─────────────────────────────────── */
 .energy-kpi-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(160px,1fr)); gap:8px; margin-bottom:14px; }
+.dash-section { max-width:1200px; margin:0 auto 22px; }
+.dash-section-title { font-size:0.78em; color:var(--text2); text-transform:uppercase; letter-spacing:0.06em; margin-bottom:8px; padding-bottom:6px; border-bottom:1px solid var(--border); }
 .ekpi { background:var(--bg2); border:1px solid var(--border); border-radius:4px; padding:12px 14px; }
 .ekpi-group { font-size:0.7em; color:var(--text3); text-transform:uppercase; letter-spacing:0.06em; margin-bottom:2px; }
 .ekpi-name  { font-size:0.78em; color:var(--text2); margin-bottom:6px; }
@@ -258,6 +260,20 @@ input[type=range] { width:80px; accent-color:var(--blue); }
 
 <div id="nav"></div>
 <div id="pages"></div>
+
+<!-- DASHBOARD PAGE -->
+<div id="page-dashboard" class="page">
+  <div class="page-head" style="margin-bottom:14px">
+    <span style="font-size:0.78em;color:var(--text2);text-transform:uppercase;letter-spacing:0.06em">Dashboard — Latest Data</span>
+  </div>
+  <div id="dashboard-body">
+    <div class="ld" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px">
+      <div class="skeleton skel-card"></div><div class="skeleton skel-card"></div><div class="skeleton skel-card"></div>
+      <div class="skeleton skel-card"></div><div class="skeleton skel-card"></div><div class="skeleton skel-card"></div>
+      <div class="skeleton skel-card"></div><div class="skeleton skel-card"></div><div class="skeleton skel-card"></div>
+    </div>
+  </div>
+</div>
 
 <!-- NEWS PAGE -->
 <div id="page-news" class="page">
@@ -1564,8 +1580,9 @@ window.loadData = async function() {
 
     const upd = Object.values(SERIES)[0]?.updated || '';
     setStatus('ok', upd ? 'data: '+upd.slice(0,16).replace('T',' ')+' UTC' : 'loaded');
-    // ถ้า user เปิดหน้า regular อยู่ระหว่างรอ ให้ re-render
-    if (activePageId !== '__energy__' && activePageId !== '__news__') renderActivePage();
+    // ถ้า user เปิดหน้า regular/dashboard อยู่ระหว่างรอ ให้ re-render
+    if (activePageId === '__dashboard__') renderDashboard();
+    else if (activePageId !== '__energy__' && activePageId !== '__news__') renderActivePage();
   } catch(e) {
     setStatus('err','Firestore error'); console.error(e);
     hideGlobalLoading();  // อย่าค้าง overlay ทับหน้าไว้ตลอดไปถ้า error
@@ -1624,13 +1641,94 @@ function movAvg(data,n) {
 }
 
 // ════════════════════════════════════════════════════
+//  DASHBOARD
+// ════════════════════════════════════════════════════
+
+// series ที่ raw level ดูค่าตรงๆ ไม่ค่อยมีความหมาย (ดัชนี/ปริมาณเงิน/มูลค่าการค้า)
+// ต้องแปลงเป็น %YoY ถึงจะอ่านภาวะเศรษฐกิจได้ — เช่น CPI (index, 2015=100)
+const DASHBOARD_FN = {
+  CPI: 'yoy', CORECPI: 'yoy', EUCPI: 'yoy',
+  BOT_LEI: 'yoy', BOT_PCI: 'yoy', BOT_PII: 'yoy', BOT_M2: 'yoy',
+  BOT_EXPORT: 'yoy', BOT_IMPORT: 'yoy',
+};
+
+// หมวดที่โชว์ใน Dashboard = SERIES_GROUPS ทั้งหมด ยกเว้นกลุ่มที่ granular/ซ้ำกับ
+// หน้าอื่นอยู่แล้ว (Mag 7 ราคาหุ้นรายตัว, SET รายกลุ่ม/รายsector, EPPO/PTT OR
+// ราคาน้ำมันที่มีหน้า TH Energy ของตัวเองอยู่แล้ว)
+const DASHBOARD_EXCLUDE_GROUPS = new Set(['Mag 7', 'SET Industry', 'SET Sector', 'PTT OR Oil', 'EPPO']);
+
+function getDashboardGroups() {
+  const out = {};
+  for (const [name, ids] of Object.entries(SERIES_GROUPS)) {
+    if (DASHBOARD_EXCLUDE_GROUPS.has(name)) continue;
+    out[name] = ids;
+  }
+  return out;
+}
+
+function formatDashNum(n) {
+  if (!isFinite(n)) return '—';
+  const abs = Math.abs(n);
+  const decimals = abs >= 1000 ? 0 : abs >= 10 ? 2 : 4;
+  return n.toLocaleString('en-US', { maximumFractionDigits: decimals });
+}
+
+// ดึงค่าล่าสุดของ series ตาม fn ที่กำหนด (raw หรือ yoy/mom ฯลฯ) — คืน
+// {x, y, name, unit} หรือ null ถ้ายังไม่มีข้อมูล
+function latestDashValue(docId, fn) {
+  const s = SERIES[docId];
+  if (!s || !s.data || !s.data.length) return null;
+  const series = fn === 'raw' ? s.data : applyFn(s.data, fn);
+  if (!series.length) return null;
+  const last = series[series.length - 1];
+  if (last.y === null || last.y === undefined || !isFinite(last.y)) return null;
+  return { x: last.x, y: last.y, name: s.name || docId, unit: s.meta?.unit || s.meta?.currency || '' };
+}
+
+function renderDashCard(docId) {
+  const fn = DASHBOARD_FN[docId] || 'raw';
+  const v = latestDashValue(docId, fn);
+  if (!v) return '';
+  const isGrowth = fn === 'yoy' || fn === 'mom';
+  const isPct = isGrowth || /percent|^%$/i.test(v.unit);
+  const valueStr = isPct ? (v.y >= 0 ? '+' : '') + v.y.toFixed(2) + '%' : formatDashNum(v.y);
+  const chgClass = isGrowth ? (v.y >= 0 ? 'ekpi-chg up' : 'ekpi-chg dn') : '';
+  const badge = isGrowth ? (fn === 'yoy' ? 'YoY' : 'MoM') : (isPct ? '' : v.unit);
+  return `<div class="ekpi">
+    <div class="ekpi-name">${v.name}</div>
+    <div class="ekpi-price ${chgClass}">${valueStr}${badge ? `<span class="ekpi-unit">${badge}</span>` : ''}</div>
+    <div class="ekpi-date">${v.x}</div>
+  </div>`;
+}
+
+function renderDashboard() {
+  const container = document.getElementById('dashboard-body');
+  if (!container) return;
+  if (!seriesFullyLoaded) return;  // overlay ยังบังอยู่ รอ loadData() เรียกซ้ำตอนเสร็จ
+
+  const groups = getDashboardGroups();
+  let html = '';
+  for (const [groupName, ids] of Object.entries(groups)) {
+    const cards = ids.map(renderDashCard).filter(Boolean).join('');
+    if (!cards) continue;
+    html += `<div class="dash-section">
+      <div class="dash-section-title">${groupName}</div>
+      <div class="energy-kpi-grid">${cards}</div>
+    </div>`;
+  }
+  container.innerHTML = html || '<div class="empty">ไม่มีข้อมูล</div>';
+}
+
+// ════════════════════════════════════════════════════
 //  RENDER
 // ════════════════════════════════════════════════════
 function render() {
   document.getElementById('page-news').classList.remove('active');
   document.getElementById('page-th-energy').classList.remove('active');
-  if (activePageId === '__news__')   document.getElementById('page-news').classList.add('active');
-  if (activePageId === '__energy__') document.getElementById('page-th-energy').classList.add('active');
+  document.getElementById('page-dashboard').classList.remove('active');
+  if (activePageId === '__news__')      document.getElementById('page-news').classList.add('active');
+  if (activePageId === '__energy__')    document.getElementById('page-th-energy').classList.add('active');
+  if (activePageId === '__dashboard__') document.getElementById('page-dashboard').classList.add('active');
   renderNav();
   renderActivePage();
 }
@@ -1638,6 +1736,23 @@ function render() {
 function renderNav() {
   const nav=document.getElementById('nav');
   nav.innerHTML='';
+
+  // Dashboard page — ต้องรอ seriesFullyLoaded (Phase 2) เพราะรวมทุก series
+  const dashBtn = document.createElement('button');
+  dashBtn.className = 'nb' + (activePageId === '__dashboard__' ? ' active' : '');
+  dashBtn.textContent = 'Dashboard';
+  dashBtn.onclick = () => {
+    activePageId = '__dashboard__';
+    Object.values(charts).forEach(c=>c.destroy());
+    document.getElementById('pages').innerHTML = '';
+    document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
+    document.querySelectorAll('.nb').forEach(b=>b.classList.remove('active'));
+    document.getElementById('page-dashboard').classList.add('active');
+    dashBtn.classList.add('active');
+    renderDashboard();
+  };
+  nav.appendChild(dashBtn);
+
   // News page
   const newsBtn = document.createElement('button');
   newsBtn.className = 'nb' + (activePageId === '__news__' ? ' active' : '');
@@ -1700,7 +1815,7 @@ function renderActivePage() {
   Object.values(charts).forEach(c=>c.destroy());
 
   // special pages handled by nav
-  if (activePageId === '__energy__' || activePageId === '__news__') return;
+  if (activePageId === '__energy__' || activePageId === '__news__' || activePageId === '__dashboard__') return;
 
   const page=config.pages.find(p=>p.id===activePageId);
   if (!page) { container.innerHTML='<div class="empty">ยังไม่มี page — กด + ใน nav</div>'; return; }
