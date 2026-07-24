@@ -73,7 +73,7 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkM
 /* ── Mobile: font ปกติ, 1 column, portrait only ── */
 /* ── News page ──────────────────────────────────────── */
 .news-day { margin-bottom:18px; }
-.news-day-header { font-size:0.72em; color:var(--text3); text-transform:uppercase; letter-spacing:0.06em; padding:4px 0; border-bottom:1px solid var(--border); margin-bottom:10px; }
+.news-day-header { font-size:0.72em; color:var(--text3); text-transform:uppercase; letter-spacing:0.06em; padding:4px 0; border-bottom:1px solid var(--border); margin-bottom:10px; max-width:1200px; margin-left:auto; margin-right:auto; }
 .energy-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:22px; max-width:1200px; margin:0 auto; padding:0 16px; }
 @media (max-width:700px), (orientation:portrait) and (max-width:1024px) { .energy-grid { grid-template-columns:1fr; } }
 /* ตอน export PDF: เหลือแค่ 2 การ์ด (Diesel, Gasohol 95) วาง 2 คอลัมน์ให้พอดี A4 แนวนอน 1 หน้า */
@@ -91,7 +91,7 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkM
   .energy-hero-grid > .card { border-right:none; border-bottom:1px solid var(--border); }
   .energy-hero-grid > .card:last-child { border-bottom:none; }
 }
-.news-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:20px; margin-bottom:18px; }
+.news-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:20px; margin-bottom:18px; max-width:1200px; margin-left:auto; margin-right:auto; }
 @media (max-width: 700px) { .news-grid { grid-template-columns:1fr; } }
 .news-source { font-size:0.68em; color:var(--blue); text-transform:uppercase; letter-spacing:0.04em; margin-bottom:4px; }
 .news-title { font-size:0.82em; font-weight:600; margin-bottom:6px; line-height:1.4; }
@@ -152,10 +152,10 @@ input[type=range] { width:80px; accent-color:var(--blue); }
 /* ── Pages ── */
 .page { display:none; padding:14px 16px; }
 .page.active { display:block; }
-.page-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; gap:8px; flex-wrap:wrap; }
+.page-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; gap:8px; flex-wrap:wrap; max-width:1200px; margin-left:auto; margin-right:auto; }
 .page-actions { display:flex; gap:5px; flex-wrap:wrap; }
 
-.chart-grid { display:grid; gap:16px; }
+.chart-grid { display:grid; gap:16px; max-width:1200px; margin:0 auto; }
 
 /* ── Cards ── */
 .card { border:1px solid var(--border); border-radius:8px; overflow:hidden; background:var(--bg2); box-shadow:var(--card-shadow); }
