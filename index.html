@@ -447,6 +447,7 @@ const SERIES_GROUPS = {
   'Commodities':  ['WTI','BRENT','GOLD','SILVER','COPPER','NATGAS'],
   'US Macro':     ['FEDFUNDS','CPI','CORECPI','DGS2','DGS10','UNRATE'],
   'EU Macro':     ['ECBRATE','EUCPI'],
+  'Thailand Gold (Gold Traders Assoc.)': ['GOLDTH_BAR_BUY', 'GOLDTH_BAR_SELL'],
   'Thailand GDP (NESDC, Quarterly)': [
     'NESDC_GDP_NOMINAL', 'NESDC_GDP_CVM', 'NESDC_GDP_YOY',
     'NESDC_GDP_PROD_NOMINAL', 'NESDC_GDP_PROD_CVM', 'NESDC_GDP_PROD_YOY',
@@ -1684,6 +1685,8 @@ const DASHBOARD_GROUP_ORDER = [
     ], showChange: true },
   { title: 'FX',
     ids: () => SERIES_GROUPS['FX'] || [] },
+  { title: 'Thailand Gold',
+    ids: () => SERIES_GROUPS['Thailand Gold (Gold Traders Assoc.)'] || [], showChange: true },
   { title: 'Commodities',
     ids: () => SERIES_GROUPS['Commodities'] || [] },
   { title: 'Global Macro (US & EU)',
