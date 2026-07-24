@@ -1712,6 +1712,7 @@ function latestDashValue(docId, fn) {
 // ไปโชว์ต่อท้ายตัวเลขอยู่แล้ว (ekpi-unit) ไม่ต้องซ้ำในชื่อ
 function cleanDashName(name) {
   return (name || '')
+    .replace(/^BOT\s+/i, '')
     .replace(/\s*\((?:Millions?|Billions?|Thousands?)\s+of\s+[^)]+\)/gi, '')
     .replace(/\s*\((?:Percent|Percentage|Index|Baht|USD|US Dollars?)\)/gi, '')
     .replace(/\s*\b(Monthly|Quarterly|Daily|Yearly|Annual)\b\s*$/i, '')
