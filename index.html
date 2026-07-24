@@ -1530,53 +1530,56 @@ document.addEventListener('click', function(e) {
   }
 });
 
-// ── global loading overlay: บล็อกทั้งหน้าจนกว่า Phase 1+2 จะเสร็จ พร้อม
-// progress bar — Phase 2 (fetchRest) เป็น request เดียวไม่มี native progress
-// จาก Firestore SDK เลย "trickle" ไล่ % ขึ้นเรื่อยๆ ระหว่างรอ แล้วกระโดดไป 100%
-// ตอนเสร็จจริง (ไม่ได้วัด byte จริง แต่ให้ความรู้สึกว่ากำลังโหลดอยู่)
-let _glTrickle = null;
-function setLoadingProgress(pct) {
-  const fill = document.getElementById('gl-bar-fill');
-  const txt  = document.getElementById('gl-pct');
+// ── loading progress helpers (ใช้ร่วมกันได้หลายจุด — global overlay ตอน
+// boot กับ loading state ในตัวของ Dashboard) — parametrize ด้วย element id
+// เพราะแต่ละจุดมี bar/ตัวเลข % ของตัวเอง ไม่ผูกกับ id เดียวแบบเดิม
+const _trickles = {};
+function setProgress(fillId, pctId, pct) {
+  const fill = document.getElementById(fillId);
+  const txt  = document.getElementById(pctId);
   if (fill) fill.style.width = pct + '%';
   if (txt)  txt.textContent  = Math.round(pct) + '%';
 }
-function startLoadingTrickle(from, to) {
-  clearInterval(_glTrickle);
+function startTrickle(key, fillId, pctId, from, to) {
+  clearInterval(_trickles[key]);
   let pct = from;
-  setLoadingProgress(pct);
-  _glTrickle = setInterval(() => {
+  setProgress(fillId, pctId, pct);
+  _trickles[key] = setInterval(() => {
     pct = Math.min(pct + 2, to);
-    setLoadingProgress(pct);
-    if (pct >= to) clearInterval(_glTrickle);
+    setProgress(fillId, pctId, pct);
+    if (pct >= to) clearInterval(_trickles[key]);
   }, 150);
 }
+function stopTrickle(key) { clearInterval(_trickles[key]); }
+
 function hideGlobalLoading() {
-  clearInterval(_glTrickle);
-  setLoadingProgress(100);
+  stopTrickle('boot');
+  setProgress('gl-bar-fill', 'gl-pct', 100);
   const el = document.getElementById('global-loading');
-  if (el) setTimeout(() => el.classList.add('hide'), 200);
+  if (el) setTimeout(() => el.classList.add('hide'), 150);
 }
 
+// overlay กลางจอนี้คุมแค่ Phase 1 (EPPO/OilFund/News — เร็ว) เท่านั้น พอ
+// เสร็จก็ซ่อนทันที ไม่รอ Phase 2 — แต่ละหน้า (TH Energy/News/Dashboard/
+// custom page) จัดการสถานะ "now loading" ของตัวเองแยกกัน ใครพร้อมก่อนก็
+// โชว์ก่อน ไม่ต้องรอกันเป็นก้อนเดียวเหมือนเดิม
 window.loadData = async function() {
   setStatus('load','loading…');
   document.getElementById('global-loading')?.classList.remove('hide');
-  setLoadingProgress(3);
+  startTrickle('boot', 'gl-bar-fill', 'gl-pct', 5, 90);
   try {
     // Phase 1: EPPO + news — พอสำหรับหน้าแรก (TH Energy)
     await Promise.all([fetchEppo(), fetchOilFund(), fetchNews()]);
     window._SERIES = SERIES;
-    setLoadingProgress(35);
+    hideGlobalLoading();
     render();
-    if (activePageId === '__energy__') renderEnergyPage();
-    if (activePageId === '__news__') renderNews();
+    if (activePageId === '__energy__')    renderEnergyPage();
+    if (activePageId === '__news__')      renderNews();
+    if (activePageId === '__dashboard__') renderDashboard();  // โชว์ loading ของตัวเองถ้า Phase 2 ยังไม่เสร็จ
 
-    // Phase 2: series ที่เหลือ โหลด background — trickle progress ไล่ 35%→92%
-    // ระหว่างรอ (getDocs ไม่มี progress event ให้ผูกจริง)
-    startLoadingTrickle(35, 92);
+    // Phase 2: series ที่เหลือ โหลด background — ไม่บล็อกหน้าไหนแล้ว
     await fetchRest();
     seriesFullyLoaded = true;
-    hideGlobalLoading();
 
     const upd = Object.values(SERIES)[0]?.updated || '';
     setStatus('ok', upd ? 'data: '+upd.slice(0,16).replace('T',' ')+' UTC' : 'loaded');
@@ -1749,10 +1752,27 @@ function renderDashCard(docId, opts = {}) {
   </div>`;
 }
 
+let _dashPoll = null;
 function renderDashboard() {
   const container = document.getElementById('dashboard-body');
   if (!container) return;
-  if (!seriesFullyLoaded) return;  // overlay ยังบังอยู่ รอ loadData() เรียกซ้ำตอนเสร็จ
+
+  // Dashboard ต้องการทุก series (Phase 2) — ถ้ายังไม่พร้อม โชว์ loading
+  // ของหน้านี้เองแยกจากหน้าอื่น แล้ว poll เช็คจนกว่าจะพร้อมค่อย render จริง
+  if (!seriesFullyLoaded) {
+    container.innerHTML = `
+      <div style="display:flex;flex-direction:column;align-items:center;gap:10px;padding:70px 20px">
+        <div style="font-size:0.82em;color:var(--text2)">Now loading… <span id="dash-pct">0%</span></div>
+        <div class="gl-bar-track" style="width:220px"><div class="gl-bar-fill" id="dash-bar-fill"></div></div>
+      </div>`;
+    startTrickle('dash', 'dash-bar-fill', 'dash-pct', 10, 92);
+    clearInterval(_dashPoll);
+    _dashPoll = setInterval(() => {
+      if (seriesFullyLoaded) { clearInterval(_dashPoll); stopTrickle('dash'); renderDashboard(); }
+    }, 300);
+    return;
+  }
+  clearInterval(_dashPoll);
 
   let html = '';
   DASHBOARD_GROUP_ORDER.forEach(group => {
