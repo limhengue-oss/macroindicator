@@ -1659,7 +1659,8 @@ const DASHBOARD_FN = {
 // PTT OR Oil ยังตัดออกเหมือนเดิมเพราะซ้ำกับหน้า TH Energy หรือ granular เกินไป
 const DASHBOARD_GROUP_ORDER = [
   { title: 'Thailand Macro (BOT)',
-    ids: () => (SERIES_GROUPS['Thailand Macro (BOT)'] || []).filter(id => !id.startsWith('BOT_YIELD_')) },
+    ids: () => (SERIES_GROUPS['Thailand Macro (BOT)'] || []).filter(id =>
+      !id.startsWith('BOT_YIELD_') && !['BOT_SET_BOT', 'BOT_CASHBAL', 'BOT_USDTHB'].includes(id)) },
   { title: 'Thailand Bond Yield (ThaiBMA, Daily)',
     ids: () => SERIES_GROUPS['Thailand Bond Yield (ThaiBMA, Daily)'] || [] },
   { title: 'Stock Indices',
@@ -1706,13 +1707,28 @@ function latestDashValue(docId, fn) {
   return { x: last.x, y: last.y, name: s.name || docId, unit: s.meta?.unit || s.meta?.currency || '' };
 }
 
+// ชื่อดิบจาก Firestore มักมีหน่วย/ความถี่ติดมาด้วย เช่น
+// "Exports (f.o.b.) (Millions of US Dollars) Monthly" — ตัดออกเพราะหน่วย
+// ไปโชว์ต่อท้ายตัวเลขอยู่แล้ว (ekpi-unit) ไม่ต้องซ้ำในชื่อ
+function cleanDashName(name) {
+  return (name || '')
+    .replace(/\s*\((?:Millions?|Billions?|Thousands?)\s+of\s+[^)]+\)/gi, '')
+    .replace(/\s*\((?:Percent|Percentage|Index|Baht|USD|US Dollars?)\)/gi, '')
+    .replace(/\s*\b(Monthly|Quarterly|Daily|Yearly|Annual)\b\s*$/i, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
 function renderDashCard(docId, opts = {}) {
   const fn = DASHBOARD_FN[docId] || 'raw';
   const v = latestDashValue(docId, fn);
   if (!v) return '';
   const isGrowth = fn === 'yoy' || fn === 'mom';
   const isPct = isGrowth || /percent|^%$/i.test(v.unit);
-  const valueStr = isPct ? (v.y >= 0 ? '+' : '') + v.y.toFixed(2) + '%' : formatDashNum(v.y);
+  // "+" นำหน้าเฉพาะ growth rate (yoy/mom) — ตัว % ที่เป็น ratio/level (เช่น
+  // NPL ratio, Household Debt/GDP, Unemployment) ไม่ใช่ growth ไม่ควรมี +
+  const signPrefix = isGrowth && v.y >= 0 ? '+' : '';
+  const valueStr = isPct ? signPrefix + v.y.toFixed(2) + '%' : formatDashNum(v.y);
   const chgClass = isGrowth ? (v.y >= 0 ? 'ekpi-chg up' : 'ekpi-chg dn') : '';
   const badge = isGrowth ? (fn === 'yoy' ? 'YoY' : 'MoM') : (isPct ? '' : v.unit);
 
@@ -1726,7 +1742,7 @@ function renderDashCard(docId, opts = {}) {
   }
 
   return `<div class="ekpi">
-    <div class="ekpi-name">${v.name}</div>
+    <div class="ekpi-name">${cleanDashName(v.name)}</div>
     <div class="ekpi-price ${chgClass}">${valueStr}${badge ? `<span class="ekpi-unit">${badge}</span>` : ''}${changeHtml}</div>
     <div class="ekpi-date">${v.x}</div>
   </div>`;
