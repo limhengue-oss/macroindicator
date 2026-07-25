@@ -185,6 +185,27 @@ input[type=range] { width:80px; accent-color:var(--blue); }
 .er { color:var(--dn); font-size:0.75em; padding:3px 11px 8px; }
 .empty { padding:36px; text-align:center; color:var(--text3); font-size:0.85em; }
 
+/* ── Chart-type / Group / Catalog picker modals ── */
+.picker-option { width:100%; text-align:left; padding:14px 16px; margin-bottom:8px; border-radius:5px; cursor:pointer; font-family:inherit; }
+.picker-option b { display:block; font-size:0.92em; margin-bottom:3px; }
+.picker-option span { font-size:0.78em; color:var(--text3); }
+.picker-option.primary { background:var(--blue); border:1px solid var(--blue); color:#fff; }
+.picker-option.primary span { color:rgba(255,255,255,0.75); }
+.picker-option.secondary { background:none; border:1px solid var(--border2); color:var(--text); }
+.grp-country-row { display:flex; align-items:center; gap:7px; padding:5px 0; font-size:0.85em; }
+.grp-country-row span.grp-series-name { color:var(--text3); }
+.cat-columns { display:flex; border:1px solid var(--border2); border-radius:4px; overflow:hidden; height:340px; }
+.cat-col { flex:1; min-width:0; border-right:1px solid var(--border2); overflow-y:auto; }
+.cat-col:last-child { border-right:none; }
+.cat-item { padding:8px 10px; font-size:0.82em; cursor:pointer; display:flex; justify-content:space-between; align-items:center; gap:6px; }
+.cat-item:hover { background:var(--bg3); }
+.cat-item.selected { background:var(--blue); color:#fff; }
+.cat-item .arrow { opacity:0.5; flex-shrink:0; }
+.cat-item.leaf { cursor:pointer; }
+.cat-item.leaf input[type=checkbox] { margin:0; flex-shrink:0; }
+.cat-item.leaf span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.cat-empty-hint { padding:16px 10px; font-size:0.78em; color:var(--text3); }
+
 /* ── Global loading overlay ── */
 #global-loading { position:fixed; inset:0; z-index:500; display:flex; align-items:center; justify-content:center;
   background:var(--bg); transition:opacity 0.25s ease; }
@@ -349,6 +370,61 @@ input[type=range] { width:80px; accent-color:var(--blue); }
 </div>
 
 <!-- Chart Modal -->
+<!-- Chart Type Picker (Step 0) -->
+<div class="modal-bg" id="chart-type-modal">
+  <div class="modal" style="max-width:420px">
+    <h3>Add Chart</h3>
+    <div class="field">
+      <button class="picker-option primary" onclick="startGroupFlow()">
+        <b>Group — เปรียบเทียบข้ามประเทศ</b>
+        <span>เลือก indicator เดียว (เช่น Bond Yield 10Y) แล้วเทียบหลายประเทศในกราฟเดียว</span>
+      </button>
+      <button class="picker-option secondary" onclick="startCatalogFlow()">
+        <b>Non-group — สร้างอิสระ</b>
+        <span>ไล่เลือกจาก data catalog ทีละประเทศ / หมวด / กลุ่มข้อมูล</span>
+      </button>
+    </div>
+    <div class="modal-actions"><button class="btn" onclick="closeChartTypeModal()">Cancel</button></div>
+  </div>
+</div>
+
+<!-- Group Flow: 1 indicator, multi-country -->
+<div class="modal-bg" id="group-modal">
+  <div class="modal">
+    <h3>Group — เลือก Indicator</h3>
+    <div class="field">
+      <label>Indicator</label>
+      <select id="grp-indicator" onchange="renderGroupCountries()"></select>
+    </div>
+    <div class="field">
+      <label>ประเทศ (เลือกได้หลายอัน)</label>
+      <div id="grp-countries"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn" onclick="backToChartType('group-modal')">Back</button>
+      <button class="btn btn-primary" onclick="confirmGroupSelection()">Next</button>
+    </div>
+  </div>
+</div>
+
+<!-- Non-group Flow: cascading drill-down catalog (Finder-style) -->
+<div class="modal-bg" id="catalog-modal">
+  <div class="modal" style="max-width:900px">
+    <h3>Data Catalog</h3>
+    <div class="cat-columns">
+      <div class="cat-col" id="cat-col-country"></div>
+      <div class="cat-col" id="cat-col-sector"></div>
+      <div class="cat-col" id="cat-col-category"></div>
+      <div class="cat-col" id="cat-col-series"></div>
+    </div>
+    <div class="hint" id="cat-selected-count" style="margin-top:8px">ยังไม่เลือก series</div>
+    <div class="modal-actions">
+      <button class="btn" onclick="backToChartType('catalog-modal')">Back</button>
+      <button class="btn btn-primary" onclick="confirmCatalogSelection()">Next</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-bg" id="chart-modal">
   <div class="modal">
     <h3 id="chart-modal-title">Add Chart</h3>
@@ -1965,14 +2041,14 @@ function renderActivePage() {
       </div>
     </div>
     <div class="page-actions">
-      <button class="btn" onclick="openChartModal('${page.id}')">+ Chart</button>
+      <button class="btn" onclick="openChartTypeModal('${page.id}')">+ Chart</button>
       <button class="btn" onclick="editPage('${page.id}')">Edit page</button>
       <button class="btn" onclick="deletePage('${page.id}')">Delete</button>
     </div>`;
   el.appendChild(head);
 
   if (!page.charts.length) {
-    el.innerHTML+='<div class="empty">ยังไม่มี chart<br><button class="btn btn-primary" style="margin-top:10px" onclick="openChartModal(\''+page.id+'\')">+ Add Chart</button></div>';
+    el.innerHTML+='<div class="empty">ยังไม่มี chart<br><button class="btn btn-primary" style="margin-top:10px" onclick="openChartTypeModal(\''+page.id+'\')">+ Add Chart</button></div>';
   } else {
     const grid=document.createElement('div');
     grid.className='chart-grid';
@@ -2275,9 +2351,229 @@ function drawChart(page,chart) {
 }
 
 // ════════════════════════════════════════════════════
+//  CHART-TYPE PICKER (Group / Non-group) — taxonomy + wizard
+// ════════════════════════════════════════════════════
+
+// จัดหมวด series ตาม pattern rule แทนการไล่เขียนทีละตัว (150+ series) —
+// ข้อดีคือ series ใหม่ที่เพิ่มมาทีหลัง (ตาม prefix เดิม) จะถูกจัดหมวดให้เอง
+function classifySeries(id) {
+  // Thailand
+  if (id === 'BOT_SET_BOT' || id === 'SET' || id.startsWith('SET_'))
+    return { country: 'Thailand', sector: 'financial', category: 'Equity Indices' };
+  if (id.startsWith('BOT_YIELD_') || id.startsWith('THAIBMA_YIELD_'))
+    return { country: 'Thailand', sector: 'financial', category: 'Interest Rates & Bonds' };
+  if (['BOT_NPL','BOT_HHDEBT_GDP','BOT_EXTDEBT_GDP','BOT_RESERVES_STDEBT','BOT_M2','BOT_RESERVES','BOT_FWDPOS','BOT_GOVDEBT','BOT_CASHBAL','BOT_USDTHB'].includes(id))
+    return { country: 'Thailand', sector: 'financial', category: 'Money, Banking & Financial Stability' };
+  if (['BOT_LEI','BOT_BSI','BOT_PCI','BOT_PII','BOT_UNEMP','BOT_TOURIST'].includes(id))
+    return { country: 'Thailand', sector: 'real', category: 'Economic Activity & Labor' };
+  if (['BOT_EXPORT','BOT_IMPORT','BOT_TRADEBAL','BOT_CURACC'].includes(id))
+    return { country: 'Thailand', sector: 'real', category: 'External Trade & BOP' };
+  if (id.startsWith('NESDC_GDP'))
+    return { country: 'Thailand', sector: 'real', category: 'GDP & Growth' };
+  if (id.startsWith('GOLDTH_'))
+    return { country: 'Thailand', sector: 'financial', category: 'Commodities' };
+  if (id.startsWith('PTTOR_') || id.startsWith('EPPO_'))
+    return { country: 'Thailand', sector: 'real', category: 'Energy Prices' };
+  if (id === 'USDTHB')
+    return { country: 'Thailand', sector: 'financial', category: 'FX' };
+
+  // United States
+  if (['SPX','NASDAQ','VIX','AAPL','MSFT','GOOGL','AMZN','NVDA','META','TSLA'].includes(id))
+    return { country: 'United States', sector: 'financial', category: 'Equity Indices' };
+  if (['FEDFUNDS','DGS2','DGS10'].includes(id))
+    return { country: 'United States', sector: 'financial', category: 'Interest Rates & Bonds' };
+  if (['CPI','CORECPI','UNRATE'].includes(id))
+    return { country: 'United States', sector: 'real', category: 'Inflation & Labor' };
+
+  // Eurozone
+  if (['STOXX50','DAX'].includes(id))
+    return { country: 'Eurozone', sector: 'financial', category: 'Equity Indices' };
+  if (id === 'ECBRATE')
+    return { country: 'Eurozone', sector: 'financial', category: 'Interest Rates & Bonds' };
+  if (id === 'EUCPI')
+    return { country: 'Eurozone', sector: 'real', category: 'Inflation & Labor' };
+  if (id === 'EURUSD')
+    return { country: 'Eurozone', sector: 'financial', category: 'FX' };
+
+  // อื่นๆ ต่อประเทศ
+  if (id === 'FTSE')   return { country: 'United Kingdom', sector: 'financial', category: 'Equity Indices' };
+  if (id === 'NIKKEI') return { country: 'Japan', sector: 'financial', category: 'Equity Indices' };
+  if (id === 'USDJPY') return { country: 'Japan', sector: 'financial', category: 'FX' };
+  if (id === 'KOSPI')  return { country: 'South Korea', sector: 'financial', category: 'Equity Indices' };
+  if (id === 'USDKRW') return { country: 'South Korea', sector: 'financial', category: 'FX' };
+  if (id === 'NIFTY')  return { country: 'India', sector: 'financial', category: 'Equity Indices' };
+  if (id === 'USDINR') return { country: 'India', sector: 'financial', category: 'FX' };
+  if (id === 'IDX')    return { country: 'Indonesia', sector: 'financial', category: 'Equity Indices' };
+  if (id === 'USDIDR') return { country: 'Indonesia', sector: 'financial', category: 'FX' };
+  if (id === 'HSI')    return { country: 'Hong Kong', sector: 'financial', category: 'Equity Indices' };
+
+  // Global / cross-country
+  if (['WTI','BRENT','GOLD','SILVER','COPPER','NATGAS'].includes(id))
+    return { country: 'Global', sector: 'financial', category: 'Commodities' };
+  if (id === 'BTC')
+    return { country: 'Global', sector: 'financial', category: 'Crypto' };
+
+  return { country: 'Other', sector: 'financial', category: 'Other' };
+}
+
+const SECTOR_LABEL = { real: 'ภาคเศรษฐกิจจริง (Real Economy)', financial: 'ภาคการเงิน (Financial Sector)' };
+
+// Group mode: indicator เดียวกัน เทียบหลายประเทศ — เลือกเฉพาะกรณีที่มี
+// series เทียบเท่ากันจริงข้ามประเทศ (ไม่ใช่ทุก series จะมีคู่เทียบ)
+const INDICATOR_FAMILIES = [
+  { label: 'Headline Equity Index', members: [
+    { country: 'United States', id: 'SPX' }, { country: 'Eurozone', id: 'STOXX50' },
+    { country: 'Germany', id: 'DAX' }, { country: 'United Kingdom', id: 'FTSE' },
+    { country: 'Japan', id: 'NIKKEI' }, { country: 'Thailand', id: 'SET' },
+    { country: 'South Korea', id: 'KOSPI' }, { country: 'India', id: 'NIFTY' },
+    { country: 'Indonesia', id: 'IDX' }, { country: 'Hong Kong', id: 'HSI' },
+  ]},
+  { label: 'USD Exchange Rate', members: [
+    { country: 'Thailand', id: 'USDTHB' }, { country: 'Japan', id: 'USDJPY' },
+    { country: 'South Korea', id: 'USDKRW' }, { country: 'India', id: 'USDINR' },
+    { country: 'Indonesia', id: 'USDIDR' }, { country: 'Eurozone (EUR/USD)', id: 'EURUSD' },
+  ]},
+  { label: 'Government Bond Yield 10Y', members: [
+    { country: 'United States', id: 'DGS10' },
+    { country: 'Thailand (รายเดือน, BOT)', id: 'BOT_YIELD_10Y' },
+    { country: 'Thailand (รายวัน, ThaiBMA)', id: 'THAIBMA_YIELD_10Y' },
+  ]},
+  { label: 'Government Bond Yield 2Y', members: [
+    { country: 'United States', id: 'DGS2' },
+    { country: 'Thailand (รายเดือน, BOT)', id: 'BOT_YIELD_2Y' },
+    { country: 'Thailand (รายวัน, ThaiBMA)', id: 'THAIBMA_YIELD_2Y' },
+  ]},
+  { label: 'Central Bank Policy / Reference Rate', members: [
+    { country: 'United States (Fed Funds)', id: 'FEDFUNDS' }, { country: 'Eurozone (ECB Deposit Rate)', id: 'ECBRATE' },
+  ]},
+  { label: 'Consumer Price Index (%YoY)', members: [
+    { country: 'United States', id: 'CPI', fn: 'yoy' }, { country: 'Eurozone', id: 'EUCPI', fn: 'yoy' },
+  ]},
+  { label: 'Unemployment Rate', members: [
+    { country: 'United States', id: 'UNRATE' }, { country: 'Thailand', id: 'BOT_UNEMP' },
+  ]},
+];
+
+let chartPickerPageId = null;
+window.openChartTypeModal = function(pageId) {
+  chartPickerPageId = pageId;
+  document.getElementById('chart-type-modal').classList.add('show');
+};
+window.closeChartTypeModal = () => document.getElementById('chart-type-modal').classList.remove('show');
+window.backToChartType = function(closeId) {
+  document.getElementById(closeId).classList.remove('show');
+  openChartTypeModal(chartPickerPageId);
+};
+
+// ── Group flow ──
+let groupState = { familyIdx: 0, selectedIds: new Set() };
+window.startGroupFlow = function() {
+  closeChartTypeModal();
+  const sel = document.getElementById('grp-indicator');
+  sel.innerHTML = INDICATOR_FAMILIES.map((f, i) => `<option value="${i}">${f.label}</option>`).join('');
+  sel.value = '0';
+  renderGroupCountries();
+  document.getElementById('group-modal').classList.add('show');
+};
+window.renderGroupCountries = function() {
+  const idx = parseInt(document.getElementById('grp-indicator').value || '0');
+  groupState = { familyIdx: idx, selectedIds: new Set() };
+  const family = INDICATOR_FAMILIES[idx];
+  document.getElementById('grp-countries').innerHTML = family.members.map(m => `
+    <label class="grp-country-row">
+      <input type="checkbox" value="${m.id}" onchange="toggleGroupCountry('${m.id}',this.checked)">
+      ${m.country} <span class="grp-series-name">(${SERIES[m.id]?.name || m.id})</span>
+    </label>`).join('');
+};
+window.toggleGroupCountry = function(id, checked) {
+  if (checked) groupState.selectedIds.add(id); else groupState.selectedIds.delete(id);
+};
+window.confirmGroupSelection = function() {
+  const family = INDICATOR_FAMILIES[groupState.familyIdx];
+  const picked = family.members.filter(m => groupState.selectedIds.has(m.id));
+  if (!picked.length) { alert('เลือกอย่างน้อย 1 ประเทศ'); return; }
+  document.getElementById('group-modal').classList.remove('show');
+  const seriesList = picked.map((m, i) => ({ id: m.id, axis: 'L', fn: m.fn || 'raw', color: COLORS[i % COLORS.length] }));
+  openChartModal(chartPickerPageId, null, seriesList, family.label);
+};
+
+// ── Non-group (catalog) flow ──
+let catalogState = { country: null, sector: null, category: null, selected: new Set() };
+function allSelectableIds() {
+  const set = new Set();
+  Object.values(SERIES_GROUPS).forEach(ids => ids.forEach(id => set.add(id)));
+  return set;
+}
+function catalogEntries() {
+  const selectable = allSelectableIds();
+  return Object.keys(SERIES).filter(id => selectable.has(id))
+    .map(id => ({ id, name: SERIES[id]?.name || id, ...classifySeries(id) }));
+}
+window.startCatalogFlow = function() {
+  closeChartTypeModal();
+  catalogState = { country: null, sector: null, category: null, selected: new Set() };
+  renderCatalogCountries();
+  document.getElementById('cat-col-sector').innerHTML = '';
+  document.getElementById('cat-col-category').innerHTML = '';
+  document.getElementById('cat-col-series').innerHTML = '';
+  document.getElementById('cat-selected-count').textContent = 'ยังไม่เลือก series';
+  document.getElementById('catalog-modal').classList.add('show');
+};
+function renderCatalogCountries() {
+  const countries = [...new Set(catalogEntries().map(e => e.country))].sort();
+  document.getElementById('cat-col-country').innerHTML = countries.map(c => `
+    <div class="cat-item ${catalogState.country === c ? 'selected' : ''}" onclick="selectCatalogCountry('${c.replace(/'/g, "\\'")}')">
+      ${c} <span class="arrow">›</span>
+    </div>`).join('');
+}
+window.selectCatalogCountry = function(country) {
+  catalogState.country = country; catalogState.sector = null; catalogState.category = null;
+  renderCatalogCountries();
+  const sectors = [...new Set(catalogEntries().filter(e => e.country === country).map(e => e.sector))];
+  document.getElementById('cat-col-sector').innerHTML = sectors.map(s => `
+    <div class="cat-item" onclick="selectCatalogSector('${s}')">${SECTOR_LABEL[s] || s} <span class="arrow">›</span></div>`).join('');
+  document.getElementById('cat-col-category').innerHTML = '';
+  document.getElementById('cat-col-series').innerHTML = '';
+};
+window.selectCatalogSector = function(sector) {
+  catalogState.sector = sector; catalogState.category = null;
+  const categories = [...new Set(catalogEntries()
+    .filter(e => e.country === catalogState.country && e.sector === sector).map(e => e.category))].sort();
+  document.getElementById('cat-col-category').innerHTML = categories.map(c => `
+    <div class="cat-item" onclick="selectCatalogCategory('${c.replace(/'/g, "\\'")}')">${c} <span class="arrow">›</span></div>`).join('');
+  document.getElementById('cat-col-series').innerHTML = '';
+};
+window.selectCatalogCategory = function(category) {
+  catalogState.category = category;
+  const entries = catalogEntries().filter(e =>
+    e.country === catalogState.country && e.sector === catalogState.sector && e.category === category);
+  document.getElementById('cat-col-series').innerHTML = entries.length
+    ? entries.map(e => `
+      <label class="cat-item leaf">
+        <input type="checkbox" value="${e.id}" ${catalogState.selected.has(e.id) ? 'checked' : ''} onchange="toggleCatalogSeries('${e.id}',this.checked)">
+        <span>${e.name}</span>
+      </label>`).join('')
+    : '<div class="cat-empty-hint">ไม่มี series ในหมวดนี้</div>';
+};
+window.toggleCatalogSeries = function(id, checked) {
+  if (checked) catalogState.selected.add(id); else catalogState.selected.delete(id);
+  const n = catalogState.selected.size;
+  document.getElementById('cat-selected-count').textContent = n ? `เลือกไว้ ${n} series` : 'ยังไม่เลือก series';
+};
+window.confirmCatalogSelection = function() {
+  const ids = [...catalogState.selected];
+  if (!ids.length) { alert('เลือกอย่างน้อย 1 series'); return; }
+  document.getElementById('catalog-modal').classList.remove('show');
+  const seriesList = ids.map((id, i) => ({ id, axis: 'L', fn: 'raw', color: COLORS[i % COLORS.length] }));
+  openChartModal(chartPickerPageId, null, seriesList);
+};
+
+// ════════════════════════════════════════════════════
 //  CHART MODAL
 // ════════════════════════════════════════════════════
-window.openChartModal = function(pageId, chartId) {
+// presetSeries/presetTitle: มาจาก chart-type picker (Group/Non-group flow) —
+// ข้ามหน้าเลือก series แบบ dropdown เดี่ยว เพราะเลือกมาจาก wizard ก่อนแล้ว
+window.openChartModal = function(pageId, chartId, presetSeries, presetTitle) {
   editingChart={pageId, chartId:chartId||null};
   document.getElementById('chart-modal-title').textContent=chartId?'Edit Chart':'Add Chart';
   let chart=null;
@@ -2285,11 +2581,11 @@ window.openChartModal = function(pageId, chartId) {
     const page=config.pages.find(p=>p.id===pageId);
     chart=page.charts.find(c=>c.id===chartId);
   }
-  document.getElementById('cm-title').value=chart?.title||'';
+  document.getElementById('cm-title').value=chart?.title||presetTitle||'';
   document.getElementById('cm-period').value=chart?.period||'1y';
   const wrap=document.getElementById('cm-series');
   wrap.innerHTML='';
-  const sList=chart?.series||[{id:Object.keys(SERIES)[0]||'SPX',axis:'L',fn:'raw',color:COLORS[0]}];
+  const sList=chart?.series||presetSeries||[{id:Object.keys(SERIES)[0]||'SPX',axis:'L',fn:'raw',color:COLORS[0]}];
   sList.forEach((s,i)=>wrap.appendChild(makeSeriesRow(s,i)));
   updateAddBtn();
   document.getElementById('chart-modal').classList.add('show');
