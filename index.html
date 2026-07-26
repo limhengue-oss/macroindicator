@@ -546,6 +546,26 @@ const SERIES_GROUPS = {
     'THAIBMA_YIELD_1M','THAIBMA_YIELD_3M','THAIBMA_YIELD_6M','THAIBMA_YIELD_1Y',
     'THAIBMA_YIELD_2Y','THAIBMA_YIELD_5Y','THAIBMA_YIELD_10Y','THAIBMA_YIELD_20Y',
   ],
+  'Thailand CPI/PPI (TPSO, Monthly)': [
+    'TPSO_CPIG_00000','TPSO_CPIG_10000','TPSO_CPIG_20000','TPSO_CPIG_30000','TPSO_CPIG_40000',
+    'TPSO_CPIG_50000','TPSO_CPIG_60000','TPSO_CPIG_70000','TPSO_CPIG_80000','TPSO_CPIG_90000',
+    'TPSO_PPI_0000','TPSO_PPI_1000','TPSO_PPI_2000','TPSO_PPI_3000',
+  ],
+  'Credit, Policy Rate & Property (BIS)': [
+    'TH','US','XM','GB','JP','KR','IN','ID','CN'
+  ].flatMap(c => [
+    `BIS_${c}_CBPOL`, `BIS_${c}_CREDIT_GAP`, `BIS_${c}_CREDIT_PRIVATE_GDP`,
+    `BIS_${c}_CREDIT_HH_GDP`, `BIS_${c}_CREDIT_CORP_GDP`, `BIS_${c}_RPP_REAL`, `BIS_${c}_RPP_NOMINAL`,
+  ]),
+  'GDP Quarterly (IMF)': [
+    'THA','USA','G163','GBR','JPN','KOR','IND','IDN','CHN'
+  ].map(c => `IMF_${c}_GDP_QUARTERLY`),
+  'Bank Soundness (IMF FSI)': [
+    'THA','USA','GBR','JPN','KOR','IND','IDN','CHN'
+  ].flatMap(c => ['CAR','NPL','ROE'].map(s => `IMF_${c}_FSI_${s}`)),
+  'CPI World & Regional Aggregates (IMF)': [
+    'G001','G110','G119','G120','G200','U002','U009','U019','U142','U150'
+  ].map(a => `IMF_${a}_CPI_YOY`),
   // EPPO Diesel/Gasoline/Other ถูกเติมด้านล่างหลังประกาศ EPPO_ORDER — จำกัดให้
   // เลือกได้แค่ Retail/Wholesale + Oil Fund เท่านั้น (ซ่อน field breakdown อื่น
   // เช่น Ex-Refin, Excise Tax, VAT, Marketing Margin จากหน้า chart ทั่วไป)
@@ -1752,6 +1772,7 @@ const DASHBOARD_FN = {
   CPI: 'yoy', CORECPI: 'yoy', EUCPI: 'yoy',
   BOT_LEI: 'yoy', BOT_PCI: 'yoy', BOT_PII: 'yoy', BOT_M2: 'yoy',
   BOT_EXPORT: 'yoy', BOT_IMPORT: 'yoy',
+  ...Object.fromEntries((SERIES_GROUPS['Thailand CPI/PPI (TPSO, Monthly)'] || []).map(id => [id, 'yoy'])),
 };
 
 // หมวดที่โชว์ใน Dashboard — จัดเรียง/รวมกลุ่มเองแทนการเดินตาม SERIES_GROUPS
@@ -1766,8 +1787,18 @@ const DASHBOARD_GROUP_ORDER = [
       ...(SERIES_GROUPS['Thailand Macro (BOT)'] || []).filter(id =>
         !id.startsWith('BOT_YIELD_') && !['BOT_SET_BOT', 'BOT_CASHBAL', 'BOT_USDTHB'].includes(id)),
     ] },
+  { title: 'Thailand CPI/PPI (TPSO, Monthly)',
+    ids: () => SERIES_GROUPS['Thailand CPI/PPI (TPSO, Monthly)'] || [] },
   { title: 'Thailand Bond Yield (ThaiBMA, Daily)',
     ids: () => SERIES_GROUPS['Thailand Bond Yield (ThaiBMA, Daily)'] || [] },
+  { title: 'Credit, Policy Rate & Property (BIS)',
+    ids: () => SERIES_GROUPS['Credit, Policy Rate & Property (BIS)'] || [] },
+  { title: 'GDP Quarterly (IMF)',
+    ids: () => SERIES_GROUPS['GDP Quarterly (IMF)'] || [] },
+  { title: 'Bank Soundness (IMF FSI)',
+    ids: () => SERIES_GROUPS['Bank Soundness (IMF FSI)'] || [] },
+  { title: 'CPI World & Regional Aggregates (IMF)',
+    ids: () => SERIES_GROUPS['CPI World & Regional Aggregates (IMF)'] || [] },
   { title: 'Stock Indices',
     ids: () => [
       ...(SERIES_GROUPS['US Equity']   || []),
@@ -2371,7 +2402,41 @@ function drawChart(page,chart) {
 
 // จัดหมวด series ตาม pattern rule แทนการไล่เขียนทีละตัว (150+ series) —
 // ข้อดีคือ series ใหม่ที่เพิ่มมาทีหลัง (ตาม prefix เดิม) จะถูกจัดหมวดให้เอง
+const BIS_COUNTRY_NAME = {
+  TH: 'Thailand', US: 'United States', XM: 'Eurozone', GB: 'United Kingdom',
+  JP: 'Japan', KR: 'South Korea', IN: 'India', ID: 'Indonesia', CN: 'China',
+};
+const IMF_COUNTRY_NAME = {
+  THA: 'Thailand', USA: 'United States', G163: 'Eurozone', GBR: 'United Kingdom',
+  JPN: 'Japan', KOR: 'South Korea', IND: 'India', IDN: 'Indonesia', CHN: 'China',
+};
+
 function classifySeries(id) {
+  // BIS multi-country series: BIS_{CTY}_{SUFFIX}
+  const bisMatch = id.match(/^BIS_([A-Z]{2})_(CBPOL|CREDIT_GAP|CREDIT_PRIVATE_GDP|CREDIT_HH_GDP|CREDIT_CORP_GDP|RPP_REAL|RPP_NOMINAL)$/);
+  if (bisMatch) {
+    const country = BIS_COUNTRY_NAME[bisMatch[1]] || bisMatch[1];
+    const category = bisMatch[2] === 'CBPOL' ? 'Interest Rates & Bonds' : 'Credit & Property (BIS)';
+    return { country, sector: 'financial', category };
+  }
+  // IMF multi-country GDP: IMF_{CTY}_GDP_QUARTERLY
+  const imfGdpMatch = id.match(/^IMF_([A-Z0-9]+)_GDP_QUARTERLY$/);
+  if (imfGdpMatch) {
+    const country = IMF_COUNTRY_NAME[imfGdpMatch[1]] || imfGdpMatch[1];
+    return { country, sector: 'real', category: 'GDP & Growth' };
+  }
+  // IMF Financial Soundness Indicators: IMF_{CTY}_FSI_{CAR|NPL|ROE}
+  const imfFsiMatch = id.match(/^IMF_([A-Z0-9]+)_FSI_(CAR|NPL|ROE)$/);
+  if (imfFsiMatch) {
+    const country = IMF_COUNTRY_NAME[imfFsiMatch[1]] || imfFsiMatch[1];
+    return { country, sector: 'financial', category: 'Bank Soundness (IMF FSI)' };
+  }
+  // IMF CPI world/regional aggregates: IMF_{AREA}_CPI_YOY
+  const imfCpiMatch = id.match(/^IMF_(G001|G110|G119|G120|G200|U002|U009|U019|U142|U150)_CPI_YOY$/);
+  if (imfCpiMatch) {
+    return { country: 'Global', sector: 'real', category: 'CPI World & Regional Aggregates (IMF)' };
+  }
+
   // Thailand
   if (id === 'BOT_SET_BOT' || id === 'SET' || id.startsWith('SET_'))
     return { country: 'Thailand', sector: 'financial', category: 'Equity Indices' };

@@ -1,0 +1,33 @@
+name: Fetch TPSO CPI/PPI
+
+on:
+  schedule:
+    - cron: '0 2 * * 6'   # 09:00 ICT ทุกวันเสาร์ — ข้อมูลเป็นรายเดือน ไม่จำเป็นต้อง fetch ถี่
+  workflow_dispatch:
+
+jobs:
+  fetch-tpso:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: 'release'
+          use-public-rspm: true
+
+      - name: Install packages and run
+        env:
+          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+        run: |
+          Rscript -e '
+          lib <- "/home/runner/R-pkgs"
+          dir.create(lib, showWarnings = FALSE)
+          .libPaths(c(lib, .libPaths()))
+          options(repos = c(CRAN = "https://packagemanager.posit.co/cran/__linux__/noble/latest"))
+          pkgs <- c("httr2","jsonlite","jose","dplyr","purrr","tibble")
+          miss <- pkgs[!pkgs %in% installed.packages(lib.loc = lib)[,"Package"]]
+          if (length(miss)) install.packages(miss, lib = lib, dependencies = TRUE)
+          .libPaths(c(lib, .libPaths()))
+          source("fetch_tpso.R")
+          '
