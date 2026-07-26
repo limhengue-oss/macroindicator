@@ -388,21 +388,29 @@ input[type=range] { width:80px; accent-color:var(--blue); }
   </div>
 </div>
 
-<!-- Group Flow: 1 indicator, multi-country -->
+<!-- Group Flow: เลือก indicator ก่อน แล้วค่อยเลือกประเทศ (2 ขั้นตอน) -->
 <div class="modal-bg" id="group-modal">
   <div class="modal">
-    <h3>Group — เลือก Indicator</h3>
-    <div class="field">
-      <label>Indicator</label>
-      <select id="grp-indicator" onchange="renderGroupCountries()"></select>
+    <!-- Step 1: เลือก indicator -->
+    <div id="grp-step-indicator">
+      <h3>Group — เลือก Indicator</h3>
+      <div class="field">
+        <div id="grp-indicator-list"></div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn" onclick="backToChartType('group-modal')">Back</button>
+      </div>
     </div>
-    <div class="field">
-      <label>ประเทศ (เลือกได้หลายอัน)</label>
-      <div id="grp-countries"></div>
-    </div>
-    <div class="modal-actions">
-      <button class="btn" onclick="backToChartType('group-modal')">Back</button>
-      <button class="btn btn-primary" onclick="confirmGroupSelection()">Next</button>
+    <!-- Step 2: เลือกประเทศ (โผล่หลังเลือก indicator แล้ว) -->
+    <div id="grp-step-countries" style="display:none">
+      <h3 id="grp-countries-title">เลือกประเทศ</h3>
+      <div class="field">
+        <div id="grp-countries"></div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn" onclick="backToGroupIndicator()">Back</button>
+        <button class="btn btn-primary" onclick="confirmGroupSelection()">Next</button>
+      </div>
     </div>
   </div>
 </div>
@@ -413,7 +421,6 @@ input[type=range] { width:80px; accent-color:var(--blue); }
     <h3>Data Catalog</h3>
     <div class="cat-columns">
       <div class="cat-col" id="cat-col-country"></div>
-      <div class="cat-col" id="cat-col-sector"></div>
       <div class="cat-col" id="cat-col-category"></div>
       <div class="cat-col" id="cat-col-series"></div>
     </div>
@@ -640,10 +647,18 @@ function uid() { return Math.random().toString(36).slice(2,9); }
 // ════════════════════════════════════════════════════
 //  DATA
 // ════════════════════════════════════════════════════
+// ตัด prefix "BOT " หน้าชื่อ series ออก (มาจากตอน push เข้า Firestore
+// ใน fetch_bot.R ที่ตั้งชื่อ = "BOT " + fullName ไว้) แล้ว trim ช่องว่าง —
+// ทำที่จุดเดียวตรงนี้ให้มีผลทุกที่ที่ใช้ SERIES[id].name (chart legend,
+// series picker, Dashboard, data catalog ฯลฯ) แทนที่จะไปตัดซ้ำหลายจุด
+function cleanSeriesName(name) {
+  return (name || '').replace(/^BOT\s+/i, '').trim();
+}
+
 function storeDoc(doc) {
   const d = doc.data();
   SERIES[doc.id] = {
-    name: d.name || doc.id,
+    name: cleanSeriesName(d.name || doc.id),
     updated: d.updated || '',
     meta: d.meta || null,
     data: (d.data||[]).map(p=>({x:p.d, y:p.v})).sort((a,b)=>a.x<b.x?-1:1)
@@ -2416,8 +2431,6 @@ function classifySeries(id) {
   return { country: 'Other', sector: 'financial', category: 'Other' };
 }
 
-const SECTOR_LABEL = { real: 'ภาคเศรษฐกิจจริง (Real Economy)', financial: 'ภาคการเงิน (Financial Sector)' };
-
 // Group mode: indicator เดียวกัน เทียบหลายประเทศ — เลือกเฉพาะกรณีที่มี
 // series เทียบเท่ากันจริงข้ามประเทศ (ไม่ใช่ทุก series จะมีคู่เทียบ)
 const INDICATOR_FAMILIES = [
@@ -2465,25 +2478,34 @@ window.backToChartType = function(closeId) {
   openChartTypeModal(chartPickerPageId);
 };
 
-// ── Group flow ──
-let groupState = { familyIdx: 0, selectedIds: new Set() };
+// ── Group flow: Step 1 เลือก indicator (ข้อมูล) ก่อน → Step 2 เลือกประเทศ ──
+let groupState = { familyIdx: null, selectedIds: new Set() };
 window.startGroupFlow = function() {
   closeChartTypeModal();
-  const sel = document.getElementById('grp-indicator');
-  sel.innerHTML = INDICATOR_FAMILIES.map((f, i) => `<option value="${i}">${f.label}</option>`).join('');
-  sel.value = '0';
-  renderGroupCountries();
+  groupState = { familyIdx: null, selectedIds: new Set() };
+  document.getElementById('grp-indicator-list').innerHTML = INDICATOR_FAMILIES.map((f, i) => `
+    <div class="cat-item" style="padding:10px" onclick="selectGroupIndicator(${i})">
+      ${f.label} <span class="arrow">›</span>
+    </div>`).join('');
+  document.getElementById('grp-step-indicator').style.display = 'block';
+  document.getElementById('grp-step-countries').style.display = 'none';
   document.getElementById('group-modal').classList.add('show');
 };
-window.renderGroupCountries = function() {
-  const idx = parseInt(document.getElementById('grp-indicator').value || '0');
+window.selectGroupIndicator = function(idx) {
   groupState = { familyIdx: idx, selectedIds: new Set() };
   const family = INDICATOR_FAMILIES[idx];
+  document.getElementById('grp-countries-title').textContent = `${family.label} — เลือกประเทศ`;
   document.getElementById('grp-countries').innerHTML = family.members.map(m => `
     <label class="grp-country-row">
       <input type="checkbox" value="${m.id}" onchange="toggleGroupCountry('${m.id}',this.checked)">
       ${m.country} <span class="grp-series-name">(${SERIES[m.id]?.name || m.id})</span>
     </label>`).join('');
+  document.getElementById('grp-step-indicator').style.display = 'none';
+  document.getElementById('grp-step-countries').style.display = 'block';
+};
+window.backToGroupIndicator = function() {
+  document.getElementById('grp-step-countries').style.display = 'none';
+  document.getElementById('grp-step-indicator').style.display = 'block';
 };
 window.toggleGroupCountry = function(id, checked) {
   if (checked) groupState.selectedIds.add(id); else groupState.selectedIds.delete(id);
@@ -2498,7 +2520,7 @@ window.confirmGroupSelection = function() {
 };
 
 // ── Non-group (catalog) flow ──
-let catalogState = { country: null, sector: null, category: null, selected: new Set() };
+let catalogState = { country: null, category: null, selected: new Set() };
 function allSelectableIds() {
   const set = new Set();
   Object.values(SERIES_GROUPS).forEach(ids => ids.forEach(id => set.add(id)));
@@ -2511,9 +2533,8 @@ function catalogEntries() {
 }
 window.startCatalogFlow = function() {
   closeChartTypeModal();
-  catalogState = { country: null, sector: null, category: null, selected: new Set() };
+  catalogState = { country: null, category: null, selected: new Set() };
   renderCatalogCountries();
-  document.getElementById('cat-col-sector').innerHTML = '';
   document.getElementById('cat-col-category').innerHTML = '';
   document.getElementById('cat-col-series').innerHTML = '';
   document.getElementById('cat-selected-count').textContent = 'ยังไม่เลือก series';
@@ -2527,18 +2548,9 @@ function renderCatalogCountries() {
     </div>`).join('');
 }
 window.selectCatalogCountry = function(country) {
-  catalogState.country = country; catalogState.sector = null; catalogState.category = null;
+  catalogState.country = country; catalogState.category = null;
   renderCatalogCountries();
-  const sectors = [...new Set(catalogEntries().filter(e => e.country === country).map(e => e.sector))];
-  document.getElementById('cat-col-sector').innerHTML = sectors.map(s => `
-    <div class="cat-item" onclick="selectCatalogSector('${s}')">${SECTOR_LABEL[s] || s} <span class="arrow">›</span></div>`).join('');
-  document.getElementById('cat-col-category').innerHTML = '';
-  document.getElementById('cat-col-series').innerHTML = '';
-};
-window.selectCatalogSector = function(sector) {
-  catalogState.sector = sector; catalogState.category = null;
-  const categories = [...new Set(catalogEntries()
-    .filter(e => e.country === catalogState.country && e.sector === sector).map(e => e.category))].sort();
+  const categories = [...new Set(catalogEntries().filter(e => e.country === country).map(e => e.category))].sort();
   document.getElementById('cat-col-category').innerHTML = categories.map(c => `
     <div class="cat-item" onclick="selectCatalogCategory('${c.replace(/'/g, "\\'")}')">${c} <span class="arrow">›</span></div>`).join('');
   document.getElementById('cat-col-series').innerHTML = '';
@@ -2546,7 +2558,7 @@ window.selectCatalogSector = function(sector) {
 window.selectCatalogCategory = function(category) {
   catalogState.category = category;
   const entries = catalogEntries().filter(e =>
-    e.country === catalogState.country && e.sector === catalogState.sector && e.category === category);
+    e.country === catalogState.country && e.category === category);
   document.getElementById('cat-col-series').innerHTML = entries.length
     ? entries.map(e => `
       <label class="cat-item leaf">
