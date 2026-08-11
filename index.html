@@ -2659,6 +2659,20 @@ function drawInflationCard(key) {
   rawSeries.forEach(s => s.pts.forEach(p => labelSet.add(p.x)));
   const labels = [...labelSet].sort();
 
+  // autoscale ตามข้อมูลจริงในกราฟ แต่ clamp ไว้ไม่ให้เกินช่วง -5% ถึง 30%
+  // (กันประเทศเงินเฟ้อสูงมาก เช่น Argentina/Zimbabwe/Sudan ดึงสเกลจนเส้น
+  // ประเทศอื่นแบนหายไปหมด) — ถ้าข้อมูลจริงแคบกว่านี้ แกนจะ fit ตามข้อมูลจริง
+  const allVals = [];
+  rawSeries.forEach(s => s.pts.forEach(p => { if (p.y !== null && p.y !== undefined && !isNaN(p.y)) allVals.push(p.y); }));
+  let axisMin = -5, axisMax = 30;
+  if (allVals.length) {
+    const dataMin = Math.min(...allVals), dataMax = Math.max(...allVals);
+    const pad = Math.max((dataMax - dataMin) * 0.1, 1);
+    axisMin = Math.max(-5, dataMin - pad);
+    axisMax = Math.min(30, dataMax + pad);
+    if (axisMin >= axisMax) { axisMin = -5; axisMax = 30; }
+  }
+
   // gray ก่อน highlight ทีหลัง (order:0 วาดทับบนสุด)
   const ordered = [...rawSeries.filter(s=>!s.isHl), ...rawSeries.filter(s=>s.isHl)];
   const datasets = ordered.map(s => {
@@ -2705,7 +2719,7 @@ function drawInflationCard(key) {
       },
       scales: {
         x: { type:'category', labels, ticks:{ color:tickColor, font:{family:'monospace',size:9}, maxRotation:0, autoSkip:true, maxTicksLimit:10 }, grid:{color:gridColor}, border:{color:gridColor} },
-        y: { position:'left', ticks:{ color:tickColor, font:{family:'monospace',size:10}, maxTicksLimit:6, callback:v=>v+'%' }, grid:{color:gridColor}, border:{color:gridColor} },
+        y: { position:'left', min:axisMin, max:axisMax, ticks:{ color:tickColor, font:{family:'monospace',size:10}, maxTicksLimit:6, callback:v=>v+'%' }, grid:{color:gridColor}, border:{color:gridColor} },
       }
     }
   });
