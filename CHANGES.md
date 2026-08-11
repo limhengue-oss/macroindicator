@@ -1,5 +1,54 @@
 # Changelog
 
+## v5.16 — 2026-08-10
+
+### เพิ่มหน้า GlobalCPI + fetch_imf_cpi.R
+
+- **หน้าใหม่ "GlobalCPI"** — เปรียบเทียบเงินเฟ้อ (%YoY) รายประเทศจาก IMF CPI
+  จัดเป็น 4 การ์ด (Advanced Economies, Emerging Asia Excl. ASEAN, ASEAN,
+  Latin America) 1 เส้น = 1 ประเทศ เส้นเทาโดย default, มีปุ่ม "Highlight ▾"
+  ต่อการ์ดให้ติ๊กเลือกประเทศที่อยากเน้นแยกสี, เลือก window (1Y/3Y/10Y/30Y)
+  และหมวด COICOP (headline + 12 หมวด) ได้จาก dropdown ร่วมทั้ง 4 การ์ด
+- **`fetch_imf_cpi.R`** (สคริปต์ใหม่) — ดึง CPI index ดิบรายเดือนจาก IMF STA
+  CPI(5.0.0) ทุกประเทศที่ IMF เผยแพร่จริง (~180 ประเทศ, ยืนยันด้วยการรันจริง
+  ไม่ใช่แค่เดา) x หัวข้อรวม + 12 หมวด COICOP — พอร์ตวิธี wildcard bulk-fetch
+  (1 request ได้ทุกประเทศ) มาจากโปรเจกต์ GlobalCPIDB ที่ live-test ไว้แล้ว
+  ตัดเหลือเฉพาะรายเดือน (ไม่ดึง Quarterly fallback) เพราะหน้า GlobalCPI
+  ต้องการแกนเวลาเดียวกันทุกเส้น
+  - workflow ใหม่ `.github/workflows/fetch-imf-cpi.yml` (`workflow_dispatch`,
+    `dry_run` default true — series เยอะ ควรเช็ค coverage ก่อน push จริง)
+- **แยกข้อมูล GlobalCPI ออกจาก series ที่หน้าอื่นเข้าถึงได้โดยเจตนา** —
+  `fetchRest()` (ที่หน้า Dashboard/catalog/custom chart อาศัยอ่าน) ข้าม doc
+  `IMF_{ISO3}_CPI_{00..12}` ไปเลย ไม่เก็บเข้า `SERIES` กลาง; เพิ่ม
+  `fetchGlobalCPI()` เป็น query แยกต่างหาก เก็บลง `GLOBALCPI_SERIES` คนละ
+  object ที่มีแค่หน้า GlobalCPI อ่านได้ — โหลดแบบ lazy ตอนกดเข้าหน้าครั้งแรก
+  เท่านั้น ไม่ผูกกับ Phase 1/2 ของ `loadData()`
+
+### รวมโค้ด R ที่ซ้ำกันของ fetch_*.R เป็น R/firestore.R
+
+- `get_access_token()` / `push_series()` / `dedup_sort_points()` / `%||%`
+  copy-paste เหมือนกันเกือบทุกตัวอักษรอยู่ 9 ไฟล์ (`fetch_and_push.R`,
+  `fetch_bis.R`, `fetch_bot.R`, `fetch_goldth.R`, `fetch_imf.R`,
+  `fetch_imf_cpi.R`, `fetch_nesdc.R`, `fetch_thaibma.R`, `fetch_tpso.R`) —
+  ย้ายมารวมที่ `R/firestore.R` ไฟล์เดียว (~665 บรรทัดที่ซ้ำถูกลบออก) แต่ละ
+  สคริปต์เหลือแค่ `source("R/firestore.R")`
+  - `push_series()` มี 2 พฤติกรรมจริง (ไม่ใช่แค่ copy เฉยๆ): full-replace
+    กับ incremental-merge (`is_incremental` param) — รวมเป็นฟังก์ชันเดียว
+    ที่รองรับทั้งคู่แทนบังคับให้เหมือนกัน; เพิ่ม `quiet` param ให้
+    `fetch_imf_cpi.R` ใช้ (push ~1,500+ series ต่อรอบ ไม่อยาก spam log ทีละ doc)
+  - ตรวจสอบด้วยการรัน `fetch_imf.R` และ `fetch_imf_cpi.R` จริงผ่าน
+    shared module แบบ dry-run จบ end-to-end ไม่ใช่แค่ตรวจ syntax
+
+### จัดโฟลเดอร์: scripts/oneoff/
+
+- ย้าย `push_oilfund_backfill.R` → `scripts/oneoff/push_oilfund_backfill.R`
+  (เป็น one-off — งานรันไปแล้วครั้งหนึ่ง เก็บไว้เผื่อต้อง re-seed ข้อมูล
+  กรณี Firestore หาย ไม่ใช่ส่วนหนึ่งของ pipeline ปกติ) แก้
+  `.github/workflows/backfill-oilfund.yml` ให้ชี้ path ใหม่
+  - `push_meta_only.R` **ไม่ย้าย** — ยังเป็นแหล่ง metadata เดียวของ series
+    EPPO ทั้งหมด (`fetch_eppo.R` ตั้งใจไม่แตะ field `meta` เลย) ยังต้องรันซ้ำ
+    ทุกครั้งที่มีสินค้า EPPO ใหม่ ไม่ใช่ one-off
+
 ## v5.15 — 2026-07-10 (bugfix)
 
 ### fetch_and_push.R

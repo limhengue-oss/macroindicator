@@ -3,7 +3,10 @@
 #  Push ข้อมูล workfile/offo_parsed.csv (ฐานะกองทุนน้ำมันย้อนหลัง) ขึ้น Firestore
 #  ครั้งเดียว แล้วตั้ง meta/oilfund_status.last_date ให้ fetch_eppo.R
 #  scrape ต่อจากจุดนี้ทุกวัน
-#  รัน: Rscript push_oilfund_backfill.R
+#
+#  one-off script — งานนี้รันไปแล้วครั้งหนึ่ง (ดู git log) เก็บไว้เผื่อต้อง
+#  re-seed ข้อมูลใหม่กรณี Firestore หาย ไม่ได้อยู่ใน pipeline ปกติ
+#  รัน (จาก repo root): Rscript scripts/oneoff/push_oilfund_backfill.R
 # ══════════════════════════════════════════════════════════════════
 
 suppressPackageStartupMessages({

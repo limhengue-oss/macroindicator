@@ -44,96 +44,11 @@ sa_json <- Sys.getenv("GCP_SA_KEY")
 if (sa_json == "") stop("GCP_SA_KEY not set")
 sa <- fromJSON(sa_json)
 
-`%||%` <- function(x, y) if (is.null(x) || length(x) == 0 || is.na(x)) y else x
-
 # ══════════════════════════════════════════════════════════════════
-#  PART 1 — Firestore auth + push (เหมือน fetch_bot.R)
+#  PART 1 — Firestore auth + push (R/firestore.R — ใช้ร่วมกับ fetch_*.R
+#  อื่นๆ ทั้งหมด, ดู R/firestore.R สำหรับรายละเอียด)
 # ══════════════════════════════════════════════════════════════════
-
-get_access_token <- function(sa) {
-  now <- as.numeric(Sys.time())
-  claim <- jwt_claim(
-    iss = sa$client_email, scope = "https://www.googleapis.com/auth/datastore",
-    aud = "https://oauth2.googleapis.com/token", iat = now, exp = now + 3600
-  )
-  jwt <- jwt_encode_sig(claim, key = gsub("\\\\n", "\n", sa$private_key))
-  resp <- request("https://oauth2.googleapis.com/token") |>
-    req_body_form(grant_type = "urn:ietf:params:oauth:grant-type:jwt-bearer", assertion = jwt) |>
-    req_perform()
-  resp_body_json(resp)$access_token
-}
-
-dedup_sort_points <- function(pts) {
-  if (length(pts) == 0) return(pts)
-  dates <- map_chr(pts, \(p) p$mapValue$fields$d$stringValue)
-  keep  <- !duplicated(dates, fromLast = TRUE)
-  pts   <- pts[keep]
-  dates <- dates[keep]
-  pts[order(dates)]
-}
-
-push_series <- function(token, doc_id, name, df, is_incremental, meta = NULL) {
-  new_points <- pmap(df, function(date, value) {
-    list(mapValue = list(fields = list(
-      d = list(stringValue = as.character(date)),
-      v = list(doubleValue = value)
-    )))
-  })
-
-  url <- sprintf(
-    "https://firestore.googleapis.com/v1/projects/%s/databases/(default)/documents/%s/%s",
-    PROJECT_ID, COLLECTION, doc_id
-  )
-
-  all_points <- new_points
-  if (is_incremental) {
-    existing_points <- tryCatch({
-      r <- request(url) |> req_auth_bearer_token(token) |>
-        req_error(is_error = \(r) FALSE) |> req_perform()
-      if (resp_status(r) == 200) {
-        arr <- resp_body_json(r)$fields$data$arrayValue$values
-        if (!is.null(arr)) arr else list()
-      } else list()
-    }, error = function(e) list())
-    all_points <- dedup_sort_points(c(existing_points, new_points))
-  }
-
-  fields <- list(
-    name    = list(stringValue = name),
-    updated = list(stringValue = format(Sys.time(), "%Y-%m-%dT%H:%M:%SZ", tz = "UTC")),
-    data    = list(arrayValue = list(values = all_points))
-  )
-
-  if (!is.null(meta)) {
-    fields$meta <- list(mapValue = list(fields = list(
-      fullName = list(stringValue = meta$fullName %||% ""),
-      currency = list(stringValue = meta$currency %||% ""),
-      unit     = list(stringValue = meta$unit     %||% ""),
-      freq     = list(stringValue = meta$freq     %||% ""),
-      source   = list(stringValue = meta$source   %||% "")
-    )))
-  }
-
-  body <- list(fields = fields)
-  mask_fields <- c("name", "updated", "data")
-  if (!is.null(meta)) mask_fields <- c(mask_fields, "meta")
-
-  resp <- request(url) |>
-    req_url_query(`updateMask.fieldPaths` = mask_fields, .multi = "explode") |>
-    req_method("PATCH") |>
-    req_auth_bearer_token(token) |>
-    req_body_json(body, auto_unbox = TRUE) |>
-    req_error(is_error = function(resp) FALSE) |>
-    req_perform()
-
-  status <- resp_status(resp)
-  if (status >= 300) {
-    warning(sprintf("  ✗ %s: HTTP %d — %s", doc_id, status, substr(resp_body_string(resp), 1, 200)))
-    return(FALSE)
-  }
-  message(sprintf("  ✓ %s (+%d new points)", doc_id, nrow(df)))
-  TRUE
-}
+source("R/firestore.R")
 
 # ══════════════════════════════════════════════════════════════════
 #  PART 2 — ThaiBMA client

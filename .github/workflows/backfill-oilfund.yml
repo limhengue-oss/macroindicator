@@ -27,5 +27,5 @@ jobs:
           miss <- pkgs[!pkgs %in% installed.packages(lib.loc = lib)[,"Package"]]
           if (length(miss)) install.packages(miss, lib = lib, dependencies = TRUE)
           .libPaths(c(lib, .libPaths()))
-          source("push_oilfund_backfill.R")
+          source("scripts/oneoff/push_oilfund_backfill.R")
           '

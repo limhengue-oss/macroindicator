@@ -1,0 +1,38 @@
+name: Fetch IMF CPI (all countries, by COICOP category)
+
+on:
+  workflow_dispatch:   # รันมือไปก่อน ยังไม่ตั้ง cron จนกว่าจะยืนยันว่ารันจบไม่มีปัญหา (series เยอะ, ใช้เวลานาน)
+    inputs:
+      dry_run:
+        description: 'Dry run (ดึงข้อมูลมาดูเฉย ๆ ไม่ push Firestore)'
+        type: boolean
+        default: true
+
+jobs:
+  fetch-imf-cpi:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: 'release'
+          use-public-rspm: true
+
+      - name: Install packages and run
+        env:
+          GCP_SA_KEY:  ${{ inputs.dry_run && '' || secrets.GCP_SA_KEY }}
+          IMF_API_KEY: ${{ secrets.IMF_API_KEY }}
+        run: |
+          Rscript -e '
+          lib <- "/home/runner/R-pkgs"
+          dir.create(lib, showWarnings = FALSE)
+          .libPaths(c(lib, .libPaths()))
+          options(repos = c(CRAN = "https://packagemanager.posit.co/cran/__linux__/noble/latest"))
+          pkgs <- c("httr2","jsonlite","jose","dplyr","purrr","tibble","xml2")
+          miss <- pkgs[!pkgs %in% installed.packages(lib.loc = lib)[,"Package"]]
+          if (length(miss)) install.packages(miss, lib = lib, dependencies = TRUE)
+          .libPaths(c(lib, .libPaths()))
+          source("fetch_imf_cpi.R")
+          '
