@@ -540,16 +540,26 @@ const PERIOD_MONTHS = { '3m':3,'6m':6,'1y':12,'3y':36,'10y':120,'30y':360,'max':
 // ทางการ — เลือกเฉพาะประเทศที่ยืนยันแล้วว่ามีข้อมูลรายเดือนจริงจาก
 // fetch_imf_cpi.R (เช็ค coverage ไว้ใน workfile/imf_cpi_country_summary.csv)
 // Singapore นับเป็น Advanced Economy (ตาม IMF) จึงไม่ซ้ำอยู่ใน ASEAN
+// G7/EU แยกออกมาจาก Advanced Economies เดิม — "Other AE" คือ Advanced
+// Economies เดิม หัก G7 และ EU ออก (ประเทศไหนอยู่ทั้ง G7 และ EU เช่น
+// Germany/France/Italy นับเป็น G7 เท่านั้น ไม่ซ้ำใน EU การ์ด)
 const INFLATION_GROUPS = [
-  { key: 'AE', title: 'Advanced Economies', countries: [
-    ['AUS','Australia'],['AUT','Austria'],['BEL','Belgium'],['CAN','Canada'],['CHE','Switzerland'],
-    ['CYP','Cyprus'],['CZE','Czech Republic'],['DEU','Germany'],['DNK','Denmark'],['ESP','Spain'],
-    ['EST','Estonia'],['FIN','Finland'],['FRA','France'],['GBR','United Kingdom'],['GRC','Greece'],
-    ['HKG','Hong Kong'],['IRL','Ireland'],['ISL','Iceland'],['ISR','Israel'],['ITA','Italy'],
-    ['JPN','Japan'],['KOR','South Korea'],['LTU','Lithuania'],['LUX','Luxembourg'],['LVA','Latvia'],
-    ['MAC','Macao'],['MLT','Malta'],['NLD','Netherlands'],['NOR','Norway'],['NZL','New Zealand'],
-    ['PRT','Portugal'],['SGP','Singapore'],['SMR','San Marino'],['SVK','Slovak Republic'],['SVN','Slovenia'],
-    ['SWE','Sweden'],['USA','United States'],
+  { key: 'G7', title: 'G7', countries: [
+    ['CAN','Canada'],['DEU','Germany'],['FRA','France'],['GBR','United Kingdom'],
+    ['ITA','Italy'],['JPN','Japan'],['USA','United States'],
+  ]},
+  { key: 'EU', title: 'EU', countries: [
+    ['AUT','Austria'],['BEL','Belgium'],['BGR','Bulgaria'],['HRV','Croatia'],['CYP','Cyprus'],
+    ['CZE','Czech Republic'],['DNK','Denmark'],['EST','Estonia'],['FIN','Finland'],['GRC','Greece'],
+    ['HUN','Hungary'],['IRL','Ireland'],['LVA','Latvia'],['LTU','Lithuania'],['LUX','Luxembourg'],
+    ['MLT','Malta'],['NLD','Netherlands'],['POL','Poland'],['PRT','Portugal'],['ROU','Romania'],
+    ['SVK','Slovak Republic'],['SVN','Slovenia'],['ESP','Spain'],['SWE','Sweden'],
+  ]},
+  { key: 'AE', title: 'Other AE (Excl. G7, EU)', countries: [
+    // เรียง Asia/Asia-Pacific ก่อน แล้วตามด้วยยุโรปที่เหลือ
+    ['HKG','Hong Kong'],['KOR','South Korea'],['MAC','Macao'],['SGP','Singapore'],['ISR','Israel'],
+    ['AUS','Australia'],['NZL','New Zealand'],
+    ['CHE','Switzerland'],['ISL','Iceland'],['NOR','Norway'],['SMR','San Marino'],
   ]},
   { key: 'EA', title: 'Emerging Asia (Excl. ASEAN)', countries: [
     ['CHN','China'],['IND','India'],['BGD','Bangladesh'],['PAK','Pakistan'],['LKA','Sri Lanka'],
@@ -587,7 +597,9 @@ const INFLATION_HL_COLORS = COLORS.filter(c => c !== '#888888');
 const inflationState = {
   category: '00',       // '00'=headline, '01'..'12'=COICOP division
   window: '10y',
-  highlights: Object.fromEntries(INFLATION_GROUPS.map(g => [g.key, new Set()])),
+  // 'OTHER' เพิ่มเองที่นี่ (นอกเหนือ INFLATION_GROUPS) เพราะกลุ่ม Other
+  // Countries คำนวณ dynamic จากข้อมูลจริงที่โหลดมา ไม่ใช่รายชื่อ hardcode
+  highlights: { ...Object.fromEntries(INFLATION_GROUPS.map(g => [g.key, new Set()])), OTHER: new Set() },
 };
 
 const SERIES_GROUPS = {
@@ -2563,68 +2575,76 @@ function renderInflationPage() {
   renderInflationCards();
 }
 
+// กลุ่ม "Other Countries" — ประเทศไหนก็ตามที่มีข้อมูล GlobalCPI จริง
+// (GLOBALCPI_SERIES) แต่ไม่อยู่ใน G7/EU/AE/EA/ASEAN/LATAM เลย คำนวณสดจาก
+// ข้อมูลที่โหลดมาแทนการ hardcode รายชื่อ ~100 ประเทศที่เหลือเอง — ชื่อประเทศ
+// ดึงจาก doc's own "name" field ("IMF CPI Index — {country}: {category}")
+function inflationOtherGroup() {
+  const known = new Set();
+  INFLATION_GROUPS.forEach(g => g.countries.forEach(([code]) => known.add(code)));
+  const seen = new Set();
+  const countries = [];
+  Object.keys(GLOBALCPI_SERIES).forEach(id => {
+    const m = id.match(/^IMF_([A-Z]{3})_CPI_\d{2}$/);
+    if (!m) return;
+    const code = m[1];
+    if (known.has(code) || seen.has(code)) return;
+    seen.add(code);
+    const nameMatch = GLOBALCPI_SERIES[id]?.name?.match(/^IMF CPI Index — (.+?): /);
+    countries.push([code, nameMatch ? nameMatch[1] : code]);
+  });
+  countries.sort((a, b) => a[1].localeCompare(b[1]));
+  return { key: 'OTHER', title: 'Other Countries', countries };
+}
+
+function getInflationGroups() {
+  return [...INFLATION_GROUPS, inflationOtherGroup()];
+}
+
 function renderInflationCards() {
   const body = document.getElementById('inflation-body');
   if (!body) return;
-  body.innerHTML = INFLATION_GROUPS.map(g => `
+  const groups = getInflationGroups();
+  body.innerHTML = groups.map(g => `
     <div class="card">
       <div class="ch">
         <div><div class="ct">${g.title}</div><div class="cs" id="infl-cs-${g.key}"></div></div>
-        <div class="ch-actions" style="position:relative">
-          <button class="btn" style="font-size:0.72em;padding:2px 8px" onclick="toggleInflationPanel('${g.key}')">Highlight ▾</button>
-          <div id="infl-panel-${g.key}" style="display:none"></div>
+        <div class="ch-actions">
+          <button class="btn" style="font-size:0.72em;padding:2px 8px" onclick="highlightAllInflation('${g.key}')">All</button>
         </div>
       </div>
       <div class="cb"><div style="position:relative;height:260px">
         <canvas id="infl-cv-${g.key}"></canvas>
       </div></div>
-      <div class="legend" id="infl-lg-${g.key}"></div>
       <div id="infl-table-${g.key}" style="padding:0 11px 12px;overflow-x:auto"></div>
     </div>
   `).join('');
 
-  INFLATION_GROUPS.forEach(g => { buildInflationPanel(g); drawInflationCard(g.key); });
+  groups.forEach(g => drawInflationCard(g.key));
 }
 
-function buildInflationPanel(g) {
-  const panel = document.getElementById('infl-panel-'+g.key);
-  if (!panel) return;
-  panel.style.cssText = 'position:absolute;right:0;top:100%;margin-top:4px;background:var(--bg2);border:1px solid var(--border2);border-radius:6px;box-shadow:var(--card-shadow);padding:6px;max-height:280px;overflow-y:auto;width:230px;z-index:20;text-align:left';
-  panel.innerHTML = g.countries.map(([code,name]) => `
-    <label style="display:flex;align-items:center;gap:6px;padding:3px 4px;font-size:0.78em;cursor:pointer;border-radius:3px;color:var(--text)">
-      <input type="checkbox" value="${code}" ${inflationState.highlights[g.key].has(code)?'checked':''} onchange="toggleInflationHighlight('${g.key}','${code}',this.checked)">
-      <span>${name}</span>
-    </label>
-  `).join('');
-}
-
-window.toggleInflationPanel = function(key) {
-  INFLATION_GROUPS.forEach(g => {
-    const p = document.getElementById('infl-panel-'+g.key);
-    if (!p) return;
-    p.style.display = (g.key === key && p.style.display === 'none') ? 'block' : 'none';
-  });
-};
-
-window.toggleInflationHighlight = function(key, code, checked) {
+// คลิกชื่อประเทศในตาราง = toggle highlight ประเทศนั้น (แทน checkbox dropdown เดิม)
+window.toggleInflationCountry = function(key, code) {
   const set = inflationState.highlights[key];
-  if (checked) set.add(code); else set.delete(code);
+  if (set.has(code)) set.delete(code); else set.add(code);
   drawInflationCard(key);
 };
 
-// ปิด highlight panel ที่เปิดอยู่เมื่อคลิกนอก panel/ปุ่ม
-document.addEventListener('click', (e) => {
-  if (e.target.closest && e.target.closest('.ch-actions')) return;
-  document.querySelectorAll('[id^="infl-panel-"]').forEach(p => p.style.display = 'none');
-});
+// ปุ่ม "All" — highlight ทุกประเทศในการ์ดนั้นทีเดียว
+window.highlightAllInflation = function(key) {
+  const g = getInflationGroups().find(x => x.key === key);
+  if (!g) return;
+  const set = inflationState.highlights[key];
+  g.countries.forEach(([code]) => set.add(code));
+  drawInflationCard(key);
+};
 
 function drawInflationCard(key) {
-  const g = INFLATION_GROUPS.find(x => x.key === key);
+  const g = getInflationGroups().find(x => x.key === key);
   if (!g) return;
   const canvas = document.getElementById('infl-cv-'+key);
   if (!canvas) return;
   const csEl = document.getElementById('infl-cs-'+key);
-  const lgEl = document.getElementById('infl-lg-'+key);
 
   const highlights = inflationState.highlights[key];
   const category = inflationState.category;
@@ -2650,12 +2670,12 @@ function drawInflationCard(key) {
   if (csEl) csEl.textContent = `${rawSeries.length}/${g.countries.length} ประเทศมีข้อมูล · %YoY`;
 
   const tblEl = document.getElementById('infl-table-'+key);
-  buildInflationTable(tblEl, rawSeries);
+  buildInflationTable(key, tblEl, rawSeries);
 
   const chartKey = 'infl-'+key;
   if (!rawSeries.length) {
     if (charts[chartKey]) { charts[chartKey].destroy(); delete charts[chartKey]; }
-    if (lgEl) lgEl.innerHTML = globalCpiLoaded ? '<span style="color:var(--text3)">no data</span>' : '';
+    if (tblEl && globalCpiLoaded) tblEl.innerHTML = '<span style="color:var(--text3)">no data</span>';
     return;
   }
 
@@ -2728,12 +2748,6 @@ function drawInflationCard(key) {
       }
     }
   });
-
-  if (lgEl) {
-    lgEl.innerHTML = rawSeries.filter(s=>s.isHl).map(s =>
-      `<div class="li"><span class="ls" style="background:${s.color}"></span><span>${s.name}</span></div>`
-    ).join('');
-  }
 }
 
 // สถิติต่อประเทศ: ล่าสุด, เฉลี่ย 3Y/10Y, S.D. 10Y — คำนวณจาก full %YoY series
@@ -2760,7 +2774,7 @@ function inflationRowStats(yoyPts) {
   return { latestDate: last.x, latestVal: last.y, avg3y: avg(vals3y), avg10y: avg(vals10y), sd10y: sd(vals10y) };
 }
 
-function buildInflationTable(tblEl, rawSeries) {
+function buildInflationTable(key, tblEl, rawSeries) {
   if (!tblEl) return;
   if (!rawSeries.length) { tblEl.innerHTML = ''; return; }
 
@@ -2771,7 +2785,7 @@ function buildInflationTable(tblEl, rawSeries) {
     const st = inflationRowStats(s.yoy);
     if (!st) return '';
     return `<tr style="border-bottom:1px solid var(--border)">
-      <td style="padding:4px 8px 4px 0;${s.isHl ? `color:${s.color};font-weight:600` : 'color:var(--text2)'}">${s.name}</td>
+      <td style="padding:4px 8px 4px 0;cursor:pointer;user-select:none;${s.isHl ? `color:${s.color};font-weight:600` : 'color:var(--text2)'}" onclick="toggleInflationCountry('${key}','${s.code}')" title="คลิกเพื่อ highlight/unhighlight">${s.name}</td>
       <td style="padding:4px 8px;text-align:right;color:var(--text3);white-space:nowrap">${fmtDate(st.latestDate)}</td>
       <td style="padding:4px 8px;text-align:right;font-weight:600">${fmtPct(st.latestVal)}</td>
       <td style="padding:4px 8px;text-align:right;color:var(--text2)">${fmtPct(st.avg3y)}</td>
