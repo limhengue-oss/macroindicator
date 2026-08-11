@@ -358,7 +358,7 @@ input[type=range] { width:80px; accent-color:var(--blue); }
       <div class="seg" id="infl-window-seg"></div>
     </div>
   </div>
-  <div id="inflation-body" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(440px,1fr));gap:14px">
+  <div id="inflation-body" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(440px,1fr));gap:14px;max-width:1200px;margin:0 auto">
     <div class="ld" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(440px,1fr));gap:14px;grid-column:1/-1">
       <div class="skeleton skel-chart"></div><div class="skeleton skel-chart"></div>
       <div class="skeleton skel-chart"></div><div class="skeleton skel-chart"></div>
@@ -2579,6 +2579,7 @@ function renderInflationCards() {
         <canvas id="infl-cv-${g.key}"></canvas>
       </div></div>
       <div class="legend" id="infl-lg-${g.key}"></div>
+      <div id="infl-table-${g.key}" style="padding:0 11px 12px;overflow-x:auto"></div>
     </div>
   `).join('');
 
@@ -2643,10 +2644,13 @@ function drawInflationCard(key) {
     const pts = cutByPeriod(yoy, win);
     if (!pts.length) return;
     const isHl = highlights.has(code);
-    rawSeries.push({ code, name: fallbackName, pts, isHl, color: isHl ? highlightColor[code] : INFLATION_GRAY });
+    rawSeries.push({ code, name: fallbackName, pts, yoy, isHl, color: isHl ? highlightColor[code] : INFLATION_GRAY });
   });
 
   if (csEl) csEl.textContent = `${rawSeries.length}/${g.countries.length} ประเทศมีข้อมูล · %YoY`;
+
+  const tblEl = document.getElementById('infl-table-'+key);
+  buildInflationTable(tblEl, rawSeries);
 
   const chartKey = 'infl-'+key;
   if (!rawSeries.length) {
@@ -2730,6 +2734,66 @@ function drawInflationCard(key) {
       `<div class="li"><span class="ls" style="background:${s.color}"></span><span>${s.name}</span></div>`
     ).join('');
   }
+}
+
+// สถิติต่อประเทศ: ล่าสุด, เฉลี่ย 3Y/10Y, S.D. 10Y — คำนวณจาก full %YoY series
+// (ไม่ตัดตาม window ที่เลือกแสดงบนกราฟ) โดย anchor เดือน "ล่าสุด" จากจุด
+// ข้อมูลจริงตัวสุดท้ายของแต่ละประเทศเอง (ไม่ใช่วันที่ปัจจุบันจริง) เพราะ
+// บางประเทศข้อมูลนิ่งมานานแล้ว (เช่น Aruba ค้างที่ปี 2020) ถ้า anchor ที่
+// วันนี้จริงจะไม่มีจุดในช่วง 3Y/10Y ล่าสุดเลย
+function inflationRowStats(yoyPts) {
+  if (!yoyPts.length) return null;
+  const last = yoyPts[yoyPts.length - 1];
+  const cutoff = (months) => {
+    const d = new Date(last.x + 'T00:00:00Z');
+    d.setUTCMonth(d.getUTCMonth() - months);
+    return d.toISOString().slice(0, 10);
+  };
+  const vals3y  = yoyPts.filter(p => p.x >= cutoff(36)).map(p => p.y);
+  const vals10y = yoyPts.filter(p => p.x >= cutoff(120)).map(p => p.y);
+  const avg = arr => arr.length ? arr.reduce((a,b)=>a+b, 0) / arr.length : null;
+  const sd = arr => {
+    if (arr.length < 2) return null;
+    const m = avg(arr);
+    return Math.sqrt(arr.reduce((a,b)=>a+(b-m)**2, 0) / (arr.length - 1));
+  };
+  return { latestDate: last.x, latestVal: last.y, avg3y: avg(vals3y), avg10y: avg(vals10y), sd10y: sd(vals10y) };
+}
+
+function buildInflationTable(tblEl, rawSeries) {
+  if (!tblEl) return;
+  if (!rawSeries.length) { tblEl.innerHTML = ''; return; }
+
+  const fmtPct  = v => (v === null || v === undefined || isNaN(v)) ? '—' : v.toFixed(2) + '%';
+  const fmtDate = d => { const dt = new Date(d+'T00:00:00Z'); return dt.toLocaleDateString('en-US',{month:'short',year:'numeric',timeZone:'UTC'}); };
+
+  const rows = rawSeries.map(s => {
+    const st = inflationRowStats(s.yoy);
+    if (!st) return '';
+    return `<tr style="border-bottom:1px solid var(--border)">
+      <td style="padding:4px 8px 4px 0;${s.isHl ? `color:${s.color};font-weight:600` : 'color:var(--text2)'}">${s.name}</td>
+      <td style="padding:4px 8px;text-align:right;color:var(--text3);white-space:nowrap">${fmtDate(st.latestDate)}</td>
+      <td style="padding:4px 8px;text-align:right;font-weight:600">${fmtPct(st.latestVal)}</td>
+      <td style="padding:4px 8px;text-align:right;color:var(--text2)">${fmtPct(st.avg3y)}</td>
+      <td style="padding:4px 8px;text-align:right;color:var(--text2)">${fmtPct(st.avg10y)}</td>
+      <td style="padding:4px 8px;text-align:right;color:var(--text2)">${fmtPct(st.sd10y)}</td>
+    </tr>`;
+  }).join('');
+
+  tblEl.innerHTML = `
+    <table style="width:100%;border-collapse:collapse;font-size:0.74em;min-width:420px">
+      <thead>
+        <tr style="border-bottom:1px solid var(--border2)">
+          <th style="text-align:left;padding:4px 8px 4px 0;color:var(--text3);font-weight:600">ประเทศ</th>
+          <th style="text-align:right;padding:4px 8px;color:var(--text3);font-weight:600">เดือนล่าสุด</th>
+          <th style="text-align:right;padding:4px 8px;color:var(--text3);font-weight:600">%YoY ล่าสุด</th>
+          <th style="text-align:right;padding:4px 8px;color:var(--text3);font-weight:600">เฉลี่ย 3Y</th>
+          <th style="text-align:right;padding:4px 8px;color:var(--text3);font-weight:600">เฉลี่ย 10Y</th>
+          <th style="text-align:right;padding:4px 8px;color:var(--text3);font-weight:600">S.D. 10Y</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>`;
 }
 
 // ════════════════════════════════════════════════════
