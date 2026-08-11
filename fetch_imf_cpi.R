@@ -27,9 +27,16 @@
 #  รัน local:  Rscript fetch_imf_cpi.R
 #  รัน CI:     GitHub Actions inject env vars จาก Secrets
 #
-#  หมายเหตุ: series ที่ได้มีจำนวนมาก (ประเทศ x หมวด ~1,000-2,000 series)
-#  รันแล้วใช้เวลานานกว่า fetch_imf.R ปกติมาก (push ทีละ doc ไป Firestore)
-#  แนะนำให้รันแบบ dry_run ก่อนเพื่อดู coverage ก่อน push จริง
+#  หมายเหตุ: series ที่ได้มีจำนวนมาก (ประเทศ x หมวด ~1,700+ series) รันแล้ว
+#  ใช้เวลานานกว่า fetch_imf.R ปกติมาก (push ทีละ doc ไป Firestore) แนะนำให้
+#  รันแบบ dry_run ก่อนเพื่อดู coverage ก่อน push จริง
+#
+#  START_PERIOD = 2000-01 (live-test แล้ว: IMF มีข้อมูลย้อนถึงปี 2000 จริง
+#  สำหรับส่วนใหญ่ของประเทศที่มีข้อมูล — ~75/~198 ประเทศเริ่มเดือน 2000-01
+#  พอดี ที่เหลือส่วนใหญ่เริ่มก่อนปี 2015 — full wildcard call (Monthly, 13
+#  หมวด, ทุกประเทศ) ที่ startPeriod นี้ตอบกลับมา ~60MB/355k+ rows วัดจริง
+#  แล้วว่า fetch+parse ใช้เวลารวม ~2-3 นาที ไม่ timeout (req_timeout ตั้งไว้
+#  180s ต่อ request เผื่อ margin)
 # ══════════════════════════════════════════════════════════════════
 
 .libPaths(c("/home/runner/R-pkgs", .libPaths()))
@@ -48,7 +55,7 @@ PROJECT_ID <- "macroindicator-6b265"
 COLLECTION <- "series"
 IMF_API_BASE <- "https://api.imf.org/external/sdmx/2.1"
 IMF_CPI_FLOW <- "IMF.STA,CPI,5.0.0"
-START_PERIOD <- "2020-01"
+START_PERIOD <- "2000-01"
 
 sa_json <- Sys.getenv("GCP_SA_KEY")
 DRY_RUN  <- sa_json == ""

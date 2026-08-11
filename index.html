@@ -559,7 +559,12 @@ const INFLATION_GROUPS = [
     // เรียง Asia/Asia-Pacific ก่อน แล้วตามด้วยยุโรปที่เหลือ
     ['HKG','Hong Kong'],['KOR','South Korea'],['MAC','Macao'],['SGP','Singapore'],['ISR','Israel'],
     ['AUS','Australia'],['NZL','New Zealand'],
-    ['CHE','Switzerland'],['ISL','Iceland'],['NOR','Norway'],['SMR','San Marino'],
+    ['CHE','Switzerland'],['ISL','Iceland'],['NOR','Norway'],['SMR','San Marino'],['RUS','Russia'],
+  ]},
+  { key: 'ME', title: 'Middle East', countries: [
+    ['ARE','United Arab Emirates'],['BHR','Bahrain'],['EGY','Egypt'],['IRN','Iran'],['IRQ','Iraq'],
+    ['JOR','Jordan'],['KWT','Kuwait'],['LBN','Lebanon'],['OMN','Oman'],['QAT','Qatar'],
+    ['SAU','Saudi Arabia'],['WBG','West Bank and Gaza'],
   ]},
   { key: 'EA', title: 'Emerging Asia (Excl. ASEAN)', countries: [
     ['CHN','China'],['IND','India'],['BGD','Bangladesh'],['PAK','Pakistan'],['LKA','Sri Lanka'],
@@ -2303,6 +2308,129 @@ function makeCard(page,chart) {
   return card;
 }
 
+// สร้าง Chart.js x-scale config (major/minor tick + date label format ตาม
+// period) — ใช้ร่วมกันทั้ง drawChart (custom page) และ drawInflationCard
+// (GlobalCPI) ให้ label แกน x เป็น format/rule เดียวกันทั้งเว็บ
+function buildTimeAxisScale(period, labels, tickColor) {
+  if (!labels.length) return { type:'category', labels };
+
+  const first   = new Date(labels[0]);
+  const last    = new Date(labels[labels.length - 1]);
+  const lastMon = last.getUTCMonth() + 1;   // 1-12
+  const lastYr  = last.getUTCFullYear();
+
+  // --- หา index ของวันแรกที่มีข้อมูลในเดือน year/mon ---
+  function firstDayIdx(year, mon) {
+    const prefix = `${year}-${String(mon).padStart(2,'0')}-`;
+    for (let i = 0; i < labels.length; i++) {
+      if (labels[i].startsWith(prefix)) return i;
+    }
+    return -1;
+  }
+
+  // --- สร้าง tickMajor และ tickMinor sets ---
+  const major = new Set();   // grid + label
+  const minor = new Set();   // grid เท่านั้น (ไม่มี label)
+
+  if (period === '3m' || period === '6m') {
+    // วนทีละเดือนในช่วง data หา index วันแรกที่มีของแต่ละเดือน
+    // ถ้าวันแรกที่มีข้อมูลของเดือนนั้น > วันที่ 4 (เช่นข้อมูลเริ่มกลางเดือน) ไม่ต้องแสดง label เดือนนั้น
+    let y = first.getUTCFullYear(), m = first.getUTCMonth() + 1;
+    const endY = last.getUTCFullYear(), endM = last.getUTCMonth() + 1;
+    while (y < endY || (y === endY && m <= endM)) {
+      const idx = firstDayIdx(y, m);
+      if (idx >= 0 && new Date(labels[idx]).getUTCDate() <= 4) major.add(idx);
+      m++; if (m > 12) { m = 1; y++; }
+    }
+    // 3m: เพิ่มครึ่งเดือน (วัน 15/16 วันแรกที่มีในครึ่งหลัง)
+    if (period === '3m') {
+      for (let i = 0; i < labels.length; i++) {
+        const d   = new Date(labels[i]);
+        const day = d.getUTCDate();
+        if (day < 15) continue;
+        const mon = d.getUTCMonth(), yr = d.getUTCFullYear();
+        const alreadyHalf = [...major].some(j => {
+          const d2 = new Date(labels[j]);
+          return d2.getUTCFullYear() === yr && d2.getUTCMonth() === mon && d2.getUTCDate() >= 14;
+        });
+        if (!alreadyHalf) { major.add(i); break; }
+      }
+    }
+  } else if (period === '1y') {
+    // major: เดือนคี่หรือคู่ตาม lastMon, minor: ทุกเดือน
+    const parity = lastMon % 2;  // 0=คู่, 1=คี่
+    let y = first.getUTCFullYear(), m = first.getUTCMonth() + 1;
+    while (y < lastYr || (y === lastYr && m <= lastMon)) {
+      const idx = firstDayIdx(y, m);
+      if (idx >= 0) {
+        if (m % 2 === parity) major.add(idx);
+        else                  minor.add(idx);
+      }
+      m++; if (m > 12) { m = 1; y++; }
+    }
+
+  } else if (period === '3y') {
+    // major: Jan, Jul  |  minor: Apr, Oct (ทุก Q)
+    let y = first.getUTCFullYear(), m = first.getUTCMonth() + 1;
+    while (y < lastYr || (y === lastYr && m <= lastMon)) {
+      const idx = firstDayIdx(y, m);
+      if (idx >= 0) {
+        if (m === 1 || m === 7)        major.add(idx);
+        else if (m === 4 || m === 10)  minor.add(idx);
+      }
+      m++; if (m > 12) { m = 1; y++; }
+    }
+
+  } else {
+    // 10y / 30y / max
+    const rangeYears = (last - first) / (1000 * 60 * 60 * 24 * 365.25);
+    const yearStep   = Math.max(1, Math.ceil(rangeYears / 6));
+    const startYear  = first.getUTCFullYear();
+    const endYear    = lastYr;
+
+    // minor: ทุกปี Jan
+    for (let y = startYear; y <= endYear; y++) {
+      const idx = firstDayIdx(y, 1);
+      if (idx >= 0) minor.add(idx);
+    }
+    // major: ทุก yearStep ปี จาก startYear
+    for (let y = startYear; y <= endYear; y += yearStep) {
+      const idx = firstDayIdx(y, 1);
+      if (idx >= 0) { major.add(idx); minor.delete(idx); }
+    }
+  }
+
+  const yearOnly = period === '10y' || period === '30y' || period === 'max' ||
+    ((last - first) / (1000*60*60*24*365.25) > 3);
+  const showDay = period === '3m' || period === '6m';
+
+  const fmt = (d) => {
+    const dt = new Date(d);
+    if (yearOnly) return String(dt.getUTCFullYear());
+    const mon = dt.toLocaleDateString('en-GB', {month:'short', timeZone:'UTC'});
+    if (showDay) return `${dt.getUTCDate()}-${mon}`;
+    return mon + String(dt.getUTCFullYear()).slice(2);
+  };
+
+  const gridOpaque  = 'rgba(128,128,128,0.15)';
+  const gridFaint   = 'rgba(128,128,128,0.06)';
+
+  return {
+    type:'category', labels,
+    ticks:{
+      color:tickColor, font:{family:'monospace',size:10}, maxRotation:0,
+      autoSkip: false, maxTicksLimit: 9999,
+      callback: (val, idx) => major.has(idx) ? fmt(labels[idx]) : ''
+    },
+    grid:{
+      color: ctx => major.has(ctx.index) ? gridOpaque
+                  : minor.has(ctx.index) ? gridFaint
+                  : 'rgba(0,0,0,0)'
+    },
+    border:{color:gridOpaque}
+  };
+}
+
 function drawChart(page,chart) {
   const canvas=document.getElementById('cv-'+chart.id);
   const ld=document.getElementById('ld-'+chart.id);
@@ -2373,128 +2501,7 @@ function drawChart(page,chart) {
   const tickColor=getComputedStyle(document.documentElement).getPropertyValue('--text3').trim()||'#555';
 
   const scales={
-    x:(function(){
-      const period = chart.period;
-      const labels = commonLabels;
-
-      if (!labels.length) return { type:'category', labels };
-
-      const first   = new Date(labels[0]);
-      const last    = new Date(labels[labels.length - 1]);
-      const lastMon = last.getUTCMonth() + 1;   // 1-12
-      const lastYr  = last.getUTCFullYear();
-
-      // --- หา index ของวันแรกที่มีข้อมูลในเดือน year/mon ---
-      function firstDayIdx(year, mon) {
-        const prefix = `${year}-${String(mon).padStart(2,'0')}-`;
-        for (let i = 0; i < labels.length; i++) {
-          if (labels[i].startsWith(prefix)) return i;
-        }
-        return -1;
-      }
-
-      // --- สร้าง tickMajor และ tickMinor sets ---
-      const major = new Set();   // grid + label
-      const minor = new Set();   // grid เท่านั้น (ไม่มี label)
-
-      if (period === '3m' || period === '6m') {
-        // วนทีละเดือนในช่วง data หา index วันแรกที่มีของแต่ละเดือน
-        // ถ้าวันแรกที่มีข้อมูลของเดือนนั้น > วันที่ 4 (เช่นข้อมูลเริ่มกลางเดือน) ไม่ต้องแสดง label เดือนนั้น
-        let y = first.getUTCFullYear(), m = first.getUTCMonth() + 1;
-        const endY = last.getUTCFullYear(), endM = last.getUTCMonth() + 1;
-        while (y < endY || (y === endY && m <= endM)) {
-          const idx = firstDayIdx(y, m);
-          if (idx >= 0 && new Date(labels[idx]).getUTCDate() <= 4) major.add(idx);
-          m++; if (m > 12) { m = 1; y++; }
-        }
-        // 3m: เพิ่มครึ่งเดือน (วัน 15/16 วันแรกที่มีในครึ่งหลัง)
-        if (period === '3m') {
-          for (let i = 0; i < labels.length; i++) {
-            const d   = new Date(labels[i]);
-            const day = d.getUTCDate();
-            if (day < 15) continue;
-            const mon = d.getUTCMonth(), yr = d.getUTCFullYear();
-            const alreadyHalf = [...major].some(j => {
-              const d2 = new Date(labels[j]);
-              return d2.getUTCFullYear() === yr && d2.getUTCMonth() === mon && d2.getUTCDate() >= 14;
-            });
-            if (!alreadyHalf) { major.add(i); break; }
-          }
-        }
-      } else if (period === '1y') {
-        // major: เดือนคี่หรือคู่ตาม lastMon, minor: ทุกเดือน
-        const parity = lastMon % 2;  // 0=คู่, 1=คี่
-        let y = first.getUTCFullYear(), m = first.getUTCMonth() + 1;
-        while (y < lastYr || (y === lastYr && m <= lastMon)) {
-          const idx = firstDayIdx(y, m);
-          if (idx >= 0) {
-            if (m % 2 === parity) major.add(idx);
-            else                  minor.add(idx);
-          }
-          m++; if (m > 12) { m = 1; y++; }
-        }
-
-      } else if (period === '3y') {
-        // major: Jan, Jul  |  minor: Apr, Oct (ทุก Q)
-        let y = first.getUTCFullYear(), m = first.getUTCMonth() + 1;
-        while (y < lastYr || (y === lastYr && m <= lastMon)) {
-          const idx = firstDayIdx(y, m);
-          if (idx >= 0) {
-            if (m === 1 || m === 7)        major.add(idx);
-            else if (m === 4 || m === 10)  minor.add(idx);
-          }
-          m++; if (m > 12) { m = 1; y++; }
-        }
-
-      } else {
-        // 10y / max
-        const rangeYears = (last - first) / (1000 * 60 * 60 * 24 * 365.25);
-        const yearStep   = Math.max(1, Math.ceil(rangeYears / 6));
-        const startYear  = first.getUTCFullYear();
-        const endYear    = lastYr;
-
-        // minor: ทุกปี Jan
-        for (let y = startYear; y <= endYear; y++) {
-          const idx = firstDayIdx(y, 1);
-          if (idx >= 0) minor.add(idx);
-        }
-        // major: ทุก yearStep ปี จาก startYear
-        for (let y = startYear; y <= endYear; y += yearStep) {
-          const idx = firstDayIdx(y, 1);
-          if (idx >= 0) { major.add(idx); minor.delete(idx); }
-        }
-      }
-
-      const yearOnly = period === '10y' || period === 'max' ||
-        ((last - first) / (1000*60*60*24*365.25) > 3);
-      const showDay = period === '3m' || period === '6m';
-
-      const fmt = (d) => {
-        const dt = new Date(d);
-        if (yearOnly) return String(dt.getUTCFullYear());
-        const mon = dt.toLocaleDateString('en-GB', {month:'short', timeZone:'UTC'});
-        if (showDay) return `${dt.getUTCDate()}-${mon}`;
-        return mon + String(dt.getUTCFullYear()).slice(2);
-      };
-
-      const gridOpaque  = 'rgba(128,128,128,0.15)';
-      const gridFaint   = 'rgba(128,128,128,0.06)';
-
-      return {
-        type:'category', labels,
-        ticks:{
-          color:tickColor, font:{family:'monospace',size:10}, maxRotation:0,
-          autoSkip: false, maxTicksLimit: 9999,
-          callback: (val, idx) => major.has(idx) ? fmt(labels[idx]) : ''
-        },
-        grid:{
-          color: ctx => major.has(ctx.index) ? gridOpaque
-                      : minor.has(ctx.index) ? gridFaint
-                      : 'rgba(0,0,0,0)'
-        },
-        border:{color:gridOpaque}
-      };
-    })(),
+    x: buildTimeAxisScale(chart.period, commonLabels, tickColor),
     yL:{ position:'left', ticks:{color:tickColor,font:{family:'monospace',size:10},maxTicksLimit:5}, grid:{color:'rgba(128,128,128,0.1)'}, border:{color:'rgba(128,128,128,0.1)'} }
   };
   if (hasRight) scales.yR={ position:'right', ticks:{color:tickColor,font:{family:'monospace',size:10},maxTicksLimit:5}, grid:{drawOnChartArea:false}, border:{color:gridColor} };
@@ -2683,10 +2690,11 @@ function drawInflationCard(key) {
   rawSeries.forEach(s => s.pts.forEach(p => labelSet.add(p.x)));
   const labels = [...labelSet].sort();
 
-  // autoscale ตามข้อมูลจริงในกราฟ แต่ clamp ไว้ไม่ให้เกินช่วง -5% ถึง 15%
-  // (กันประเทศเงินเฟ้อสูงมาก เช่น Argentina/Zimbabwe/Sudan ดึงสเกลจนเส้น
-  // ประเทศอื่นแบนหายไปหมด) — ถ้าข้อมูลจริงแคบกว่านี้ แกนจะ fit ตามข้อมูลจริง
-  const CLAMP_MIN = -5, CLAMP_MAX = 15;
+  // autoscale ตามข้อมูลจริงในกราฟ แต่ clamp ไว้ไม่ให้เกินช่วงที่กำหนด (กัน
+  // ประเทศเงินเฟ้อสูงมาก เช่น Argentina/Zimbabwe/Sudan ดึงสเกลจนเส้นประเทศ
+  // อื่นแบนหายไปหมด) — ถ้าข้อมูลจริงแคบกว่านี้ แกนจะ fit ตามข้อมูลจริง
+  // ทุก card min=-5% เหมือนกัน, max=15% ยกเว้น EU ที่ max=20%
+  const CLAMP_MIN = -5, CLAMP_MAX = key === 'EU' ? 20 : 15;
   const allVals = [];
   rawSeries.forEach(s => s.pts.forEach(p => { if (p.y !== null && p.y !== undefined && !isNaN(p.y)) allVals.push(p.y); }));
   let axisMin = CLAMP_MIN, axisMax = CLAMP_MAX;
@@ -2724,6 +2732,7 @@ function drawInflationCard(key) {
   charts[chartKey] = new Chart(canvas, {
     type: 'line',
     data: { labels, datasets },
+    plugins: [inflationZeroLinePlugin],
     options: {
       responsive: true, maintainAspectRatio: false, animation: false,
       interaction: { mode: 'nearest', intersect: false },
@@ -2743,12 +2752,34 @@ function drawInflationCard(key) {
         }
       },
       scales: {
-        x: { type:'category', labels, ticks:{ color:tickColor, font:{family:'monospace',size:9}, maxRotation:0, autoSkip:true, maxTicksLimit:10 }, grid:{color:gridColor}, border:{color:gridColor} },
+        x: buildTimeAxisScale(win, labels, tickColor),
         y: { position:'left', min:axisMin, max:axisMax, ticks:{ color:tickColor, font:{family:'monospace',size:10}, maxTicksLimit:6, callback:v=>v+'%' }, grid:{color:gridColor}, border:{color:gridColor} },
       }
     }
   });
 }
+
+// วาดเส้น y=0 ให้เด่นขึ้น (หนา/ทึบกว่า gridline ปกติ) เพราะ 0%YoY คือเส้น
+// อ้างอิงสำคัญของกราฟเงินเฟ้อ (บวก=เงินเฟ้อ, ลบ=เงินฝืด) — เหมือน pattern
+// ofZeroLine ที่ใช้ในหน้า TH Energy (Oil Fund chart)
+const inflationZeroLinePlugin = {
+  id: 'inflationZeroLine',
+  afterDraw(chart) {
+    const yScale = chart.scales.y;
+    if (!yScale) return;
+    const yZero = yScale.getPixelForValue(0);
+    if (yZero < chart.chartArea.top || yZero > chart.chartArea.bottom) return;
+    const ctx2 = chart.ctx;
+    ctx2.save();
+    ctx2.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue('--text2').trim() || '#888';
+    ctx2.lineWidth = 1.5;
+    ctx2.beginPath();
+    ctx2.moveTo(chart.chartArea.left, yZero);
+    ctx2.lineTo(chart.chartArea.right, yZero);
+    ctx2.stroke();
+    ctx2.restore();
+  }
+};
 
 // สถิติต่อประเทศ: ล่าสุด, เฉลี่ย 3Y/10Y, S.D. 10Y — คำนวณจาก full %YoY series
 // (ไม่ตัดตาม window ที่เลือกแสดงบนกราฟ) โดย anchor เดือน "ล่าสุด" จากจุด
