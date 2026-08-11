@@ -2659,18 +2659,19 @@ function drawInflationCard(key) {
   rawSeries.forEach(s => s.pts.forEach(p => labelSet.add(p.x)));
   const labels = [...labelSet].sort();
 
-  // autoscale ตามข้อมูลจริงในกราฟ แต่ clamp ไว้ไม่ให้เกินช่วง -5% ถึง 30%
+  // autoscale ตามข้อมูลจริงในกราฟ แต่ clamp ไว้ไม่ให้เกินช่วง -5% ถึง 15%
   // (กันประเทศเงินเฟ้อสูงมาก เช่น Argentina/Zimbabwe/Sudan ดึงสเกลจนเส้น
   // ประเทศอื่นแบนหายไปหมด) — ถ้าข้อมูลจริงแคบกว่านี้ แกนจะ fit ตามข้อมูลจริง
+  const CLAMP_MIN = -5, CLAMP_MAX = 15;
   const allVals = [];
   rawSeries.forEach(s => s.pts.forEach(p => { if (p.y !== null && p.y !== undefined && !isNaN(p.y)) allVals.push(p.y); }));
-  let axisMin = -5, axisMax = 30;
+  let axisMin = CLAMP_MIN, axisMax = CLAMP_MAX;
   if (allVals.length) {
     const dataMin = Math.min(...allVals), dataMax = Math.max(...allVals);
     const pad = Math.max((dataMax - dataMin) * 0.1, 1);
-    axisMin = Math.max(-5, dataMin - pad);
-    axisMax = Math.min(30, dataMax + pad);
-    if (axisMin >= axisMax) { axisMin = -5; axisMax = 30; }
+    axisMin = Math.max(CLAMP_MIN, dataMin - pad);
+    axisMax = Math.min(CLAMP_MAX, dataMax + pad);
+    if (axisMin >= axisMax) { axisMin = CLAMP_MIN; axisMax = CLAMP_MAX; }
   }
 
   // gray ก่อน highlight ทีหลัง (order:0 วาดทับบนสุด)
