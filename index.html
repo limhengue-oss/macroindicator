@@ -101,18 +101,23 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkM
 
 /* ── TH Energy page ─────────────────────────────────── */
 .energy-kpi-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(160px,1fr)); gap:8px; margin-bottom:14px; }
-.dash-section { max-width:1200px; margin:0 auto 28px; }
-.dash-section-title { font-size:0.78em; color:var(--text2); text-transform:uppercase; letter-spacing:0.06em; margin-bottom:8px; padding-bottom:6px; border-bottom:1px solid var(--border); }
-.dash-section-title-freq { font-size:0.95em; font-weight:600; color:var(--text); border-bottom:2px solid var(--blue); margin-bottom:14px; }
-.dash-subgroup { margin-bottom:16px; }
-.dash-subgroup-title { font-size:0.68em; color:var(--text3); text-transform:uppercase; letter-spacing:0.05em; margin-bottom:6px; }
-.ekpi { background:var(--bg2); border:1px solid var(--border); border-radius:4px; padding:12px 14px; }
+.ekpi { position:relative; background:var(--bg2); border:1px solid var(--border); border-radius:4px; padding:12px 14px; }
 .ekpi-group { font-size:0.7em; color:var(--text3); text-transform:uppercase; letter-spacing:0.06em; margin-bottom:2px; }
 .ekpi-name  { font-size:0.78em; color:var(--text2); margin-bottom:6px; }
 .ekpi-price { font-size:1.3em; font-weight:600; color:var(--text); }
 .ekpi-unit  { font-size:0.68em; color:var(--text3); margin-left:4px; }
 .ekpi-date  { font-size:0.68em; color:var(--text3); margin-top:4px; }
 .ekpi-chg.up{color:var(--up)} .ekpi-chg.dn{color:var(--dn)}
+/* ── Dashboard cards (compact tiles) ── */
+.ekpi-grid-mini { display:grid; grid-template-columns:repeat(auto-fill,minmax(108px,1fr)); gap:6px; }
+.ekpi-compact { padding:6px 8px; background:var(--bg3); }
+.ekpi-compact .ekpi-name { font-size:0.66em; margin-bottom:3px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.ekpi-compact .ekpi-price { font-size:0.92em; }
+.ekpi-compact .ekpi-unit { font-size:0.6em; }
+.ekpi-compact .ekpi-date { font-size:0.6em; margin-top:2px; }
+.ekpi-remove { position:absolute; top:2px; right:2px; background:none; border:none; color:var(--text3); font-size:0.62em; cursor:pointer; padding:2px 3px; line-height:1; border-radius:2px; opacity:0; transition:opacity .15s; }
+.ekpi:hover .ekpi-remove { opacity:1; }
+.ekpi-remove:hover { color:var(--red); background:var(--bg4); }
 .energy-section { margin-bottom:18px; }
 .energy-section-title { font-size:0.78em; color:var(--text3); text-transform:uppercase; letter-spacing:0.08em; margin-bottom:8px; border-bottom:1px solid var(--border); padding-bottom:4px; }
 
@@ -287,8 +292,11 @@ input[type=range] { width:80px; accent-color:var(--blue); }
 
 <!-- DASHBOARD PAGE -->
 <div id="page-dashboard" class="page">
-  <div class="page-head" style="margin-bottom:14px">
+  <div class="page-head" style="margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
     <span style="font-size:0.78em;color:var(--text2);text-transform:uppercase;letter-spacing:0.06em">Dashboard — Latest Data</span>
+    <div class="page-actions">
+      <button class="btn btn-primary" onclick="addDashboardCard()">+ Card</button>
+    </div>
   </div>
   <div id="dashboard-body">
     <div class="ld" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px">
@@ -443,8 +451,8 @@ input[type=range] { width:80px; accent-color:var(--blue); }
     </div>
     <div class="hint" id="cat-selected-count" style="margin-top:8px">ยังไม่เลือก series</div>
     <div class="modal-actions">
-      <button class="btn" onclick="backToChartType('catalog-modal')">Back</button>
-      <button class="btn btn-primary" onclick="confirmCatalogSelection()">Next</button>
+      <button class="btn" onclick="catalogModalBack()">Back</button>
+      <button class="btn btn-primary" id="cat-confirm-btn" onclick="confirmCatalogSelection()">Next</button>
     </div>
   </div>
 </div>
@@ -751,24 +759,6 @@ function loadConfig() {
   return defaultConfig();
 }
 function saveConfig() { localStorage.setItem('macro:config', JSON.stringify(config)); }
-
-// Dashboard v2 — เหมือนหน้า custom page ทุกอย่าง (การ์ดกราฟ เพิ่ม/ลบ series
-// เองได้ผ่าน catalog เดิม 1-8 เส้นต่อการ์ด) แค่ปักหมุดเป็นปุ่ม nav แยก
-// ต่างหาก ไม่ต้องกด + สร้างเอง — เก็บเป็น entry ปกติใน config.pages ด้วย id
-// คงที่ (ไม่ใช่ uid() สุ่ม) เลย reuse renderActivePage/makeCard/drawChart
-// และ catalog ทั้งหมดได้โดยไม่ต้องเขียนโค้ด render ใหม่เลย — GlobalCPI series
-// เลือกจากที่นี่ไม่ได้อยู่แล้วโดยธรรมชาติ เพราะ allSelectableIds()/SERIES
-// ไม่มี series กลุ่มนั้นอยู่แต่แรก (ดู GLOBALCPI_ID_RE)
-const DASHBOARD_V2_ID = 'dashboard-v2';
-function ensureDashboardV2Page() {
-  let p = config.pages.find(p => p.id === DASHBOARD_V2_ID);
-  if (!p) {
-    p = { id: DASHBOARD_V2_ID, name: 'Dashboard v2', cols: 0, charts: [] };
-    config.pages.push(p);
-    saveConfig();
-  }
-  return p;
-}
 function uid() { return Math.random().toString(36).slice(2,9); }
 
 // ════════════════════════════════════════════════════
@@ -2002,28 +1992,9 @@ function cleanDashName(name) {
     .trim();
 }
 
-// จัดกลุ่มบนสุดของ Dashboard ตามความถี่ข้อมูลจริง — วัดจาก gap เฉลี่ย
-// (วัน) ของจุดข้อมูล 5 ช่วงล่าสุด แทนที่จะ hardcode รายชื่อ series ต่อ
-// ความถี่ (แหล่งข้อมูลเพิ่มเรื่อยๆ ไม่อยาก maintain list แยกอีกชุด)
-const FREQ_ORDER = ['daily', 'monthly', 'quarterly'];
-const FREQ_LABEL = { daily: 'รายวัน (Daily)', monthly: 'รายเดือน (Monthly)', quarterly: 'รายไตรมาส (Quarterly)' };
-
-function detectFreq(docId) {
-  const s = SERIES[docId];
-  if (!s || !s.data || s.data.length < 2) return 'monthly';
-  const recent = s.data.slice(-6);
-  let totalGap = 0, n = 0;
-  for (let i = 1; i < recent.length; i++) {
-    const gap = (new Date(recent[i].x) - new Date(recent[i - 1].x)) / 86400000;
-    if (gap > 0) { totalGap += gap; n++; }
-  }
-  if (n === 0) return 'monthly';
-  const avgGap = totalGap / n;
-  if (avgGap <= 5) return 'daily';
-  if (avgGap <= 45) return 'monthly';
-  return 'quarterly';  // รวม annual ไว้ในนี้ด้วย — ผู้ใช้ขอแค่ 3 กลุ่ม
-}
-
+// การ์ด compact สำหรับ 1 indicator — opts.removable=true จะมีปุ่ม ✕ มุมขวาบน
+// (โผล่ตอน hover) ให้เอา indicator นั้นออกจาก card (opts.cardId) โดยไม่ลบ
+// series จริงจากระบบ แค่เอาออกจากรายการที่ card นี้ติดตาม
 function renderDashCard(docId, opts = {}) {
   const fn = DASHBOARD_FN[docId] || 'raw';
   const v = latestDashValue(docId, fn);
@@ -2046,10 +2017,86 @@ function renderDashCard(docId, opts = {}) {
     }
   }
 
-  return `<div class="ekpi">
+  const removeBtn = opts.removable
+    ? `<button class="ekpi-remove" title="เอาออกจากการ์ด" onclick="removeDashboardIndicator('${opts.cardId}','${docId}')">✕</button>`
+    : '';
+
+  return `<div class="ekpi${opts.compact ? ' ekpi-compact' : ''}">
+    ${removeBtn}
     <div class="ekpi-name">${cleanDashName(v.name)}</div>
     <div class="ekpi-price ${chgClass}">${valueStr}${badge ? `<span class="ekpi-unit">${badge}</span>` : ''}${changeHtml}</div>
     <div class="ekpi-date">${v.x}</div>
+  </div>`;
+}
+
+// ── Dashboard cards: ผู้ใช้สร้าง/ลบการ์ดเอง + เพิ่ม/ลบ indicator ต่อการ์ด
+// เอง — เก็บใน config.dashboardCards (persist ผ่าน localStorage เดียวกับ
+// config.pages เลย Export/Import เดิมครอบคลุมให้ฟรี) โครงสร้าง 1 การ์ด =
+// { id, title, seriesIds: [] }
+//
+// seed ครั้งแรก (ทั้ง user ใหม่และ user เก่าที่เพิ่งอัปเดต — เช็คจาก
+// undefined ไม่ใช่ [] เพื่อแยกจากกรณีผู้ใช้ลบการ์ดจนหมดเองแล้วตั้งใจ) จาก
+// DASHBOARD_GROUP_ORDER เดิม ให้ผู้ใช้มีจุดเริ่มต้นที่ใช้งานได้ทันที ไม่ใช่
+// หน้าว่างเปล่า — ทำตอน renderDashboard() เรียกจริง (ไม่ใช่ตอน loadConfig())
+// เพราะ DASHBOARD_GROUP_ORDER ประกาศทีหลัง config ในไฟล์ (top-level
+// loadConfig() รันก่อน DASHBOARD_GROUP_ORDER จะ initialize)
+function ensureDashboardCardsSeeded() {
+  if (config.dashboardCards !== undefined) return;
+  config.dashboardCards = DASHBOARD_GROUP_ORDER.map(g => ({
+    id: uid(), title: g.title, seriesIds: g.ids(), showChange: !!g.showChange,
+  }));
+  saveConfig();
+}
+
+window.addDashboardCard = function() {
+  // ปุ่ม "+ Card" อยู่ใน page-head แบบ static เลยกดได้ก่อน renderDashboard()
+  // จะ seed config.dashboardCards เสร็จ (เช่น ระหว่างที่ยังโหลด Phase 2 ไม่จบ)
+  ensureDashboardCardsSeeded();
+  const title = prompt('ชื่อการ์ด');
+  if (!title || !title.trim()) return;
+  config.dashboardCards.push({ id: uid(), title: title.trim(), seriesIds: [] });
+  saveConfig();
+  renderDashboard();
+};
+window.renameDashboardCard = function(cardId) {
+  const card = config.dashboardCards.find(c => c.id === cardId);
+  if (!card) return;
+  const title = prompt('เปลี่ยนชื่อการ์ด', card.title);
+  if (!title || !title.trim()) return;
+  card.title = title.trim();
+  saveConfig();
+  renderDashboard();
+};
+window.deleteDashboardCard = function(cardId) {
+  if (!confirm('ลบการ์ดนี้?')) return;
+  config.dashboardCards = config.dashboardCards.filter(c => c.id !== cardId);
+  saveConfig();
+  renderDashboard();
+};
+window.removeDashboardIndicator = function(cardId, seriesId) {
+  const card = config.dashboardCards.find(c => c.id === cardId);
+  if (!card) return;
+  card.seriesIds = card.seriesIds.filter(id => id !== seriesId);
+  saveConfig();
+  renderDashboard();
+};
+
+function renderDashboardCardHtml(card) {
+  const tiles = (card.seriesIds || [])
+    .map(id => renderDashCard(id, { compact: true, removable: true, cardId: card.id, showChange: card.showChange }))
+    .filter(Boolean).join('');
+  return `<div class="card">
+    <div class="ch">
+      <div><div class="ct">${card.title}</div><div class="cs">${(card.seriesIds || []).length} indicator</div></div>
+      <div class="ch-actions">
+        <button class="icon-btn" title="Rename card" onclick="renameDashboardCard('${card.id}')">✎</button>
+        <button class="icon-btn" title="Delete card" onclick="deleteDashboardCard('${card.id}')">✕</button>
+      </div>
+    </div>
+    <div class="cb">
+      <div class="ekpi-grid-mini">${tiles || '<div class="empty" style="padding:14px 0;font-size:0.76em;grid-column:1/-1">ยังไม่มี indicator</div>'}</div>
+      <button class="btn" style="margin-top:8px;width:100%" onclick="openDashboardCatalog('${card.id}')">+ Indicator</button>
+    </div>
   </div>`;
 }
 
@@ -2074,41 +2121,14 @@ function renderDashboard() {
     return;
   }
   clearInterval(_dashPoll);
+  ensureDashboardCardsSeeded();
 
-  // จัดกลุ่มบนสุดตาม "ความถี่จริงของข้อมูล" (วัดจาก gap เฉลี่ยของจุดข้อมูล
-  // ล่าสุด ไม่ใช่ hardcode รายชื่อ) แล้วค่อยแบ่งย่อยตามธีม (Stock/FX/Macro
-  // ฯลฯ) ข้างในแต่ละความถี่อีกที — ทำแบบ dynamic เพราะแหล่งข้อมูลเพิ่มขึ้น
-  // เรื่อยๆ (BOT/ThaiBMA/NESDC/FRED/Yahoo ปนกัน) ไม่อยากต้องมานั่งจัดหมวด
-  // ความถี่เองทุกครั้งที่เพิ่ม series ใหม่
-  const buckets = { daily: {}, monthly: {}, quarterly: {} };
-  DASHBOARD_GROUP_ORDER.forEach(group => {
-    group.ids().forEach(id => {
-      const freq = detectFreq(id);
-      (buckets[freq][group.title] ??= []).push(id);
-    });
-  });
-
-  let html = '';
-  FREQ_ORDER.forEach(freq => {
-    const themeNames = Object.keys(buckets[freq]);
-    if (!themeNames.length) return;
-    let sectionHtml = '';
-    themeNames.forEach(themeTitle => {
-      const groupDef = DASHBOARD_GROUP_ORDER.find(g => g.title === themeTitle);
-      const cards = buckets[freq][themeTitle].map(id => renderDashCard(id, { showChange: groupDef?.showChange })).filter(Boolean).join('');
-      if (!cards) return;
-      sectionHtml += `<div class="dash-subgroup">
-        <div class="dash-subgroup-title">${themeTitle}</div>
-        <div class="energy-kpi-grid">${cards}</div>
-      </div>`;
-    });
-    if (!sectionHtml) return;
-    html += `<div class="dash-section">
-      <div class="dash-section-title dash-section-title-freq">${FREQ_LABEL[freq]}</div>
-      ${sectionHtml}
-    </div>`;
-  });
-  container.innerHTML = html || '<div class="empty">ไม่มีข้อมูล</div>';
+  const cards = config.dashboardCards;
+  container.innerHTML = cards.length
+    ? `<div class="chart-grid" style="grid-template-columns:repeat(auto-fill,minmax(300px,1fr))">
+        ${cards.map(renderDashboardCardHtml).join('')}
+      </div>`
+    : '<div class="empty">ยังไม่มีการ์ด<br><button class="btn btn-primary" style="margin-top:10px" onclick="addDashboardCard()">+ Add Card</button></div>';
 }
 
 // ════════════════════════════════════════════════════
@@ -2209,16 +2229,7 @@ function renderNav() {
   };
   nav.appendChild(inflBtn);
 
-  // special Dashboard v2 page — entry ปกติใน config.pages (id คงที่) แค่
-  // ปักหมุดปุ่ม nav แยกจาก custom pages ที่ผู้ใช้สร้างเอง; render ผ่าน
-  // renderActivePage() เดิมทุกอย่าง (ดู ensureDashboardV2Page ด้านบน)
-  const dashV2Btn = document.createElement('button');
-  dashV2Btn.className = 'nb' + (activePageId === DASHBOARD_V2_ID ? ' active' : '');
-  dashV2Btn.textContent = 'Dashboard v2';
-  dashV2Btn.onclick = () => { ensureDashboardV2Page(); activePageId = DASHBOARD_V2_ID; render(); };
-  nav.appendChild(dashV2Btn);
-
-  config.pages.filter(page => page.id !== DASHBOARD_V2_ID).forEach(page=>{
+  config.pages.forEach(page=>{
     const btn=document.createElement('button');
     btn.className='nb'+(page.id===activePageId?' active':'');
     btn.textContent=page.name;
@@ -3060,8 +3071,11 @@ window.confirmGroupSelection = function() {
   openChartModal(chartPickerPageId, null, seriesList, family.label);
 };
 
-// ── Non-group (catalog) flow ──
+// ── Non-group (catalog) flow — ใช้ร่วมกันทั้ง "+ Chart" (custom page) และ
+// "+ Indicator" (Dashboard card) โดย catalogTarget บอกว่า confirm แล้วจะ
+// เอา series ที่เลือกไปทำอะไรต่อ ──
 let catalogState = { country: null, category: null, selected: new Set() };
+let catalogTarget = { type: 'chart' };
 function allSelectableIds() {
   const set = new Set();
   Object.values(SERIES_GROUPS).forEach(ids => ids.forEach(id => set.add(id)));
@@ -3072,14 +3086,33 @@ function catalogEntries() {
   return Object.keys(SERIES).filter(id => selectable.has(id))
     .map(id => ({ id, name: SERIES[id]?.name || id, ...classifySeries(id) }));
 }
-window.startCatalogFlow = function() {
-  closeChartTypeModal();
-  catalogState = { country: null, category: null, selected: new Set() };
+function openCatalogModal(preselected) {
+  catalogState = { country: null, category: null, selected: new Set(preselected || []) };
   renderCatalogCountries();
   document.getElementById('cat-col-category').innerHTML = '';
   document.getElementById('cat-col-series').innerHTML = '';
-  document.getElementById('cat-selected-count').textContent = 'ยังไม่เลือก series';
+  const n = catalogState.selected.size;
+  document.getElementById('cat-selected-count').textContent = n ? `เลือกไว้ ${n} series` : 'ยังไม่เลือก series';
+  document.getElementById('cat-confirm-btn').textContent = catalogTarget.type === 'dashboard-card' ? 'Save' : 'Next';
   document.getElementById('catalog-modal').classList.add('show');
+}
+window.startCatalogFlow = function() {
+  closeChartTypeModal();
+  catalogTarget = { type: 'chart' };
+  openCatalogModal();
+};
+// เปิด catalog เพื่อแก้ indicator ของ Dashboard card — ข้าม chart-type
+// wizard ไปเลย (การ์ด dashboard ไม่มี Group/Non-group ให้เลือก) ติ๊กของเดิม
+// ไว้ให้แล้ว กด Confirm = แทนที่ทั้งชุด (เหมือนหน้าจอ edit membership)
+window.openDashboardCatalog = function(cardId) {
+  const card = config.dashboardCards.find(c => c.id === cardId);
+  if (!card) return;
+  catalogTarget = { type: 'dashboard-card', cardId };
+  openCatalogModal(card.seriesIds);
+};
+window.catalogModalBack = function() {
+  document.getElementById('catalog-modal').classList.remove('show');
+  if (catalogTarget.type !== 'dashboard-card') openChartTypeModal(chartPickerPageId);
 };
 function renderCatalogCountries() {
   const countries = [...new Set(catalogEntries().map(e => e.country))].sort();
@@ -3117,6 +3150,11 @@ window.confirmCatalogSelection = function() {
   const ids = [...catalogState.selected];
   if (!ids.length) { alert('เลือกอย่างน้อย 1 series'); return; }
   document.getElementById('catalog-modal').classList.remove('show');
+  if (catalogTarget.type === 'dashboard-card') {
+    const card = config.dashboardCards.find(c => c.id === catalogTarget.cardId);
+    if (card) { card.seriesIds = ids; saveConfig(); renderDashboard(); }
+    return;
+  }
   const seriesList = ids.map((id, i) => ({ id, axis: 'L', fn: 'raw', color: COLORS[i % COLORS.length] }));
   openChartModal(chartPickerPageId, null, seriesList);
 };
