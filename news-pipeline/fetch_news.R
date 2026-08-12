@@ -27,7 +27,14 @@ RSS_FEEDS <- list(
   list(name = "Bangkok Post Biz",   url = "https://www.bangkokpost.com/rss/data/business.xml"),
   list(name = "Prachachat",         url = "https://www.prachachat.net/feed"),
   list(name = "Reuters World",      url = "https://feeds.feedburner.com/reuters/worldNews"),
-  list(name = "Reuters Business",   url = "https://feeds.feedburner.com/reuters/businessNews")
+  list(name = "Reuters Business",   url = "https://feeds.feedburner.com/reuters/businessNews"),
+  list(name = "MarketWatch",        url = "https://www.marketwatch.com/rss/topstories"),
+  list(name = "CNBC Economy",       url = "https://www.cnbc.com/id/20910258/device/rss/rss.html"),
+  list(name = "Investing.com Economy",     url = "https://www.investing.com/rss/news_14.rss"),
+  list(name = "Investing.com Econ Indicators", url = "https://www.investing.com/rss/news_95.rss"),
+  list(name = "Nikkei Asia",        url = "https://asia.nikkei.com/rss/feed/nar"),
+  # bangkokbiznews.com ไม่มี RSS ให้ใช้แล้ว (เว็บเปลี่ยนเป็น SPA) — ใช้ Google News site-search แทน
+  list(name = "Krungthep Turakij",  url = "https://news.google.com/rss/search?q=site:bangkokbiznews.com&hl=th&gl=TH&ceid=TH:th")
 )
 
 if (nchar(FT_COOKIE) > 0) {
@@ -45,7 +52,9 @@ fetch_rss <- function(feed) {
       req_timeout(15) |>
       req_perform()
 
-    items <- read_xml(resp_body_string(resp)) |> xml_find_all(".//item")
+    doc <- read_xml(resp_body_string(resp))
+    xml_ns_strip(doc)
+    items <- xml_find_all(doc, ".//item")
     items <- head(items, MAX_PER_FEED)
 
     lapply(items, function(item) list(

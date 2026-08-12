@@ -109,14 +109,13 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkM
 .ekpi-date  { font-size:0.68em; color:var(--text3); margin-top:4px; }
 .ekpi-chg.up{color:var(--up)} .ekpi-chg.dn{color:var(--dn)}
 /* ── Dashboard cards (compact tiles) ── */
-.ekpi-grid-mini { display:grid; grid-template-columns:repeat(auto-fill,minmax(108px,1fr)); gap:6px; }
-.ekpi-compact { padding:6px 8px; background:var(--bg3); }
-.ekpi-compact .ekpi-name { font-size:0.66em; margin-bottom:3px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.ekpi-compact .ekpi-price { font-size:0.92em; }
-.ekpi-compact .ekpi-unit { font-size:0.6em; }
-.ekpi-compact .ekpi-date { font-size:0.6em; margin-top:2px; }
-.ekpi-remove { position:absolute; top:2px; right:2px; background:none; border:none; color:var(--text3); font-size:0.62em; cursor:pointer; padding:2px 3px; line-height:1; border-radius:2px; opacity:0; transition:opacity .15s; }
-.ekpi:hover .ekpi-remove { opacity:1; }
+.ekpi-grid-mini { display:flex; flex-direction:column; gap:4px; }
+.ekpi-row { position:relative; display:flex; align-items:center; gap:8px; padding:5px 26px 5px 8px; background:var(--bg3); border:1px solid var(--border); border-radius:4px; font-size:0.76em; }
+.ekpi-row-name { flex:1 1 auto; min-width:0; color:var(--text2); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.ekpi-row-val { flex:0 0 auto; font-weight:600; color:var(--text); white-space:nowrap; }
+.ekpi-row-date { flex:0 0 auto; width:62px; text-align:right; color:var(--text3); font-size:0.85em; }
+.ekpi-remove { position:absolute; top:50%; right:4px; transform:translateY(-50%); background:none; border:none; color:var(--text3); font-size:0.68em; cursor:pointer; padding:2px 4px; line-height:1; border-radius:2px; opacity:0; transition:opacity .15s; }
+.ekpi-row:hover .ekpi-remove, .ekpi:hover .ekpi-remove { opacity:1; }
 .ekpi-remove:hover { color:var(--red); background:var(--bg4); }
 .energy-section { margin-bottom:18px; }
 .energy-section-title { font-size:0.78em; color:var(--text3); text-transform:uppercase; letter-spacing:0.08em; margin-bottom:8px; border-bottom:1px solid var(--border); padding-bottom:4px; }
@@ -2021,7 +2020,18 @@ function renderDashCard(docId, opts = {}) {
     ? `<button class="ekpi-remove" title="เอาออกจากการ์ด" onclick="removeDashboardIndicator('${opts.cardId}','${docId}')">✕</button>`
     : '';
 
-  return `<div class="ekpi${opts.compact ? ' ekpi-compact' : ''}">
+  // การ์ด Dashboard: 1 indicator = 1 row (ชื่อซ้าย, ค่า+วันที่ขวา) แทน tile
+  // แบบเดิม — compact กว่าและอ่านรายชื่อยาวๆ ง่ายกว่าตอนมีหลาย indicator
+  if (opts.compact) {
+    return `<div class="ekpi-row">
+      <span class="ekpi-row-name">${cleanDashName(v.name)}</span>
+      <span class="ekpi-row-val ${chgClass}">${valueStr}${badge ? `<span class="ekpi-unit">${badge}</span>` : ''}${changeHtml}</span>
+      <span class="ekpi-row-date">${v.x}</span>
+      ${removeBtn}
+    </div>`;
+  }
+
+  return `<div class="ekpi">
     ${removeBtn}
     <div class="ekpi-name">${cleanDashName(v.name)}</div>
     <div class="ekpi-price ${chgClass}">${valueStr}${badge ? `<span class="ekpi-unit">${badge}</span>` : ''}${changeHtml}</div>
