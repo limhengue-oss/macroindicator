@@ -751,6 +751,24 @@ function loadConfig() {
   return defaultConfig();
 }
 function saveConfig() { localStorage.setItem('macro:config', JSON.stringify(config)); }
+
+// Dashboard v2 — เหมือนหน้า custom page ทุกอย่าง (การ์ดกราฟ เพิ่ม/ลบ series
+// เองได้ผ่าน catalog เดิม 1-8 เส้นต่อการ์ด) แค่ปักหมุดเป็นปุ่ม nav แยก
+// ต่างหาก ไม่ต้องกด + สร้างเอง — เก็บเป็น entry ปกติใน config.pages ด้วย id
+// คงที่ (ไม่ใช่ uid() สุ่ม) เลย reuse renderActivePage/makeCard/drawChart
+// และ catalog ทั้งหมดได้โดยไม่ต้องเขียนโค้ด render ใหม่เลย — GlobalCPI series
+// เลือกจากที่นี่ไม่ได้อยู่แล้วโดยธรรมชาติ เพราะ allSelectableIds()/SERIES
+// ไม่มี series กลุ่มนั้นอยู่แต่แรก (ดู GLOBALCPI_ID_RE)
+const DASHBOARD_V2_ID = 'dashboard-v2';
+function ensureDashboardV2Page() {
+  let p = config.pages.find(p => p.id === DASHBOARD_V2_ID);
+  if (!p) {
+    p = { id: DASHBOARD_V2_ID, name: 'Dashboard v2', cols: 0, charts: [] };
+    config.pages.push(p);
+    saveConfig();
+  }
+  return p;
+}
 function uid() { return Math.random().toString(36).slice(2,9); }
 
 // ════════════════════════════════════════════════════
@@ -2191,7 +2209,16 @@ function renderNav() {
   };
   nav.appendChild(inflBtn);
 
-  config.pages.forEach(page=>{
+  // special Dashboard v2 page — entry ปกติใน config.pages (id คงที่) แค่
+  // ปักหมุดปุ่ม nav แยกจาก custom pages ที่ผู้ใช้สร้างเอง; render ผ่าน
+  // renderActivePage() เดิมทุกอย่าง (ดู ensureDashboardV2Page ด้านบน)
+  const dashV2Btn = document.createElement('button');
+  dashV2Btn.className = 'nb' + (activePageId === DASHBOARD_V2_ID ? ' active' : '');
+  dashV2Btn.textContent = 'Dashboard v2';
+  dashV2Btn.onclick = () => { ensureDashboardV2Page(); activePageId = DASHBOARD_V2_ID; render(); };
+  nav.appendChild(dashV2Btn);
+
+  config.pages.filter(page => page.id !== DASHBOARD_V2_ID).forEach(page=>{
     const btn=document.createElement('button');
     btn.className='nb'+(page.id===activePageId?' active':'');
     btn.textContent=page.name;
