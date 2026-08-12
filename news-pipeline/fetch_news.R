@@ -9,7 +9,9 @@ FIREBASE_URL   <- Sys.getenv("FIREBASE_URL")
 FIREBASE_TOKEN <- Sys.getenv("FIREBASE_TOKEN")
 FT_COOKIE      <- Sys.getenv("FT_COOKIE")
 
-MAX_PER_FEED <- 10
+MAX_PER_FEED_FALLBACK <- 10  # ใช้เมื่อ feed ไม่มี pubDate ให้เทียบ (เช่น Nikkei Asia)
+MAX_PER_FEED_SAFETY   <- 50  # เพดานกันกรณี feed เดียวมีข่าวสดเยอะผิดปกติในวันเดียว
+FRESHNESS_HOURS       <- 24  # เอาเฉพาะข่าวที่ตีพิมพ์ภายในกี่ชั่วโมงที่ผ่านมา
 
 # ระบุ session: morning (00:00 UTC) หรือ afternoon (06:00 UTC)
 utc_hour <- as.integer(format(Sys.time(), "%H", tz = "UTC"))
@@ -34,7 +36,8 @@ RSS_FEEDS <- list(
   list(name = "Investing.com Econ Indicators", url = "https://www.investing.com/rss/news_95.rss"),
   list(name = "Nikkei Asia",        url = "https://asia.nikkei.com/rss/feed/nar"),
   # bangkokbiznews.com ไม่มี RSS ให้ใช้แล้ว (เว็บเปลี่ยนเป็น SPA) — ใช้ Google News site-search แทน
-  list(name = "Krungthep Turakij",  url = "https://news.google.com/rss/search?q=site:bangkokbiznews.com&hl=th&gl=TH&ceid=TH:th")
+  # when:1d กันข่าวเก่าหลุดเข้ามา (เจอเคสข่าวปี 2014 ตอนไม่ใส่ตัวกรอง)
+  list(name = "Krungthep Turakij",  url = "https://news.google.com/rss/search?q=site:bangkokbiznews.com+when:1d&hl=th&gl=TH&ceid=TH:th")
 )
 
 if (nchar(FT_COOKIE) > 0) {
@@ -42,6 +45,20 @@ if (nchar(FT_COOKIE) > 0) {
 }
 
 # ─── 1. ดึง RSS ───────────────────────────────────────────────────────────────
+
+# แปลง pubDate/date ของ RSS (รูปแบบไม่ตรงกันในแต่ละ feed) เป็นเวลา UTC
+# ตัด timezone token ท้ายสตริงทิ้งแล้วตีความเป็น UTC (ยอมรับความคลาดเคลื่อนเล็กน้อย
+# จาก offset ที่ไม่ใช่ 0 เพราะใช้แค่กรอง "ข่าวใหม่ภายใน 24 ชม." ไม่ต้องแม่นระดับนาที)
+parse_pubdate <- function(x) {
+  if (is.na(x) || !nzchar(x)) return(as.POSIXct(NA, tz = "UTC"))
+  x <- sub("\\s*(GMT|UTC|[+-]\\d{4})\\s*$", "", trimws(x))
+  for (fmt in c("%a, %d %b %Y %H:%M:%S", "%a, %d %b %Y %H:%M", "%Y-%m-%dT%H:%M:%S")) {
+    t <- as.POSIXct(x, format = fmt, tz = "UTC")
+    if (!is.na(t)) return(t)
+  }
+  as.POSIXct(NA, tz = "UTC")
+}
+
 fetch_rss <- function(feed) {
   tryCatch({
     resp  <- request(feed$url) |>
@@ -55,7 +72,23 @@ fetch_rss <- function(feed) {
     doc <- read_xml(resp_body_string(resp))
     xml_ns_strip(doc)
     items <- xml_find_all(doc, ".//item")
-    items <- head(items, MAX_PER_FEED)
+
+    dates <- vapply(items, function(item) {
+      raw <- xml_text(xml_find_first(item, "pubDate|date"))
+      as.numeric(parse_pubdate(raw))
+    }, numeric(1))
+
+    cutoff <- as.numeric(Sys.time() - FRESHNESS_HOURS * 3600)
+    has_date <- !is.na(dates)
+
+    if (any(has_date)) {
+      # feed มี pubDate ให้เทียบ → กรองเฉพาะข่าวสดภายใน FRESHNESS_HOURS
+      items <- items[has_date & dates >= cutoff]
+    } else {
+      # feed ไม่มี pubDate เลย (เช่น Nikkei Asia) → fallback เอาข่าวใหม่สุดตามลำดับ feed
+      items <- head(items, MAX_PER_FEED_FALLBACK)
+    }
+    items <- head(items, MAX_PER_FEED_SAFETY)
 
     lapply(items, function(item) list(
       source = feed$name,
@@ -118,6 +151,17 @@ if (length(all_items) == 0) {
 }
 
 # ─── 3. เรียก Gemini ──────────────────────────────────────────────────────────
+
+# theme คงที่ + "อื่นๆ" เป็น bucket สำหรับข่าวสำคัญที่ไม่เข้าพวกไหนเลย
+THEMES <- c(
+  "สงครามการค้า",
+  "สงครามอิหร่าน",
+  "Fed/ดอกเบี้ย/เงินเฟ้อ",
+  "เศรษฐกิจไทย/SEA",
+  "ตลาดทุน/SET",
+  "อื่นๆ"
+)
+
 build_prompt <- function(items) {
   articles <- paste(
     seq_along(items),
@@ -130,17 +174,23 @@ build_prompt <- function(items) {
     collapse = "\n\n"
   )
 
+  theme_list <- paste0("\"", THEMES, "\"", collapse = ", ")
+
   paste0(
     "คุณเป็นนักวิเคราะห์เศรษฐศาสตร์และการเงิน\n",
-    "จากข่าวด้านล่าง เลือก 5 ข่าวที่สำคัญที่สุดโดยพิจารณาจาก:\n",
+    "จากข่าวด้านล่าง เลือกข่าวที่สำคัญที่สุด (สูงสุด 15 ข่าว) โดยพิจารณาจาก:\n",
     "- ผลกระทบต่อ Fed, ดอกเบี้ย, เงินเฟ้อ หรือ macro global\n",
     "- ผลกระทบต่อเศรษฐกิจไทย / SEA\n",
     "- ผลกระทบต่อ SET หรือ asset prices\n",
+    "- ความเกี่ยวข้องกับสงครามการค้า หรือสงครามอิหร่าน/ตะวันออกกลาง\n",
     "- มี surprise factor สูง หรือเปลี่ยน market narrative\n",
     "ตัดข่าว routine, ซ้ำ, หรือ opinion ไม่มี hard news\n\n",
+    "จากนั้นจัดข่าวแต่ละข่าวเข้า theme หนึ่งใน [", theme_list, "] ",
+    "โดยเลือก theme ที่ตรงที่สุดเพียงอันเดียว ถ้าไม่เข้าพวกไหนเลยให้ใช้ \"อื่นๆ\"\n\n",
     "ตอบเป็น JSON array เท่านั้น ไม่มี markdown ไม่มี backtick:\n",
     "[{\"title\":\"...\",\"summary_th\":\"สรุป 3 ประโยคภาษาไทย\",",
-    "\"source\":\"...\",\"url\":\"...\",\"why_picked\":\"เหตุผล 1 ประโยคภาษาไทย\"}]\n\n",
+    "\"source\":\"...\",\"url\":\"...\",\"why_picked\":\"เหตุผล 1 ประโยคภาษาไทย\",",
+    "\"theme\":\"...\"}]\n\n",
     "ข่าว:\n", articles
   )
 }
@@ -179,6 +229,9 @@ to_fs <- function(x) {
   else list(stringValue = as.character(x))
 }
 
+# กัน Gemini ตอบ theme ที่ไม่อยู่ใน THEMES (พิมพ์ผิด/ตั้งชื่อเอง) → fallback "อื่นๆ"
+normalize_theme <- function(t) if (is.null(t) || is.na(t) || !(t %in% THEMES)) "อื่นๆ" else t
+
 news_array <- lapply(seq_len(nrow(news_list)), function(i) {
   r <- news_list[i, ]
   list(mapValue = list(fields = list(
@@ -186,7 +239,8 @@ news_array <- lapply(seq_len(nrow(news_list)), function(i) {
     summary_th = to_fs(r$summary_th),
     source     = to_fs(r$source),
     url        = to_fs(r$url),
-    why_picked = to_fs(r$why_picked)
+    why_picked = to_fs(r$why_picked),
+    theme      = to_fs(normalize_theme(r$theme))
   )))
 })
 

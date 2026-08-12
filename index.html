@@ -74,6 +74,8 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkM
 /* ── News page ──────────────────────────────────────── */
 .news-day { margin-bottom:18px; }
 .news-day-header { font-size:0.72em; color:var(--text3); text-transform:uppercase; letter-spacing:0.06em; padding:4px 0; border-bottom:1px solid var(--border); margin-bottom:10px; max-width:1200px; margin-left:auto; margin-right:auto; }
+.news-theme-block { margin-bottom:14px; }
+.news-theme-header { font-size:0.76em; font-weight:600; color:var(--blue); padding:2px 0; margin-bottom:8px; max-width:1200px; margin-left:auto; margin-right:auto; }
 .energy-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:22px; max-width:1200px; margin:0 auto; padding:0 16px; }
 @media (max-width:700px), (orientation:portrait) and (max-width:1024px) { .energy-grid { grid-template-columns:1fr; } }
 /* ตอน export PDF: เหลือแค่ 2 การ์ด (Diesel, Gasohol 95) วาง 2 คอลัมน์ให้พอดี A4 แนวนอน 1 หน้า */
@@ -845,7 +847,9 @@ async function fetchGlobalCPI() {
 
 async function fetchNews() {
   NEWS = [];
-  const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  // ดึงย้อนหลังเผื่อไว้ 5 วัน (มากกว่าที่จะแสดงจริง) กัน edge case
+  // sessions ไม่ครบทุกวัน — หน้าจอแสดงผลจะตัดเหลือแค่ 3 วันล่าสุดเอง
+  const since = new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
   const q = query(collection(db, 'daily_news'), where(documentId(), '>=', since));
   const snap = await getDocs(q);
   snap.forEach(d => {
@@ -855,7 +859,8 @@ async function fetchNews() {
       summary_th: n.summary_th || '',
       source:     n.source     || '',
       url:        n.url        || '',
-      why_picked: n.why_picked || ''
+      why_picked: n.why_picked || '',
+      theme:      n.theme      || 'อื่นๆ'
     }));
     if (items.length) NEWS.push({
       docId:   d.id,
@@ -866,6 +871,8 @@ async function fetchNews() {
   });
   NEWS.sort((a,b) => b.docId.localeCompare(a.docId));
 }
+
+const NEWS_DAYS_SHOWN = 3;
 
 // ══════════════════════════════════════════════════════
 //  TH ENERGY PAGE
@@ -1728,6 +1735,16 @@ window.closeMeta = closeMeta;
 window.openStructureModal = openStructureModal;
 window.closeStructureModal = closeStructureModal;
 
+// ลำดับ theme สำหรับแสดงผล ให้ตรงกับ THEMES ใน news-pipeline/fetch_news.R
+const NEWS_THEME_ORDER = [
+  'สงครามการค้า',
+  'สงครามอิหร่าน',
+  'Fed/ดอกเบี้ย/เงินเฟ้อ',
+  'เศรษฐกิจไทย/SEA',
+  'ตลาดทุน/SET',
+  'อื่นๆ'
+];
+
 function renderNews() {
   const container = document.getElementById('news-container');
   if (!container) return;
@@ -1741,24 +1758,43 @@ function renderNews() {
     byDate[doc.date].push(...doc.news);
   });
 
-  Object.keys(byDate).sort().reverse().forEach(date => {
+  // แสดงแค่ NEWS_DAYS_SHOWN วันล่าสุด
+  Object.keys(byDate).sort().reverse().slice(0, NEWS_DAYS_SHOWN).forEach(date => {
     const dt = new Date(date + 'T00:00:00Z');
     const label = dt.toLocaleDateString('en-US', {weekday:'long', day:'numeric', month:'long', year:'numeric', timeZone:'UTC'});
     const section = document.createElement('div');
     section.className = 'news-day';
     section.innerHTML = `<div class="news-day-header">${label}</div>`;
-    const grid = document.createElement('div');
-    grid.className = 'news-grid';
+
+    // group ข่าวในวันนั้นตาม theme เรียงตาม NEWS_THEME_ORDER
+    const byTheme = {};
     byDate[date].forEach(item => {
-      const el = document.createElement('div');
-      el.className = 'news-item';
-      el.innerHTML = `
-        <div class="news-source">${item.source || 'Unknown'}</div>
-        <div class="news-title"><a href="${item.url}" target="_blank" rel="noopener">${item.title}</a></div>
-        ${item.summary_th ? `<div class="news-summary">${item.summary_th}</div>` : ''}`;
-      grid.appendChild(el);
+      const t = item.theme || 'อื่นๆ';
+      if (!byTheme[t]) byTheme[t] = [];
+      byTheme[t].push(item);
     });
-    section.appendChild(grid);
+    Object.keys(byTheme).sort((a, b) => {
+      const ia = NEWS_THEME_ORDER.indexOf(a), ib = NEWS_THEME_ORDER.indexOf(b);
+      return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib);
+    }).forEach(theme => {
+      const themeBlock = document.createElement('div');
+      themeBlock.className = 'news-theme-block';
+      themeBlock.innerHTML = `<div class="news-theme-header">${theme}</div>`;
+      const grid = document.createElement('div');
+      grid.className = 'news-grid';
+      byTheme[theme].forEach(item => {
+        const el = document.createElement('div');
+        el.className = 'news-item';
+        el.innerHTML = `
+          <div class="news-source">${item.source || 'Unknown'}</div>
+          <div class="news-title"><a href="${item.url}" target="_blank" rel="noopener">${item.title}</a></div>
+          ${item.summary_th ? `<div class="news-summary">${item.summary_th}</div>` : ''}`;
+        grid.appendChild(el);
+      });
+      themeBlock.appendChild(grid);
+      section.appendChild(themeBlock);
+    });
+
     container.appendChild(section);
   });
 }
@@ -2042,7 +2078,7 @@ function renderDashCard(docId, opts = {}) {
     return `<div class="ekpi-row">
       <div class="ekpi-row-left">
         <div class="ekpi-row-name">${cleanDashName(v.name)}</div>
-        <div class="ekpi-row-unit">${badge || '—'}</div>
+        <div class="ekpi-row-unit">${badge}</div>
       </div>
       <div class="ekpi-row-right">
         <div class="ekpi-row-val ${chgClass}">${valueStr}${changeHtml}</div>
