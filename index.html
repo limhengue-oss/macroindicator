@@ -1978,7 +1978,20 @@ function latestDashValue(docId, fn) {
   if (!series.length) return null;
   const last = series[series.length - 1];
   if (last.y === null || last.y === undefined || !isFinite(last.y)) return null;
-  return { x: last.x, y: last.y, name: s.name || docId, unit: s.meta?.unit || s.meta?.currency || '' };
+  return { x: last.x, y: last.y, name: s.name || docId, unit: s.meta?.unit || s.meta?.currency || '', freq: s.meta?.freq || '' };
+}
+
+// จัดรูปแบบวันที่ตาม meta.freq ของ series — รายวัน "13-Jun-26", รายเดือน
+// "Jun-26", รายไตรมาส "Q1-26" (freq ว่าง/ไม่รู้จัก fallback เป็นรายวัน
+// เพราะให้ข้อมูลครบสุด)
+function formatDashDate(dateStr, freq) {
+  const d = new Date(dateStr + 'T00:00:00Z');
+  const mon = d.toLocaleDateString('en-GB', { month: 'short', timeZone: 'UTC' });
+  const yr2 = String(d.getUTCFullYear()).slice(2);
+  const f = (freq || '').toLowerCase();
+  if (f.startsWith('quarter')) return `Q${Math.floor(d.getUTCMonth() / 3) + 1}-${yr2}`;
+  if (f.startsWith('month'))   return `${mon}-${yr2}`;
+  return `${d.getUTCDate()}-${mon}-${yr2}`;
 }
 
 // ชื่อดิบจาก Firestore มักมีหน่วย/ความถี่ติดมาด้วย เช่น
@@ -2033,7 +2046,7 @@ function renderDashCard(docId, opts = {}) {
       </div>
       <div class="ekpi-row-right">
         <div class="ekpi-row-val ${chgClass}">${valueStr}${changeHtml}</div>
-        <div class="ekpi-row-date">${v.x}</div>
+        <div class="ekpi-row-date">${formatDashDate(v.x, v.freq)}</div>
       </div>
       ${removeBtn}
     </div>`;
@@ -2043,7 +2056,7 @@ function renderDashCard(docId, opts = {}) {
     ${removeBtn}
     <div class="ekpi-name">${cleanDashName(v.name)}</div>
     <div class="ekpi-price ${chgClass}">${valueStr}${badge ? `<span class="ekpi-unit">${badge}</span>` : ''}${changeHtml}</div>
-    <div class="ekpi-date">${v.x}</div>
+    <div class="ekpi-date">${formatDashDate(v.x, v.freq)}</div>
   </div>`;
 }
 
