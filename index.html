@@ -110,10 +110,13 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkM
 .ekpi-chg.up{color:var(--up)} .ekpi-chg.dn{color:var(--dn)}
 /* ── Dashboard cards (compact tiles) ── */
 .ekpi-grid-mini { display:flex; flex-direction:column; gap:4px; }
-.ekpi-row { position:relative; display:flex; align-items:center; gap:8px; padding:5px 26px 5px 8px; background:var(--bg3); border:1px solid var(--border); border-radius:4px; font-size:0.76em; }
-.ekpi-row-name { flex:1 1 auto; min-width:0; color:var(--text2); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.ekpi-row-val { flex:0 0 auto; font-weight:600; color:var(--text); white-space:nowrap; }
-.ekpi-row-date { flex:0 0 auto; width:62px; text-align:right; color:var(--text3); font-size:0.85em; }
+.ekpi-row { position:relative; display:flex; align-items:center; gap:8px; padding:6px 26px 6px 8px; background:var(--bg3); border:1px solid var(--border); border-radius:4px; }
+.ekpi-row-left { flex:1 1 auto; min-width:0; }
+.ekpi-row-right { flex:0 0 auto; text-align:right; }
+.ekpi-row-name { font-size:0.76em; color:var(--text2); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.ekpi-row-unit { font-size:0.66em; color:var(--text3); margin-top:1px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.ekpi-row-val { font-size:0.86em; font-weight:600; color:var(--text); white-space:nowrap; }
+.ekpi-row-date { font-size:0.66em; color:var(--text3); margin-top:1px; white-space:nowrap; }
 .ekpi-remove { position:absolute; top:50%; right:4px; transform:translateY(-50%); background:none; border:none; color:var(--text3); font-size:0.68em; cursor:pointer; padding:2px 4px; line-height:1; border-radius:2px; opacity:0; transition:opacity .15s; }
 .ekpi-row:hover .ekpi-remove, .ekpi:hover .ekpi-remove { opacity:1; }
 .ekpi-remove:hover { color:var(--red); background:var(--bg4); }
@@ -2020,13 +2023,18 @@ function renderDashCard(docId, opts = {}) {
     ? `<button class="ekpi-remove" title="เอาออกจากการ์ด" onclick="removeDashboardIndicator('${opts.cardId}','${docId}')">✕</button>`
     : '';
 
-  // การ์ด Dashboard: 1 indicator = 1 row (ชื่อซ้าย, ค่า+วันที่ขวา) แทน tile
-  // แบบเดิม — compact กว่าและอ่านรายชื่อยาวๆ ง่ายกว่าตอนมีหลาย indicator
+  // การ์ด Dashboard: 1 indicator = 1 row, ฝั่งซ้าย 2 บรรทัด (ชื่อ/หน่วย)
+  // ฝั่งขวา 2 บรรทัด (ค่าล่าสุด/วันที่ล่าสุด)
   if (opts.compact) {
     return `<div class="ekpi-row">
-      <span class="ekpi-row-name">${cleanDashName(v.name)}</span>
-      <span class="ekpi-row-val ${chgClass}">${valueStr}${badge ? `<span class="ekpi-unit">${badge}</span>` : ''}${changeHtml}</span>
-      <span class="ekpi-row-date">${v.x}</span>
+      <div class="ekpi-row-left">
+        <div class="ekpi-row-name">${cleanDashName(v.name)}</div>
+        <div class="ekpi-row-unit">${badge || '—'}</div>
+      </div>
+      <div class="ekpi-row-right">
+        <div class="ekpi-row-val ${chgClass}">${valueStr}${changeHtml}</div>
+        <div class="ekpi-row-date">${v.x}</div>
+      </div>
       ${removeBtn}
     </div>`;
   }
