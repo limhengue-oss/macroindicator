@@ -235,9 +235,33 @@ message("── Fetching IMF CPI index, monthly, all countries (HICP)...")
 ix_hicp <- imf_fetch_cpi_wildcard("HICP", "M", "monthly", START_PERIOD)
 message(sprintf("  HICP -> %d rows, %d countries", nrow(ix_hicp), n_distinct(ix_hicp$country_code)))
 
+# World & Regional aggregates (IMF.STA,CPI_WCA,3.0.0 — คนละ dataflow กับ
+# CPI ปกติ) — headline (_T) เท่านั้น ไม่มี COICOP breakdown ให้ (เช็คสดแล้ว
+# CP01 ของ World ตอบ 0 series) ใช้ area code ตรงๆ เป็น "ISO3" ในโค้ดเดิม
+# (บางโค้ดยาว 4 ตัวอักษร เช่น G001, U002 — regex ฝั่ง index.html รองรับแล้ว)
+CPI_WCA_FLOW <- "IMF.STA,CPI_WCA,3.0.0"
+CPI_WCA_AREAS <- c(
+  G001 = "World", G110 = "Advanced Economies", G119 = "G7", G120 = "G20",
+  G200 = "Emerging Market and Developing Economies", U002 = "Africa",
+  U009 = "Oceania", U019 = "Americas", U142 = "Asia", U150 = "Europe"
+)
+message("── Fetching IMF CPI World & Regional Aggregates (headline only)...")
+wca_url <- paste0(IMF_API_BASE, "/data/", CPI_WCA_FLOW, "/.CPI._T.IX.M?startPeriod=", START_PERIOD)
+wca_resp <- tryCatch(
+  request(wca_url) |> imf_apply_headers() |> req_timeout(60) |>
+    req_error(is_error = function(resp) FALSE) |> req_perform(),
+  error = function(e) NULL
+)
+ix_wca <- if (!is.null(wca_resp) && resp_status(wca_resp) < 300) {
+  imf_parse_cpi_xml(resp_body_string(wca_resp), "monthly") |>
+    filter(country_code %in% names(CPI_WCA_AREAS)) |> mutate(index_type = "CPI")
+} else tibble()
+message(sprintf("  WCA -> %d rows, %d areas", nrow(ix_wca), n_distinct(ix_wca$country_code)))
+
 # เลือก CPI หรือ HICP ต่อประเทศตาม INDEX_TYPE_MAP (ดู comment header) —
-# ทิ้งอีกฝั่งไปเลย ไม่ผสมสอง index type เป็น series เดียว
-ix_m <- bind_rows(ix_cpi, ix_hicp) |>
+# ทิ้งอีกฝั่งไปเลย ไม่ผสมสอง index type เป็น series เดียว (WCA area code ไม่
+# อยู่ใน INDEX_TYPE_MAP เลย fallback "CPI" ซึ่งตรงกับ tag ที่ตั้งไว้แล้วพอดี)
+ix_m <- bind_rows(ix_cpi, ix_hicp, ix_wca) |>
   filter(index_type == vapply(country_code, index_type_for, character(1)))
 message(sprintf("  IX/M -> %d rows, %d countries", nrow(ix_m), n_distinct(ix_m$country_code)))
 
@@ -253,7 +277,7 @@ message(sprintf("── Combined: %d rows, %d countries, %d country x category s
                  nrow(distinct(ix_all, country_code, category_code))))
 
 country_names <- imf_fetch_country_names()
-country_label <- function(cty) unname(country_names[cty]) %||% cty
+country_label <- function(cty) unname(country_names[cty]) %||% unname(CPI_WCA_AREAS[cty]) %||% cty
 
 token <- NULL
 if (!DRY_RUN) {

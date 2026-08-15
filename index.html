@@ -556,6 +556,12 @@ const PERIOD_MONTHS = { '3m':3,'6m':6,'1y':12,'3y':36,'10y':120,'30y':360,'max':
 // Economies เดิม หัก G7 และ EU ออก (ประเทศไหนอยู่ทั้ง G7 และ EU เช่น
 // Germany/France/Italy นับเป็น G7 เท่านั้น ไม่ซ้ำใน EU การ์ด)
 const INFLATION_GROUPS = [
+  { key: 'WORLD', title: 'World & Regional Aggregates', countries: [
+    // headline เท่านั้น — IMF ไม่มี COICOP breakdown ให้กับ aggregate พวกนี้
+    ['G001','World'],['G110','Advanced Economies'],['G119','G7'],['G120','G20'],
+    ['G200','Emerging Market and Developing Economies'],
+    ['U002','Africa'],['U009','Oceania'],['U019','Americas'],['U142','Asia'],['U150','Europe'],
+  ]},
   { key: 'G7', title: 'G7', countries: [
     ['CAN','Canada'],['DEU','Germany'],['FRA','France'],['GBR','United Kingdom'],
     ['ITA','Italy'],['JPN','Japan'],['USA','United States'],
@@ -808,7 +814,7 @@ async function fetchOilFund() {
 // SERIES กลาง — ต้องเรียกผ่าน fetchGlobalCPI() ของหน้า GlobalCPI เท่านั้น
 // หน้าอื่น (Dashboard/catalog/custom chart) อ่าน SERIES เป็นแหล่งเดียว เลย
 // ไม่มีทางเห็น/เลือกใช้ series กลุ่มนี้ได้เลยแม้จะรู้ doc id ตรงๆ
-const GLOBALCPI_ID_RE = /^IMF_[A-Z]{3}_CPI_\d{2}$/;
+const GLOBALCPI_ID_RE = /^IMF_[A-Z0-9]{3,4}_CPI_\d{2}$/;
 
 // Phase 2: series ที่เหลือ (โหลด background หลัง render หน้าแรกแล้ว) — ยกเว้น
 // IMF CPI by-country-category (ดู GLOBALCPI_ID_RE ด้านบน)
