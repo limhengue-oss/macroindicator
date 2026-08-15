@@ -1,12 +1,7 @@
 name: Fetch IMF CPI (all countries, by COICOP category)
 
 on:
-  workflow_dispatch:   # รันมือไปก่อน ยังไม่ตั้ง cron จนกว่าจะยืนยันว่ารันจบไม่มีปัญหา (series เยอะ, ใช้เวลานาน)
-    inputs:
-      dry_run:
-        description: 'Dry run (ดึงข้อมูลมาดูเฉย ๆ ไม่ push Firestore)'
-        type: boolean
-        default: true
+  workflow_dispatch:   # รันมือไปก่อน ยังไม่ตั้ง cron — dry_run ผ่านแล้ว, push จริงยืนยันแล้วว่าใช้ได้
 
 jobs:
   fetch-imf-cpi:
@@ -22,7 +17,7 @@ jobs:
 
       - name: Install packages and run
         env:
-          GCP_SA_KEY:  ${{ inputs.dry_run && '' || secrets.GCP_SA_KEY }}
+          GCP_SA_KEY:  ${{ secrets.GCP_SA_KEY }}
           IMF_API_KEY: ${{ secrets.IMF_API_KEY }}
         run: |
           Rscript -e '
