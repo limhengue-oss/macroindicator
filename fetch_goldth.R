@@ -167,6 +167,16 @@ message(sprintf("── Fetching Thai gold bar prices from %s to %s...", from, D
 raw <- if (is_first_run) fetch_goldth_full_history(from, DATE_TO) else fetch_goldth_range(from, DATE_TO)
 message(sprintf("  %d price updates fetched", nrow(raw)))
 
+# First run ต้องได้ข้อมูลย้อนหลังหลายปี (2007-ปัจจุบัน) ได้ 0 แถวแปลว่า API
+# พังหรือถูกบล็อก (เช่น IP ของ GitHub Actions runner โดน rate-limit/geo-block
+# จากเว็บ goldtraders.or.th) ไม่ใช่แค่ "ยังไม่มีราคาใหม่วันนี้" แบบ incremental
+# run ปกติ — ต้อง fail ให้เห็นชัด (exit code != 0) ไม่ใช่ปล่อยผ่านเงียบๆ
+# แบบเดิมที่ workflow ขึ้น success ทั้งที่ไม่เคย push ข้อมูลได้เลยสักครั้ง
+if (is_first_run && nrow(raw) == 0) {
+  stop("First run fetched 0 rows for a 19+ year range (", from, "..", DATE_TO,
+       ") — API likely blocked/broken. Check goldtraders.or.th response manually.")
+}
+
 ok_count <- 0
 new_status <- fetch_status
 
