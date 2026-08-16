@@ -241,6 +241,10 @@ message("Gemini selected ", nrow(news_list), " articles")
 
 # ─── 4. Push Firestore ────────────────────────────────────────────────────────
 to_fs <- function(x) {
+  # NA/NULL ต้องแปลงเป็น "" ไม่ใช่ null — Firestore REST API reject
+  # {"stringValue": null} เพราะ field ต้องเป็น string เท่านั้น (สาเหตุ HTTP 400
+  # ที่เจอตอน push หลังเพิ่ม field "theme" — Gemini อาจไม่ตอบบาง field มาครบ)
+  if (is.null(x) || length(x) == 0 || (length(x) == 1 && is.na(x))) return(list(stringValue = ""))
   if (is.character(x)) list(stringValue = x)
   else list(stringValue = as.character(x))
 }
@@ -277,14 +281,29 @@ doc <- list(fields = list(
   all_news   = list(arrayValue = list(values = all_news_array))
 ))
 
-request(paste0(FIREBASE_URL, "/daily_news/", DOC_ID)) |>
-  req_method("PATCH") |>
-  req_headers(
-    "Authorization" = paste("Bearer", FIREBASE_TOKEN),
-    "Content-Type"  = "application/json"
-  ) |>
-  req_body_json(doc) |>
-  req_timeout(30) |>
-  req_perform()
+push_result <- tryCatch({
+  request(paste0(FIREBASE_URL, "/daily_news/", DOC_ID)) |>
+    req_method("PATCH") |>
+    req_headers(
+      "Authorization" = paste("Bearer", FIREBASE_TOKEN),
+      "Content-Type"  = "application/json"
+    ) |>
+    req_body_json(doc) |>
+    req_timeout(30) |>
+    req_error(is_error = function(resp) FALSE) |>
+    req_perform()
+}, error = function(e) {
+  message("Firestore push network error: ", conditionMessage(e))
+  NULL
+})
+
+if (is.null(push_result)) {
+  stop("Firestore push failed — network error (ดู log ด้านบน)")
+}
+status <- resp_status(push_result)
+if (status >= 400) {
+  message("Firestore push HTTP ", status, ": ", resp_body_string(push_result))
+  stop("Firestore push failed with HTTP ", status)
+}
 
 message("Done — pushed daily_news/", DOC_ID)
