@@ -4,6 +4,8 @@
 #  ไฟล์: fetch_and_push.R, fetch_bis.R, fetch_bot.R, fetch_goldth.R,
 #  fetch_imf.R, fetch_imf_cpi.R, fetch_nesdc.R, fetch_thaibma.R,
 #  fetch_tpso.R — รวมมาไว้ที่เดียว)
+#  หมายเหตุ 2026-08-16: fetch_imf.R ถูกลบไปแล้ว (ไม่เคย push ข้อมูลจริง)
+#  เพิ่ม fetch_imf_multi.R (21 IMF dataset) เป็น consumer ใหม่แทน
 #
 #  แต่ละสคริปต์ต้อง library(httr2)/library(jose)/library(purrr) เองก่อน
 #  source ไฟล์นี้ (ไฟล์นี้ไม่โหลด package ให้ เพื่อไม่ให้ซ้อนกับ

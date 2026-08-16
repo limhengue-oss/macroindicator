@@ -1,4 +1,4 @@
-name: Fetch IMF (GDP, FSI, CPI Aggregates)
+name: Fetch IMF (21 dataset, raw index/level, all countries)
 
 on:
   workflow_dispatch:   # รันมือไปก่อน ยังไม่ตั้ง cron จนกว่าจะยืนยันว่าข้อมูลอัปเดตสม่ำเสมอ
@@ -11,6 +11,7 @@ on:
 jobs:
   fetch-imf:
     runs-on: ubuntu-latest
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
 
@@ -22,16 +23,15 @@ jobs:
       - name: Install packages and run
         env:
           GCP_SA_KEY:  ${{ inputs.dry_run && '' || secrets.GCP_SA_KEY }}
-          IMF_API_KEY: ${{ secrets.IMF_API_KEY }}
         run: |
           Rscript -e '
           lib <- "/home/runner/R-pkgs"
           dir.create(lib, showWarnings = FALSE)
           .libPaths(c(lib, .libPaths()))
           options(repos = c(CRAN = "https://packagemanager.posit.co/cran/__linux__/noble/latest"))
-          pkgs <- c("httr2","jsonlite","jose","dplyr","purrr","tibble","stringr")
+          pkgs <- c("httr2","jsonlite","jose","dplyr","purrr","readr","tibble","stringr","xml2")
           miss <- pkgs[!pkgs %in% installed.packages(lib.loc = lib)[,"Package"]]
           if (length(miss)) install.packages(miss, lib = lib, dependencies = TRUE)
           .libPaths(c(lib, .libPaths()))
-          source("fetch_imf.R")
+          source("fetch_imf_multi.R")
           '

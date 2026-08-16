@@ -2,7 +2,17 @@
   "permissions": {
     "allow": [
       "Bash(powershell -Command \"Get-Item fetch_and_push.R, push_meta_only.R, index.html, fetch_eppo.R | Select-Object Name, LastWriteTime\")",
-      "Bash(awk 'NR==864,NR==1290{print NR\": \"$0}' index.html)"
+      "Bash(awk 'NR==864,NR==1290{print NR\": \"$0}' index.html)",
+      "Bash(cd \"C:/Users/limhe/OneDrive/Documents/GitHub/macroindicator\" && mv \".playwright-mcp/dataset-2026-08-14T16-30-47-962134610Z-DEFAULT-INTEGRATION-IMF-STA-GFS-SFCP-10-0-0.csv\" scratch_imf/bulk_downloads/IMF.STA_GFS_SFCP.csv && ls scratch_imf/bulk_downloads/ | wc -l)",
+      "Bash(mv \".playwright-mcp/dataset-2026-08-14T16-40-44-737598507Z-DEFAULT-INTEGRATION-IMF-STA-ANEA-6-0-1.csv\" \"scratch_imf/bulk_downloads/IMF.STA_ANEA.csv\")",
+      "Bash(echo \"- ANEA \\(IMF.STA:ANEA\\): done, size=$\\(stat -c%s scratch_imf/bulk_downloads/IMF.STA_ANEA.csv\\) bytes\")",
+      "Bash(mv \".playwright-mcp/dataset-2026-08-14T16-44-07-149771816Z-DEFAULT-INTEGRATION-IMF-STA-QGDP-WCA-4-0-0.csv\" \"scratch_imf/bulk_downloads/IMF.STA_QGDP_WCA.csv\")",
+      "Bash(echo \"- QGDP_WCA \\(IMF.STA:QGDP_WCA\\): done, size=$\\(stat -c%s scratch_imf/bulk_downloads/IMF.STA_QGDP_WCA.csv\\) bytes\")",
+      "Bash(mv \".playwright-mcp/dataset-2026-08-14T16-46-04-122031948Z-DEFAULT-INTEGRATION-IMF-RES-WEO-9-0-0.csv\" \"scratch_imf/bulk_downloads/IMF.RES_WEO.csv\")",
+      "Bash(echo \"- WEO \\(IMF.RES:WEO\\): done, size=$\\(stat -c%s scratch_imf/bulk_downloads/IMF.RES_WEO.csv\\) bytes\")"
+    ],
+    "additionalDirectories": [
+      "C:\\Users\\limhe\\OneDrive\\Documents\\GitHub\\macroindicator\\.playwright-mcp"
     ]
   }
 }

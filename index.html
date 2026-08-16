@@ -664,15 +664,11 @@ const SERIES_GROUPS = {
     `BIS_${c}_CBPOL`, `BIS_${c}_CREDIT_GAP`, `BIS_${c}_CREDIT_PRIVATE_GDP`,
     `BIS_${c}_CREDIT_HH_GDP`, `BIS_${c}_CREDIT_CORP_GDP`, `BIS_${c}_RPP_REAL`, `BIS_${c}_RPP_NOMINAL`,
   ]),
-  'GDP Quarterly (IMF)': [
-    'THA','USA','G163','GBR','JPN','KOR','IND','IDN','CHN'
-  ].map(c => `IMF_${c}_GDP_QUARTERLY`),
-  'Bank Soundness (IMF FSI)': [
-    'THA','USA','GBR','JPN','KOR','IND','IDN','CHN'
-  ].flatMap(c => ['CAR','NPL','ROE'].map(s => `IMF_${c}_FSI_${s}`)),
-  'CPI World & Regional Aggregates (IMF)': [
-    'G001','G110','G119','G120','G200','U002','U009','U019','U142','U150'
-  ].map(a => `IMF_${a}_CPI_YOY`),
+  // 'GDP Quarterly (IMF)' / 'Bank Soundness (IMF FSI)' / 'CPI World &
+  // Regional Aggregates (IMF)' 3 กลุ่มเดิมถูกลบออก 2026-08-16 พร้อมกับ
+  // fetch_imf.R (ไม่เคย push ข้อมูลจริงเลย) — series จาก fetch_imf_multi.R
+  // (21 dataset ใหม่) จัดหมวดผ่าน classifySeries()/IMF_DATASET_INFO แทน
+  // ไม่ต้อง list doc_id ตรงๆ ที่นี่อีก
   // EPPO Diesel/Gasoline/Other ถูกเติมด้านล่างหลังประกาศ EPPO_ORDER — จำกัดให้
   // เลือกได้แค่ Retail/Wholesale + Oil Fund เท่านั้น (ซ่อน field breakdown อื่น
   // เช่น Ex-Refin, Excise Tax, VAT, Marketing Margin จากหน้า chart ทั่วไป)
@@ -839,8 +835,9 @@ function storeGlobalCpiDoc(doc) {
 }
 // เรียกเฉพาะตอนเปิดหน้า GlobalCPI (lazy) — query prefix "IMF_" ทั้งก้อนแล้ว
 // กรองด้วย GLOBALCPI_ID_RE ฝั่ง client (Firestore range query กรอง mid-string
-// ไม่ได้ตรงๆ) ตัวที่ไม่เข้าเงื่อนไข (GDP_QUARTERLY/FSI_*/CPI_YOY ของ fetch_imf.R)
-// จะถูกละทิ้ง ไม่เก็บเข้าที่ไหนเลย
+// ไม่ได้ตรงๆ) ตัวที่ไม่เข้าเงื่อนไข (series จาก fetch_imf_multi.R, doc_id
+// รูปแบบ IMF_{ISO3}_{DATASET}_{suffix}) จะถูกละทิ้ง ไม่เก็บเข้าที่นี่ —
+// ไปโผล่ใน SERIES กลางผ่าน fetchRest() แทน (ดู classifySeries)
 async function fetchGlobalCPI() {
   if (globalCpiLoaded) return;
   const q = query(collection(db, 'series'),
@@ -1971,12 +1968,11 @@ const DASHBOARD_GROUP_ORDER = [
     ids: () => SERIES_GROUPS['Thailand Bond Yield (ThaiBMA, Daily)'] || [] },
   { title: 'Credit, Policy Rate & Property (BIS)',
     ids: () => SERIES_GROUPS['Credit, Policy Rate & Property (BIS)'] || [] },
-  { title: 'GDP Quarterly (IMF)',
-    ids: () => SERIES_GROUPS['GDP Quarterly (IMF)'] || [] },
-  { title: 'Bank Soundness (IMF FSI)',
-    ids: () => SERIES_GROUPS['Bank Soundness (IMF FSI)'] || [] },
-  { title: 'CPI World & Regional Aggregates (IMF)',
-    ids: () => SERIES_GROUPS['CPI World & Regional Aggregates (IMF)'] || [] },
+  // GDP Quarterly / Bank Soundness / CPI World & Regional Aggregates (IMF)
+  // การ์ดเดิม 3 ใบถูกลบออก 2026-08-16 พร้อมกับ fetch_imf.R (ไม่เคย push
+  // ข้อมูลจริงเลย) — ยังไม่มีการ์ดแทนที่จาก fetch_imf_multi.R (21 dataset)
+  // เพราะ series กลุ่มนี้จัดหมวดผ่าน classifySeries() แล้ว (ดู
+  // IMF_DATASET_INFO) ผู้ใช้เพิ่มการ์ดเองได้จาก Custom Chart picker
   { title: 'Stock Indices',
     ids: () => [
       ...(SERIES_GROUPS['US Equity']   || []),
@@ -2962,10 +2958,312 @@ const BIS_COUNTRY_NAME = {
   TH: 'Thailand', US: 'United States', XM: 'Eurozone', GB: 'United Kingdom',
   JP: 'Japan', KR: 'South Korea', IN: 'India', ID: 'Indonesia', CN: 'China',
 };
-const IMF_COUNTRY_NAME = {
-  THA: 'Thailand', USA: 'United States', G163: 'Eurozone', GBR: 'United Kingdom',
-  JPN: 'Japan', KOR: 'South Korea', IND: 'India', IDN: 'Indonesia', CHN: 'China',
+// ISO3 -> ชื่อประเทศเต็ม (265 ประเทศ, มาตรฐาน IMF CL_COUNTRY codelist) — สร้าง
+// จาก data/imf_country_codes.csv (ดู scratch_imf/r_scripts/gen_iso3_js.R)
+// ใช้ร่วมกันทุก dataset ของ fetch_imf_multi.R (21 dataset, doc_id scheme
+// เดียวกันหมด: IMF_{ISO3}_{DATASET_ID}_{suffix}) แทนที่ IMF_COUNTRY_NAME เดิม
+// ที่มีแค่ ~9 ประเทศ (เขียนไว้เฉพาะของ fetch_imf.R ซึ่งลบไปแล้ว)
+const IMF_ISO3_NAME = {
+  AFG:"Afghanistan",
+  ALB:"Albania",
+  DZA:"Algeria",
+  ASM:"American Samoa",
+  AND:"Andorra",
+  AGO:"Angola",
+  AIA:"Anguilla",
+  ATG:"Antigua and Barbuda",
+  ARG:"Argentina",
+  ARM:"Armenia",
+  ABW:"Aruba",
+  AUS:"Australia",
+  AUT:"Austria",
+  AZE:"Azerbaijan",
+  BHS:"Bahamas",
+  BHR:"Bahrain",
+  BGD:"Bangladesh",
+  BRB:"Barbados",
+  BLR:"Belarus",
+  BEL:"Belgium",
+  BLZ:"Belize",
+  BEN:"Benin",
+  BMU:"Bermuda",
+  BTN:"Bhutan",
+  BOL:"Bolivia",
+  BIH:"Bosnia and Herzegovina",
+  BWA:"Botswana",
+  BRA:"Brazil",
+  VGB:"British Virgin Islands",
+  BRN:"Brunei Darussalam",
+  BGR:"Bulgaria",
+  BFA:"Burkina Faso",
+  BDI:"Burundi",
+  CPV:"Cabo Verde",
+  KHM:"Cambodia",
+  CMR:"Cameroon",
+  CAN:"Canada",
+  CYM:"Cayman Islands",
+  CAF:"Central African Republic",
+  TCD:"Chad",
+  CHL:"Chile",
+  CHN:"China",
+  COL:"Colombia",
+  COM:"Comoros",
+  COD:"DR Congo",
+  COG:"Congo",
+  COK:"Cook Islands",
+  CRI:"Costa Rica",
+  HRV:"Croatia",
+  CUB:"Cuba",
+  CUW:"Curaçao",
+  CYP:"Cyprus",
+  CZE:"Czech Republic",
+  CIV:"Côte d'Ivoire",
+  DNK:"Denmark",
+  DJI:"Djibouti",
+  DMA:"Dominica",
+  DOM:"Dominican Republic",
+  ECU:"Ecuador",
+  EGY:"Egypt",
+  SLV:"El Salvador",
+  GNQ:"Equatorial Guinea",
+  ERI:"Eritrea",
+  EST:"Estonia",
+  SWZ:"Eswatini",
+  ETH:"Ethiopia",
+  FLK:"Falkland Islands (Malvinas)",
+  FRO:"Faroe Islands",
+  FJI:"Fiji",
+  FIN:"Finland",
+  FRA:"France",
+  GUF:"French Guiana",
+  PYF:"French Polynesia",
+  GAB:"Gabon",
+  GMB:"Gambia",
+  GEO:"Georgia",
+  DEU:"Germany",
+  GHA:"Ghana",
+  GIB:"Gibraltar",
+  GRC:"Greece",
+  GRL:"Greenland",
+  GRD:"Grenada",
+  GLP:"Guadeloupe",
+  GUM:"Guam",
+  GTM:"Guatemala",
+  GGY:"Guernsey",
+  GIN:"Guinea",
+  GNB:"Guinea-Bissau",
+  GUY:"Guyana",
+  HTI:"Haiti",
+  VAT:"Holy See",
+  HND:"Honduras",
+  HKG:"Hong Kong Special Administrative Region",
+  HUN:"Hungary",
+  ISL:"Iceland",
+  IND:"India",
+  IDN:"Indonesia",
+  IRN:"Iran",
+  IRQ:"Iraq",
+  IRL:"Ireland",
+  IMN:"Isle of Man",
+  ISR:"Israel",
+  ITA:"Italy",
+  JAM:"Jamaica",
+  JPN:"Japan",
+  JEY:"Jersey",
+  JOR:"Jordan",
+  KAZ:"Kazakhstan",
+  KEN:"Kenya",
+  KIR:"Kiribati",
+  PRK:"North Korea",
+  KOR:"South Korea",
+  KOS:"Kosovo",
+  KWT:"Kuwait",
+  KGZ:"Kyrgyz Republic",
+  LAO:"Lao People's Democratic Republic",
+  LVA:"Latvia",
+  LBN:"Lebanon",
+  LSO:"Lesotho",
+  LBR:"Liberia",
+  LBY:"Libya",
+  LIE:"Liechtenstein",
+  LTU:"Lithuania",
+  LUX:"Luxembourg",
+  MAC:"Macao Special Administrative Region",
+  MDG:"Madagascar",
+  MWI:"Malawi",
+  MYS:"Malaysia",
+  MDV:"Maldives",
+  MLI:"Mali",
+  MLT:"Malta",
+  MHL:"Marshall Islands",
+  MTQ:"Martinique",
+  MRT:"Mauritania",
+  MUS:"Mauritius",
+  MYT:"Mayotte",
+  MEX:"Mexico",
+  FSM:"Micronesia",
+  MDA:"Moldova",
+  MCO:"Monaco",
+  MNG:"Mongolia",
+  MNE:"Montenegro",
+  MSR:"Montserrat",
+  MAR:"Morocco",
+  MOZ:"Mozambique",
+  MMR:"Myanmar",
+  NAM:"Namibia",
+  NRU:"Naoero",
+  NPL:"Nepal",
+  NLD:"Netherlands",
+  NCL:"New Caledonia",
+  NZL:"New Zealand",
+  NIC:"Nicaragua",
+  NER:"Niger",
+  NGA:"Nigeria",
+  NIU:"Niue",
+  NFK:"Norfolk Island",
+  MKD:"North Macedonia",
+  MNP:"Northern Mariana Islands",
+  NOR:"Norway",
+  OMN:"Oman",
+  PAK:"Pakistan",
+  PLW:"Palau",
+  PAN:"Panama",
+  PNG:"Papua New Guinea",
+  PRY:"Paraguay",
+  PER:"Peru",
+  PHL:"Philippines",
+  PCN:"Pitcairn Islands",
+  POL:"Poland",
+  PRT:"Portugal",
+  PRI:"Puerto Rico",
+  QAT:"Qatar",
+  ROU:"Romania",
+  RUS:"Russian Federation",
+  RWA:"Rwanda",
+  REU:"Réunion",
+  WSM:"Samoa",
+  SMR:"San Marino",
+  SAU:"Saudi Arabia",
+  SEN:"Senegal",
+  SRB:"Serbia",
+  SYC:"Seychelles",
+  SLE:"Sierra Leone",
+  SGP:"Singapore",
+  SXM:"Sint Maarten",
+  SVK:"Slovak Republic",
+  SVN:"Slovenia",
+  SLB:"Solomon Islands",
+  SOM:"Somalia",
+  ZAF:"South Africa",
+  SSD:"South Sudan",
+  ESP:"Spain",
+  LKA:"Sri Lanka",
+  SHN:"St. Helena",
+  KNA:"St. Kitts and Nevis",
+  LCA:"St. Lucia",
+  SPM:"St. Pierre and Miquelon",
+  VCT:"St. Vincent and the Grenadines",
+  SDN:"Sudan",
+  SUR:"Suriname",
+  SJM:"Svalbard and Jan Mayen Islands",
+  SWE:"Sweden",
+  CHE:"Switzerland",
+  SYR:"Syrian Arab Republic",
+  STP:"São Tomé and Príncipe",
+  TWN:"Taiwan Province of China",
+  TJK:"Tajikistan",
+  TZA:"Tanzania",
+  THA:"Thailand",
+  TLS:"Timor-Leste",
+  TGO:"Togo",
+  TKL:"Tokelau",
+  TON:"Tonga",
+  TTO:"Trinidad and Tobago",
+  TUN:"Tunisia",
+  TKM:"Turkmenistan",
+  TCA:"Turks and Caicos Islands",
+  TUV:"Tuvalu",
+  TUR:"Türkiye",
+  UGA:"Uganda",
+  UKR:"Ukraine",
+  ARE:"United Arab Emirates",
+  GBR:"United Kingdom",
+  USA:"United States",
+  VIR:"United States Virgin Islands",
+  URY:"Uruguay",
+  UZB:"Uzbekistan",
+  VUT:"Vanuatu",
+  VEN:"Venezuela",
+  VNM:"Vietnam",
+  WLF:"Wallis and Futuna Islands",
+  WBG:"West Bank and Gaza",
+  YEM:"Yemen",
+  ZMB:"Zambia",
+  ZWE:"Zimbabwe",
+  ALA:"Åland Islands",
+  BES:"Bonaire",
+  ATF:"French Southern Territories",
+  CWX:"Curaçao and Sint Maarten",
+  CSK:"Czechoslovakia",
+  DDR:"German Democratic Republic",
+  ANT:"Netherlands Antilles",
+  VDR:"South Vietnam (former)",
+  SCG:"Serbia and Montenegro",
+  SUN:"Union of Soviet Socialist Republics (USSR)",
+  YAR:"Yemen Arab Republic",
+  YMD:"South Yemen (former)",
+  YUG:"Yugoslavia",
+  BLM:"Saint Barthelemy",
+  MAF:"Saint Martin",
+  SGS:"South Georgia and the South Sandwich Islands",
+  CXR:"Christmas Island",
+  CCK:"Cocos Islands",
+  ESH:"Western Sahara",
+  BVT:"Bouvet Island",
+  IOT:"British Indian Ocean Territory",
+  HMD:"Heard Island and McDonald Islands",
+  UMI:"United States Minor Outlying Islands",
+  AFR:"Africa (AFR)",
+  APD:"Asia and Pacific (APD)",
+  EUR:"Europe (EUR)",
+  MCD:"Middle East and Central Asia (MCD)",
+  WHD:"Western Hemisphere (WHD)",
+  SDS:"Small Developing States (SDS)",
 };
+
+// dataset_id -> category label สำหรับ fetch_imf_multi.R (21 dataset) — ตรงกับ
+// data/imf_dataset_config.csv ต้องเรียงจากยาว/เจาะจงกว่าไปหาสั้นกว่าใน regex
+// ด้านล่าง (เช่น CPI_WCA ต้องมาก่อน CPI) กัน alternation จับผิดตัว
+const IMF_DATASET_INFO = {
+  CPI_WCA:  { category: 'CPI World & Regional Aggregates (IMF)', sector: 'real' },
+  PI_WCA:   { category: 'Production Index World & Regional Aggregates (IMF)', sector: 'real' },
+  QGDP_WCA: { category: 'Quarterly GDP World & Regional Aggregates (IMF)', sector: 'real' },
+  CPI:      { category: 'Consumer Prices (IMF)', sector: 'real' },
+  CTOT:     { category: 'Terms of Trade (IMF)', sector: 'real' },
+  EER:      { category: 'Effective Exchange Rates (IMF)', sector: 'financial' },
+  ER:       { category: 'Exchange Rates (IMF)', sector: 'financial' },
+  FSIC:     { category: 'Bank Soundness (IMF FSI)', sector: 'financial' },
+  IL:       { category: 'International Liquidity & Reserves (IMF)', sector: 'financial' },
+  ITG:      { category: 'International Trade in Goods (IMF)', sector: 'real' },
+  MFS_CBS:  { category: 'Money & Banking — Central Bank (IMF)', sector: 'financial' },
+  MFS_FC:   { category: 'Money & Banking — Financial Corporations (IMF)', sector: 'financial' },
+  MFS_FMP:  { category: 'Financial Market Prices (IMF)', sector: 'financial' },
+  MFS_IR:   { category: 'Interest Rates (IMF)', sector: 'financial' },
+  MFS_MA:   { category: 'Monetary Aggregates (IMF)', sector: 'financial' },
+  MFS_ODC:  { category: 'Money & Banking — Other Depository Corp. (IMF)', sector: 'financial' },
+  MFS_OFC:  { category: 'Money & Banking — Other Financial Corp. (IMF)', sector: 'financial' },
+  PCPS:     { category: 'Primary Commodity Prices (IMF)', sector: 'financial' },
+  PI:       { category: 'Production Index (IMF)', sector: 'real' },
+  PPI:      { category: 'Producer Prices (IMF)', sector: 'real' },
+  QNEA:     { category: 'GDP & National Accounts (IMF)', sector: 'real' },
+};
+// derive จาก key ของ IMF_DATASET_INFO เอง (ไม่ maintain แยก list ซ้ำ กัน
+// สอง list หลุด sync กันถ้ามีคนเพิ่ม dataset ใหม่ทีหลัง) เรียงยาว -> สั้น
+// เพื่อกัน regex จับ "CPI_WCA_xxx" เป็น dataset=CPI, suffix="WCA_xxx" ผิด
+// (alternation เลือกตัวแรกที่ match ได้ ไม่ใช่ตัวที่ยาวที่สุด)
+const IMF_DATASET_RE_ALT = Object.keys(IMF_DATASET_INFO)
+  .sort((a, b) => b.length - a.length).join('|');
+const IMF_MULTI_RE = new RegExp(`^IMF_([A-Z0-9]{2,4})_(${IMF_DATASET_RE_ALT})_(.+)$`);
 
 function classifySeries(id) {
   // BIS multi-country series: BIS_{CTY}_{SUFFIX}
@@ -2975,22 +3273,16 @@ function classifySeries(id) {
     const category = bisMatch[2] === 'CBPOL' ? 'Interest Rates & Bonds' : 'Credit & Property (BIS)';
     return { country, sector: 'financial', category };
   }
-  // IMF multi-country GDP: IMF_{CTY}_GDP_QUARTERLY
-  const imfGdpMatch = id.match(/^IMF_([A-Z0-9]+)_GDP_QUARTERLY$/);
-  if (imfGdpMatch) {
-    const country = IMF_COUNTRY_NAME[imfGdpMatch[1]] || imfGdpMatch[1];
-    return { country, sector: 'real', category: 'GDP & Growth' };
-  }
-  // IMF Financial Soundness Indicators: IMF_{CTY}_FSI_{CAR|NPL|ROE}
-  const imfFsiMatch = id.match(/^IMF_([A-Z0-9]+)_FSI_(CAR|NPL|ROE)$/);
-  if (imfFsiMatch) {
-    const country = IMF_COUNTRY_NAME[imfFsiMatch[1]] || imfFsiMatch[1];
-    return { country, sector: 'financial', category: 'Bank Soundness (IMF FSI)' };
-  }
-  // IMF CPI world/regional aggregates: IMF_{AREA}_CPI_YOY
-  const imfCpiMatch = id.match(/^IMF_(G001|G110|G119|G120|G200|U002|U009|U019|U142|U150)_CPI_YOY$/);
-  if (imfCpiMatch) {
-    return { country: 'Global', sector: 'real', category: 'CPI World & Regional Aggregates (IMF)' };
+  // fetch_imf_multi.R — 21 dataset, doc_id เดียวกันหมด: IMF_{ISO3}_{DATASET_ID}_{suffix}
+  // ครอบคลุมทุก dataset อัตโนมัติ ไม่ต้องเขียน regex แยกทีละตัวแบบเดิม
+  const imfMultiMatch = id.match(IMF_MULTI_RE);
+  if (imfMultiMatch) {
+    const [, iso3, datasetId] = imfMultiMatch;
+    const info = IMF_DATASET_INFO[datasetId];
+    if (info) {
+      const country = IMF_ISO3_NAME[iso3] || iso3;
+      return { country, sector: info.sector, category: info.category };
+    }
   }
   // หมายเหตุ: IMF CPI by-country-category (IMF_{ISO3}_CPI_{00..12}, จาก
   // fetch_imf_cpi.R) ไม่มี branch ที่นี่โดยตั้งใจ — ข้อมูลกลุ่มนี้ไม่เข้า

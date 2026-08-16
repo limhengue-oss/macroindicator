@@ -196,19 +196,35 @@ build_prompt <- function(items) {
 }
 
 call_gemini <- function(prompt, max_retries = 3) {
+  message("Prompt size: ", nchar(prompt), " chars")
+  if (nchar(GEMINI_API_KEY) == 0) stop("GEMINI_API_KEY is empty — check GitHub secret")
+
   for (attempt in seq_len(max_retries)) {
     result <- tryCatch({
       resp <- request("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent") |>
         req_url_query(key = GEMINI_API_KEY) |>
         req_headers("Content-Type" = "application/json") |>
         req_body_json(list(contents = list(list(parts = list(list(text = prompt)))))) |>
-        req_timeout(60) |>
+        req_timeout(90) |>
+        req_error(is_error = function(resp) FALSE) |>  # ไม่ throw เอง — เช็ค status ข้างล่างเพื่อ print body ได้
         req_perform()
       list(ok = TRUE, resp = resp)
     }, error = function(e) {
-      message("Gemini attempt ", attempt, " failed: ", e$message)
+      # error ระดับนี้คือ curl/network fail (DNS, timeout, connection reset) ไม่ใช่ HTTP status
+      message("Gemini attempt ", attempt, " network error: ", conditionMessage(e))
+      if (!is.null(e$parent)) message("  parent: ", conditionMessage(e$parent))
       list(ok = FALSE)
     })
+
+    if (result$ok) {
+      status <- resp_status(result$resp)
+      if (status >= 400) {
+        body_txt <- tryCatch(resp_body_string(result$resp), error = function(e) "(no body)")
+        message("Gemini attempt ", attempt, " HTTP ", status, ": ", substr(body_txt, 1, 500))
+        result$ok <- FALSE
+      }
+    }
+
     if (result$ok) { resp <- result$resp; break }
     if (attempt < max_retries) Sys.sleep(15)
   }
