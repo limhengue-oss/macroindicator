@@ -1,8 +1,13 @@
 name: Fetch Thai Gold Price
 
+# หมายเหตุ 2026-08-16: ปิด cron schedule ถาวร (ไม่ใช่แค่ปิดชั่วคราว) — เว็บ
+# goldtraders.or.th อยู่หลัง Cloudflare ซึ่ง 403 บล็อกทุก request จาก IP ของ
+# GitHub-hosted runner (เช็คแล้วด้วย diagnostic script, เป็น Cloudflare JS
+# challenge page ไม่ใช่ปัญหา header/User-Agent — เปลี่ยน header ไม่ช่วย ต้องใช้
+# browser จริงหรือ IP ที่ไม่ใช่ datacenter เท่านั้นถึงจะผ่าน) ผู้ใช้เลือกรัน
+# fetch_goldth.R เองเป็นระยะจาก local machine แทน (ดู comment ในไฟล์นั้น) —
+# เก็บ workflow_dispatch ไว้เผื่ออนาคตมี self-hosted runner หรือ IP ไม่โดนบล็อกแล้ว
 on:
-  schedule:
-    - cron: '0 11 * * *'   # 18:00 ICT — หลังตลาดทองปิดรอบสุดท้ายของวัน
   workflow_dispatch:
 
 jobs:

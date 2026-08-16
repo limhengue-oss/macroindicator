@@ -3,7 +3,7 @@
 #  ดึงราคาทองคำแท่ง 96.5% ในไทย จาก API ของสมาคมค้าทองคำ (newgta.goldtraders.or.th)
 #  → push ขึ้น Firestore
 #
-#  Endpoint (public, ไม่ต้อง API key, ไม่มี bot-check):
+#  Endpoint (public, ไม่ต้อง API key):
 #    GET https://newgta.goldtraders.or.th/api/GoldPricesDaily/pricechanges
 #        ?StartDate=YYYY-MM-DD&EndDate=YYYY-MM-DD
 #  คืนค่าราคาทุกรอบที่ประกาศปรับ (หลายรอบ/วัน) ไม่ใช่ 1 จุด/วัน — เก็บเป็น
@@ -13,15 +13,22 @@
 #    bL_BuyPrice / bL_SellPrice = ทองคำแท่ง 96.5% ราคารับซื้อ/ขายออก
 #    (บาทต่อน้ำหนัก 1 บาท)
 #
+#  ⚠ หมายเหตุ 2026-08-16 — ต้องรันมือจาก local เท่านั้น (ปิด cron แล้ว):
+#  เว็บ goldtraders.or.th อยู่หลัง Cloudflare ซึ่ง 403 บล็อกทุก request จาก
+#  IP ของ GitHub-hosted Actions runner (ยืนยันแล้วว่าเป็น Cloudflare JS
+#  challenge page ไม่ใช่ปัญหา header/User-Agent) local IP ปกติผ่านได้ไม่มี
+#  ปัญหา — รันเองเป็นระยะผ่าน:
+#    Rscript -e 'source("load_secret.R"); load_secret("GCP_SA_KEY"); source("fetch_goldth.R")'
+#  ดู .github/workflows/fetch-goldth.yml สำหรับรายละเอียดเพิ่มเติม (เหลือ
+#  แค่ workflow_dispatch เผื่ออนาคตมี self-hosted runner)
+#
 #  Environment variables ที่ต้องตั้ง:
 #    GCP_SA_KEY — service account JSON (ทั้งก้อน เป็น string)
 #
-#  รัน local:  Rscript fetch_goldth.R
-#  รัน CI:     GitHub Actions inject env vars จาก Secrets
-#
 #  Backfill: ครั้งแรกดึงเต็มประวัติตั้งแต่ 2007-01-01 (จุดเริ่มต้นจริงของ
-#  ข้อมูลใน API — เช็คแล้วว่าก่อนหน้านั้นไม่มี) แบ่งดึงทีละปีกัน timeout
-#  จากนั้นรอบถัดๆ ไปดึงต่อจากวันล่าสุดที่มีอยู่แค่ช่วงสั้นๆ ทุกวัน
+#  ข้อมูลใน API — เช็คแล้วว่าก่อนหน้านั้นไม่มี) แบ่งดึงทีละปีกัน timeout —
+#  ทำสำเร็จแล้ว 2026-08-16 (23,245 price updates, 6,002 จุด/series)
+#  จากนั้นรอบถัดๆ ไปดึงต่อจากวันล่าสุดที่มีอยู่แค่ช่วงสั้นๆ
 # ══════════════════════════════════════════════════════════════════
 
 .libPaths(c("/home/runner/R-pkgs", .libPaths()))
