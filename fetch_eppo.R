@@ -97,10 +97,27 @@ parse_thai_date_flex <- function(txt) {
   as.character(as.Date(sprintf("%04d-%02d-%02d", year, mon, day)))
 }
 
-do_get <- function(url) {
-  request(url) |>
-    req_headers("User-Agent"="Mozilla/5.0 (Windows NT 10.0; Win64; x64)") |>
-    req_timeout(30) |> req_error(is_error=\(r) FALSE) |> req_perform()
+do_get <- function(url, retries = 2) {
+  # req_error(is_error=FALSE) กัน error เฉพาะ HTTP status (404/500 ฯลฯ) ไม่กัน
+  # network-level error (timeout/DNS/connection reset) — req_perform() ยัง throw
+  # ปกติ ถ้าไม่ดัก ทั้ง source("fetch_eppo.R") จะตายไปด้วย ทำให้แหล่งข้อมูลอื่น
+  # ที่ไม่เกี่ยวกัน (EPPO, Oil Fund status) ไม่ได้รันตาม (เจอเคส OFFO timeout
+  # 2026-08-17) — retry แล้ว fallback เป็น fake response status 599 แทน throw
+  # เพื่อให้ resp_status(resp) != 200 ที่ทุก call site ใช้อยู่แล้วทำงานเหมือนเดิม
+  for (attempt in seq_len(retries + 1)) {
+    resp <- tryCatch(
+      request(url) |>
+        req_headers("User-Agent"="Mozilla/5.0 (Windows NT 10.0; Win64; x64)") |>
+        req_timeout(30) |> req_error(is_error=\(r) FALSE) |> req_perform(),
+      error = function(e) {
+        message("  ✗ network error ดึง ", url, ": ", conditionMessage(e))
+        NULL
+      }
+    )
+    if (!is.null(resp)) return(resp)
+    if (attempt <= retries) Sys.sleep(5)
+  }
+  structure(list(status_code = 599L, url = url), class = "httr2_response")
 }
 
 # ── Firestore auth ────────────────────────────────────────────────
