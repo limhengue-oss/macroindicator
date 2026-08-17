@@ -100,6 +100,9 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkM
 .news-title a { color:var(--text); text-decoration:none; }
 .news-title a:hover { color:var(--blue); }
 .news-summary { font-size:0.78em; color:var(--text2); line-height:1.5; margin-bottom:6px; }
+.news-links { font-size:0.7em; }
+.news-links a { color:var(--blue); text-decoration:none; margin-right:4px; }
+.news-links a:hover { text-decoration:underline; }
 
 /* ── TH Energy page ─────────────────────────────────── */
 .energy-kpi-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(160px,1fr)); gap:8px; margin-bottom:14px; }
@@ -857,13 +860,18 @@ async function fetchNews() {
   const snap = await getDocs(q);
   snap.forEach(d => {
     const data = d.data();
+    // แต่ละ item คือ "กลุ่มข่าว" — ถ้าหลายข่าวพูดเรื่องเดียวกัน Gemini รวม
+    // เป็น punchline เดียว sources[] คือแหล่งข่าวย่อยในกลุ่มนั้น (1 ตัวขึ้นไป)
     const items = (data.news || []).map(n => ({
-      title:      n.title      || '',
+      theme:      n.theme      || 'อื่นๆ',
+      headline:   n.headline   || '',
       summary_th: n.summary_th || '',
-      source:     n.source     || '',
-      url:        n.url        || '',
       why_picked: n.why_picked || '',
-      theme:      n.theme      || 'อื่นๆ'
+      sources:    (n.sources || []).map(s => ({
+        title:  s.title  || '',
+        source: s.source || '',
+        url:    s.url    || ''
+      }))
     }));
     if (items.length) NEWS.push({
       docId:   d.id,
@@ -1788,10 +1796,15 @@ function renderNews() {
       byTheme[theme].forEach(item => {
         const el = document.createElement('div');
         el.className = 'news-item';
+        const sourceNames = item.sources.map(s => s.source).filter(Boolean).join(', ');
+        const sourceLinks = item.sources.map((s, i) =>
+          `<a href="${s.url}" target="_blank" rel="noopener">${s.source || `แหล่งที่ ${i+1}`}</a>`
+        ).join(' · ');
         el.innerHTML = `
-          <div class="news-source">${item.source || 'Unknown'}</div>
-          <div class="news-title"><a href="${item.url}" target="_blank" rel="noopener">${item.title}</a></div>
-          ${item.summary_th ? `<div class="news-summary">${item.summary_th}</div>` : ''}`;
+          <div class="news-source">${sourceNames || 'Unknown'}</div>
+          <div class="news-title">${item.headline || item.summary_th}</div>
+          ${item.summary_th ? `<div class="news-summary">${item.summary_th}</div>` : ''}
+          ${sourceLinks ? `<div class="news-links">${sourceLinks}</div>` : ''}`;
         grid.appendChild(el);
       });
       themeBlock.appendChild(grid);

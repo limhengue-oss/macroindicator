@@ -185,12 +185,19 @@ build_prompt <- function(items) {
     "- ความเกี่ยวข้องกับสงครามการค้า หรือสงครามอิหร่าน/ตะวันออกกลาง\n",
     "- มี surprise factor สูง หรือเปลี่ยน market narrative\n",
     "ตัดข่าว routine, ซ้ำ, หรือ opinion ไม่มี hard news\n\n",
-    "จากนั้นจัดข่าวแต่ละข่าวเข้า theme หนึ่งใน [", theme_list, "] ",
+    "**ถ้าข่าวที่เลือกหลายข่าวพูดถึงเรื่องเดียวกัน (สำนักข่าวหลายเจ้ารายงานเรื่อง\n",
+    "เดียวกัน หรือข่าวต่อเนื่องในประเด็นเดียวกัน) ให้รวมเป็นกลุ่มเดียว เขียนสรุป\n",
+    "แบบ punchline สั้นๆ ครอบคลุมทุกแหล่งในกลุ่มนั้น แทนที่จะแยกสรุปทีละข่าว**\n",
+    "ข่าวที่ไม่เกี่ยวกับข่าวอื่นเลยก็ยังเป็นกลุ่มเดี่ยวได้ (sources มีแค่ 1 รายการ)\n\n",
+    "จากนั้นจัดแต่ละกลุ่มเข้า theme หนึ่งใน [", theme_list, "] ",
     "โดยเลือก theme ที่ตรงที่สุดเพียงอันเดียว ถ้าไม่เข้าพวกไหนเลยให้ใช้ \"อื่นๆ\"\n\n",
-    "ตอบเป็น JSON array เท่านั้น ไม่มี markdown ไม่มี backtick:\n",
-    "[{\"title\":\"...\",\"summary_th\":\"สรุป 3 ประโยคภาษาไทย\",",
-    "\"source\":\"...\",\"url\":\"...\",\"why_picked\":\"เหตุผล 1 ประโยคภาษาไทย\",",
-    "\"theme\":\"...\"}]\n\n",
+    "ตอบเป็น JSON array เท่านั้น ไม่มี markdown ไม่มี backtick ",
+    "โดยแต่ละ element คือ 1 กลุ่มข่าว (1 ข่าวเดี่ยวหรือหลายข่าวที่รวมกัน):\n",
+    "[{\"theme\":\"...\",",
+    "\"headline\":\"พาดหัวรวมสั้นๆ ภาษาไทย ไม่เกิน 15 คำ\",",
+    "\"summary_th\":\"สรุปรวม 2-3 ประโยคภาษาไทย ครอบคลุมทุกข่าวในกลุ่ม แบบ punchline\",",
+    "\"why_picked\":\"เหตุผลที่สำคัญ 1 ประโยคภาษาไทย\",",
+    "\"sources\":[{\"title\":\"...\",\"source\":\"...\",\"url\":\"...\"}]}]\n\n",
     "ข่าว:\n", articles
   )
 }
@@ -237,7 +244,7 @@ call_gemini <- function(prompt, max_retries = 3) {
 
 prompt    <- build_prompt(all_items)
 news_list <- call_gemini(prompt)
-message("Gemini selected ", nrow(news_list), " articles")
+message("Gemini selected ", nrow(news_list), " กลุ่มข่าว")
 
 # ─── 4. Push Firestore ────────────────────────────────────────────────────────
 to_fs <- function(x) {
@@ -252,15 +259,30 @@ to_fs <- function(x) {
 # กัน Gemini ตอบ theme ที่ไม่อยู่ใน THEMES (พิมพ์ผิด/ตั้งชื่อเอง) → fallback "อื่นๆ"
 normalize_theme <- function(t) if (is.null(t) || is.na(t) || !(t %in% THEMES)) "อื่นๆ" else t
 
+# แต่ละ element ของ news_list ตอนนี้คือ "กลุ่มข่าว" (1 ข่าวเดี่ยว หรือหลายข่าว
+# ที่ Gemini รวม punchline เดียวกัน) — r$sources[[1]] คือ data.frame ของ
+# แหล่งข่าวย่อยในกลุ่มนั้น (jsonlite ยุบ nested array เป็น list-column ให้)
 news_array <- lapply(seq_len(nrow(news_list)), function(i) {
   r <- news_list[i, ]
+  cluster_sources <- r$sources[[1]]
+
+  sources_array <- if (!is.null(cluster_sources) && nrow(cluster_sources) > 0) {
+    lapply(seq_len(nrow(cluster_sources)), function(j) {
+      s <- cluster_sources[j, ]
+      list(mapValue = list(fields = list(
+        title  = to_fs(s$title),
+        source = to_fs(s$source),
+        url    = to_fs(s$url)
+      )))
+    })
+  } else list()
+
   list(mapValue = list(fields = list(
-    title      = to_fs(r$title),
+    theme      = to_fs(normalize_theme(r$theme)),
+    headline   = to_fs(r$headline),
     summary_th = to_fs(r$summary_th),
-    source     = to_fs(r$source),
-    url        = to_fs(r$url),
     why_picked = to_fs(r$why_picked),
-    theme      = to_fs(normalize_theme(r$theme))
+    sources    = list(arrayValue = list(values = sources_array))
   )))
 })
 
