@@ -212,7 +212,7 @@ call_gemini <- function(prompt, max_retries = 3) {
         req_url_query(key = GEMINI_API_KEY) |>
         req_headers("Content-Type" = "application/json") |>
         req_body_json(list(contents = list(list(parts = list(list(text = prompt)))))) |>
-        req_timeout(90) |>
+        req_timeout(150) |>  # เพิ่มจาก 90s — prompt clustering ใหม่ทำให้ Gemini คิดนานขึ้น
         req_error(is_error = function(resp) FALSE) |>  # ไม่ throw เอง — เช็ค status ข้างล่างเพื่อ print body ได้
         req_perform()
       list(ok = TRUE, resp = resp)
