@@ -519,6 +519,11 @@ parse_be_yymmdd_filename <- function(txt) {
 # meta/oilfund_status) แทน href ไหนที่ยังไม่เคยเห็นถือว่าใหม่ ไม่ว่า text จะฟอร์แมตแบบไหน
 #
 # หน้านี้ไม่มี pagination — แสดงรายการของปีปัจจุบันทั้งหมดในหน้าเดียว เรียงใหม่ → เก่า
+#
+# href ใหม่บนหน้านี้ไม่ได้แปลว่าเป็น "ข้อมูลใหม่" เสมอไป (อาจเป็นไฟล์แนบอื่นที่ไม่ใช่
+# รายงานฐานะกองทุน) — ขั้นแรกกรองแค่ลิงก์ที่เป็นไฟล์ .pdf จริงๆ (นามสกุลไฟล์) ก่อน ส่วนการ
+# เช็คว่าเนื้อหาข้างในใช่รายงานฐานะกองทุนจริงไหม (มีหัวข้อ + ตารางฐานะกองทุนสุทธิ) ทำใน
+# parse_fund_pdf() หลังดาวน์โหลดมาแล้ว
 fund_scrape_pending <- function(known_hrefs) {
   resp <- do_get(FUND_STATUS_LIST)
   if (resp_status(resp) != 200) { message("  HTTP ", resp_status(resp), " — stop"); return(list(pending=list(), all_hrefs=known_hrefs)) }
@@ -530,6 +535,10 @@ fund_scrape_pending <- function(known_hrefs) {
     if (is.na(href) || href == "") next
     all_hrefs <- c(all_hrefs, href)
     if (href %in% known_hrefs) next
+    if (!str_detect(tolower(href), "\\.pdf(\\?|$)")) {
+      message(sprintf("  ⚠ ไม่ใช่ไฟล์ .pdf — ข้าม: %s", href))
+      next
+    }
     pending[[length(pending)+1]] <- list(href=href, text=html_text(node, trim=TRUE))
   }
   list(pending=rev(pending), all_hrefs=unique(c(known_hrefs, all_hrefs)))  # rev: หน้าเว็บใหม่→เก่า กลับเป็นเก่า→ใหม่
@@ -549,7 +558,16 @@ extract_pdf_date <- function(text) {
   NA_character_
 }
 
-# ดาวน์โหลด pdf → อ่านค่า ฐานะกองทุนสุทธิ (net_oil, net_lpg, net_total) + วันที่ในไฟล์
+# ยืนยันว่าไฟล์ pdf ที่ดาวน์โหลดมาเป็นรายงาน "ประมาณการฐานะกองทุนน้ำมัน" จริง ไม่ใช่ไฟล์อื่น
+# ที่บังเอิญมีนามสกุล .pdf — เช็คหัวข้อรายงาน + คำ "ฐานะกองทุนสุทธิ" ที่นำหน้าตารางตัวเลข
+is_fund_status_pdf <- function(text) {
+  has_title <- str_detect(text, "ประมาณการฐานะกองทุน|ฐานะกองทุนน้ำมัน")
+  has_table <- str_detect(text, "ฐานะกองทุน\\s*สุทธิ\\s+-?[\\d,]+")
+  has_title && has_table
+}
+
+# ดาวน์โหลด pdf → เช็ค pattern ว่าเป็นรายงานฐานะกองทุนจริง → อ่านค่า ฐานะกองทุนสุทธิ
+# (net_oil, net_lpg, net_total) + วันที่ในไฟล์
 parse_fund_pdf <- function(href) {
   resp <- do_get(href)
   if (resp_status(resp) != 200) { message("  ✗ HTTP ", resp_status(resp)); return(NULL) }
@@ -558,6 +576,10 @@ parse_fund_pdf <- function(href) {
   text <- tryCatch(pdf_text(tmp) |> paste(collapse="\n"), error=function(e) NA_character_)
   unlink(tmp)
   if (is.na(text)) { message("  ✗ pdf_text failed"); return(NULL) }
+  if (!is_fund_status_pdf(text)) {
+    message("  ⚠ ไม่ใช่รายงานฐานะกองทุน (ไม่พบหัวข้อ/ตารางที่คาดไว้) — ข้าม")
+    return(NULL)
+  }
   m <- str_match(text, "ฐานะกองทุน\\s*สุทธิ\\s+(-?[\\d,]+)\\s+(-?[\\d,]+)\\s+(-?[\\d,]+)")
   if (is.na(m[1])) { message("  ✗ net fund pattern not found"); return(NULL) }
   list(
