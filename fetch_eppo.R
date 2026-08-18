@@ -500,26 +500,56 @@ download_and_parse <- function(pending, meta_products = NULL, strict = TRUE) {
   list(df=if (length(all_rows)>0) bind_rows(all_rows) else NULL, latest=latest)
 }
 
-# ── Oil Fund status (ฐานะกองทุนน้ำมันเชื้อเพลิง) ────────────────────
-# หน้านี้ไม่มี pagination — แสดงรายการของปีปัจจุบันทั้งหมดในหน้าเดียว
-# วันที่ (ณ วันที่ ...) อยู่ใน text ของ <a> เอง ไม่ต้องงมหา parent node
-fund_scrape_pending <- function(last_date) {
-  resp <- do_get(FUND_STATUS_LIST)
-  if (resp_status(resp) != 200) { message("  HTTP ", resp_status(resp), " — stop"); return(list()) }
-  html  <- resp_body_string(resp) |> read_html()
-  nodes <- html |> html_elements("a[href*='.pdf'], a[href*='.png'], a[href*='.jpg'], a[href*='.jpeg']")
-  pending <- list()
-  for (node in nodes) {
-    wd_str <- parse_thai_date_flex(html_text(node, trim=TRUE))
-    if (is.na(wd_str)) next
-    wd <- as.Date(wd_str)
-    if (is.na(wd) || wd <= last_date) next
-    pending[[length(pending)+1]] <- list(date=wd, href=html_attr(node, "href"))
-  }
-  pending[order(map_dbl(pending, \(x) as.numeric(x$date)))]
+# บาง link text ไม่ใช่ "ณ วันที่ ..." แบบเดิม แต่เป็นชื่อไฟล์ดิบเช่น
+# "ฐานะกองทุน ส่ง สนพ 69-08-16.pdf" (เจอตั้งแต่ไฟล์ 16 ส.ค. 2569) — ไม่มีชื่อเดือนไทย
+# ให้ parse_thai_date_flex() จับได้ แต่ href ยังฝังวันที่ พ.ศ. 2 หลักรูปแบบ YY-MM-DD
+# ไว้ท้ายชื่อไฟล์เสมอ (ทั้งไฟล์เก่าและใหม่) ใช้เป็น fallback
+parse_be_yymmdd_filename <- function(txt) {
+  m <- str_match(txt, "(\\d{2})-(\\d{2})-(\\d{2})\\.\\w+$")
+  if (is.na(m[1])) return(NA_character_)
+  yy <- as.integer(m[2]); mo <- as.integer(m[3]); dd <- as.integer(m[4])
+  if (mo < 1 || mo > 12 || dd < 1 || dd > 31) return(NA_character_)
+  year <- yy + 2500 - 543
+  as.character(as.Date(sprintf("%04d-%02d-%02d", year, mo, dd)))
 }
 
-# ดาวน์โหลด pdf → อ่านค่า ฐานะกองทุนสุทธิ (net_oil, net_lpg, net_total)
+# วันที่บนหน้า "ฐานะกองทุนน้ำมันเชื้อเพลิง" ของ OFFO เปลี่ยน format ของ link text/
+# filename ได้เรื่อยๆ (เจอมาแล้ว 2 แบบ) เลยไม่ใช้การ parse วันที่จาก text มาตัดสินว่า
+# ไฟล์ไหน "ใหม่" อีกต่อไป — ใช้วิธีจำ href ที่เคยประมวลผลแล้วไว้ใน known_hrefs (Firestore
+# meta/oilfund_status) แทน href ไหนที่ยังไม่เคยเห็นถือว่าใหม่ ไม่ว่า text จะฟอร์แมตแบบไหน
+#
+# หน้านี้ไม่มี pagination — แสดงรายการของปีปัจจุบันทั้งหมดในหน้าเดียว เรียงใหม่ → เก่า
+fund_scrape_pending <- function(known_hrefs) {
+  resp <- do_get(FUND_STATUS_LIST)
+  if (resp_status(resp) != 200) { message("  HTTP ", resp_status(resp), " — stop"); return(list(pending=list(), all_hrefs=known_hrefs)) }
+  html  <- resp_body_string(resp) |> read_html()
+  nodes <- html |> html_elements("a[href*='.pdf'], a[href*='.png'], a[href*='.jpg'], a[href*='.jpeg']")
+  pending <- list(); all_hrefs <- c()
+  for (node in nodes) {
+    href <- html_attr(node, "href")
+    if (is.na(href) || href == "") next
+    all_hrefs <- c(all_hrefs, href)
+    if (href %in% known_hrefs) next
+    pending[[length(pending)+1]] <- list(href=href, text=html_text(node, trim=TRUE))
+  }
+  list(pending=rev(pending), all_hrefs=unique(c(known_hrefs, all_hrefs)))  # rev: หน้าเว็บใหม่→เก่า กลับเป็นเก่า→ใหม่
+}
+
+# หาวันที่ในเนื้อหา PDF เอง (ฝังคำว่า "วันที่" ตามด้วยวันที่แบบไทย เช่น "16 ส.ค. 69")
+# เสถียรกว่า link text/filename บนเว็บเพราะไม่ขึ้นกับที่ OFFO เปลี่ยนวิธีตั้งชื่อไฟล์
+extract_pdf_date <- function(text) {
+  lines <- str_split(text, "\n")[[1]]
+  idx <- which(str_detect(lines, "วันที่"))
+  for (i in idx) {
+    for (j in i:min(i + 2, length(lines))) {
+      d <- parse_thai_date_flex(lines[j])
+      if (!is.na(d)) return(d)
+    }
+  }
+  NA_character_
+}
+
+# ดาวน์โหลด pdf → อ่านค่า ฐานะกองทุนสุทธิ (net_oil, net_lpg, net_total) + วันที่ในไฟล์
 parse_fund_pdf <- function(href) {
   resp <- do_get(href)
   if (resp_status(resp) != 200) { message("  ✗ HTTP ", resp_status(resp)); return(NULL) }
@@ -533,7 +563,8 @@ parse_fund_pdf <- function(href) {
   list(
     net_oil   = as.numeric(str_remove_all(m[2], ",")),
     net_lpg   = as.numeric(str_remove_all(m[3], ",")),
-    net_total = as.numeric(str_remove_all(m[4], ","))
+    net_total = as.numeric(str_remove_all(m[4], ",")),
+    date      = extract_pdf_date(text)
   )
 }
 
@@ -712,30 +743,39 @@ fund_meta_url  <- sprintf(
 )
 fund_meta_resp <- request(fund_meta_url) |> req_auth_bearer_token(token) |>
   req_error(is_error=\(r) FALSE) |> req_perform()
-fund_last_date <- if (resp_status(fund_meta_resp) == 200) {
-  as.Date(resp_body_json(fund_meta_resp)$fields$last_date$stringValue)
-} else {
-  message("  meta/oilfund_status ไม่พบ — จะสร้างใหม่ (default last_date = 2000-01-01)")
-  as.Date("2000-01-01")
-}
-message(sprintf("  last_date = %s", fund_last_date))
+fund_meta_fields <- if (resp_status(fund_meta_resp) == 200) resp_body_json(fund_meta_resp)$fields else NULL
+fund_last_date <- tryCatch(as.Date(fund_meta_fields$last_date$stringValue), error=function(e) NA) %||% as.Date("2000-01-01")
+fund_known_hrefs <- tryCatch(
+  map_chr(fund_meta_fields$known_hrefs$arrayValue$values, \(v) v$stringValue),
+  error=function(e) character()
+)
+if (is.null(fund_meta_fields)) message("  meta/oilfund_status ไม่พบ — จะสร้างใหม่")
+message(sprintf("  last_date = %s, known_hrefs = %d ไฟล์", fund_last_date, length(fund_known_hrefs)))
 
-fund_pending <- fund_scrape_pending(fund_last_date)
-message(sprintf("  %d new file(s)", length(fund_pending)))
+scrape_result <- fund_scrape_pending(fund_known_hrefs)
+fund_pending  <- scrape_result$pending
+message(sprintf("  %d new file(s) (href ที่ยังไม่เคยประมวลผล)", length(fund_pending)))
 
 if (length(fund_pending) > 0) {
-  fund_rows  <- list()
+  fund_rows   <- list()
   fund_latest <- fund_last_date
   for (item in fund_pending) {
-    message(sprintf("  [%s]", item$date))
+    message(sprintf("  [%s]", item$href))
     vals <- parse_fund_pdf(item$href)
     if (is.null(vals)) next
+    # ลำดับความน่าเชื่อถือ: วันที่ในเนื้อหา PDF เอง > link text บนเว็บ > ชื่อไฟล์ใน href
+    wd_str <- vals$date
+    if (is.na(wd_str)) wd_str <- parse_thai_date_flex(item$text)
+    if (is.na(wd_str)) wd_str <- parse_be_yymmdd_filename(utils::URLdecode(item$href))
+    if (is.na(wd_str)) { message("  ✗ หาวันที่ไม่เจอ (PDF/link text/filename) — ข้าม แต่ยังจำ href นี้ไว้กันประมวลผลซ้ำ"); next }
+    wd <- as.Date(wd_str)
+    if (is.na(wd)) next
     fund_rows[[length(fund_rows)+1]] <- data.frame(
-      date=as.character(item$date), net_oil=vals$net_oil,
+      date=as.character(wd), net_oil=vals$net_oil,
       net_lpg=vals$net_lpg, net_total=vals$net_total
     )
-    fund_latest <- item$date
-    message("  ✓ parsed")
+    if (is.na(fund_latest) || wd > fund_latest) fund_latest <- wd
+    message(sprintf("  ✓ parsed date=%s", wd))
     Sys.sleep(DELAY)
   }
   if (length(fund_rows) > 0) {
@@ -747,17 +787,21 @@ if (length(fund_pending) > 0) {
       if (nrow(df_s) == 0) next
       upsert_series(token, s$doc_id, s$name, df_s)
     }
-    fund_meta_body <- list(fields=list(
-      last_date = list(stringValue=as.character(fund_latest)),
-      updated   = list(stringValue=format(Sys.time(),"%Y-%m-%dT%H:%M:%SZ",tz="UTC"))
-    ))
-    fund_meta_patch <- request(fund_meta_url) |> req_method("PATCH") |>
-      req_auth_bearer_token(token) |>
-      req_body_json(fund_meta_body, auto_unbox=TRUE) |>
-      req_error(is_error=\(r) FALSE) |> req_perform()
-    if (resp_status(fund_meta_patch) < 300) message(sprintf("  ✓ oilfund last_date → %s", fund_latest))
-    else message(sprintf("  ✗ meta patch HTTP %d", resp_status(fund_meta_patch)))
   }
+  # อัปเดต known_hrefs เสมอ (แม้บาง href parse วันที่ไม่ได้) กันไม่ให้ประมวลผลไฟล์เดิมซ้ำทุกรอบ
+  fund_meta_body <- list(fields=list(
+    last_date   = list(stringValue=as.character(fund_latest)),
+    known_hrefs = list(arrayValue=list(values=map(as.list(scrape_result$all_hrefs), \(h) list(stringValue=h)))),
+    updated     = list(stringValue=format(Sys.time(),"%Y-%m-%dT%H:%M:%SZ",tz="UTC"))
+  ))
+  fund_meta_patch <- request(fund_meta_url) |>
+    req_url_query(`updateMask.fieldPaths`=c("last_date","known_hrefs","updated"), .multi="explode") |>
+    req_method("PATCH") |>
+    req_auth_bearer_token(token) |>
+    req_body_json(fund_meta_body, auto_unbox=TRUE) |>
+    req_error(is_error=\(r) FALSE) |> req_perform()
+  if (resp_status(fund_meta_patch) < 300) message(sprintf("  ✓ oilfund last_date → %s (known_hrefs: %d)", fund_latest, length(scrape_result$all_hrefs)))
+  else message(sprintf("  ✗ meta patch HTTP %d", resp_status(fund_meta_patch)))
 }
 
 # ── Step 4: Daily report gating ──────────────────────────────────
