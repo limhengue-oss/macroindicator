@@ -8,6 +8,7 @@ on:
 jobs:
   fetch-and-push:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     steps:
       - name: Checkout
@@ -20,8 +21,12 @@ jobs:
           use-public-rspm: true
 
       - name: Install system deps (pdftools)
+        # apt mirror (azure.archive.ubuntu.com) เคยค้างไม่ตอบสนองแล้ว job แขวนหลายชม.
+        # เพราะ apt-get ไม่มี timeout ของตัวเอง — ใส่ Acquire options ให้ fail เร็วแทน
+        # แขวนเงียบๆ (retry เอง 3 ครั้ง, timeout ต่อ connection 15s) บวก job-level
+        # timeout-minutes ด้านบนเป็นตาข่ายรองรับอีกชั้น
         run: |
-          sudo apt-get update
+          sudo apt-get update -o Acquire::Retries=3 -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15
           sudo apt-get install -y libpoppler-cpp-dev
 
       - name: Install and run

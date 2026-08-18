@@ -9,6 +9,7 @@ on:
 jobs:
   fetch-news:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     steps:
       - uses: actions/checkout@v4
@@ -25,7 +26,11 @@ jobs:
           use-public-rspm: true
 
       - name: Install R packages
+        # options(timeout=...) กัน download มะรื่ออก (CRAN/RSPM mirror ค้าง) จาก
+        # การแขวนไม่มีกำหนด — ค่า default ของ R (60s) มักสั้นไปสำหรับ package ใหญ่
+        # แต่ก็ต้องมี upper bound ชัดเจน ไม่ใช่ไม่มีเลย
         run: |
+          options(timeout = 120)
           install.packages(c("httr2", "xml2", "jsonlite", "dplyr"))
         shell: Rscript {0}
 
