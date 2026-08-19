@@ -72,10 +72,8 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkM
 
 /* ── Mobile: font ปกติ, 1 column, portrait only ── */
 /* ── News page ──────────────────────────────────────── */
-.news-day { margin-bottom:18px; }
-.news-day-header { font-size:0.72em; color:var(--text3); text-transform:uppercase; letter-spacing:0.06em; padding:4px 0; border-bottom:1px solid var(--border); margin-bottom:10px; max-width:1200px; margin-left:auto; margin-right:auto; }
-.news-theme-block { margin-bottom:14px; }
-.news-theme-header { font-size:0.76em; font-weight:600; color:var(--blue); padding:2px 0; margin-bottom:8px; max-width:1200px; margin-left:auto; margin-right:auto; }
+.news-day { margin-bottom:14px; }
+.news-day-header { font-size:0.72em; color:var(--text3); text-transform:uppercase; letter-spacing:0.06em; padding:3px 0; border-bottom:1px solid var(--border); margin-bottom:6px; max-width:1200px; margin-left:auto; margin-right:auto; }
 .energy-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:22px; max-width:1200px; margin:0 auto; padding:0 16px; }
 @media (max-width:700px), (orientation:portrait) and (max-width:1024px) { .energy-grid { grid-template-columns:1fr; } }
 /* ตอน export PDF: เหลือแค่ 2 การ์ด (Diesel, Gasohol 95) วาง 2 คอลัมน์ให้พอดี A4 แนวนอน 1 หน้า */
@@ -93,16 +91,16 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkM
   .energy-hero-grid > .card { border-right:none; border-bottom:1px solid var(--border); }
   .energy-hero-grid > .card:last-child { border-bottom:none; }
 }
-.news-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:20px; margin-bottom:18px; max-width:1200px; margin-left:auto; margin-right:auto; }
-@media (max-width: 700px) { .news-grid { grid-template-columns:1fr; } }
-.news-source { font-size:0.68em; color:var(--blue); text-transform:uppercase; letter-spacing:0.04em; margin-bottom:4px; }
-.news-title { font-size:0.82em; font-weight:600; margin-bottom:6px; line-height:1.4; }
-.news-title a { color:var(--text); text-decoration:none; }
-.news-title a:hover { color:var(--blue); }
-.news-summary { font-size:0.78em; color:var(--text2); line-height:1.5; margin-bottom:6px; }
-.news-links { font-size:0.7em; }
-.news-links a { color:var(--blue); text-decoration:none; margin-right:4px; }
-.news-links a:hover { text-decoration:underline; }
+.news-list { list-style:none; margin:0 0 4px; padding:0; max-width:1200px; margin-left:auto; margin-right:auto; }
+.news-bullet { font-size:0.82em; line-height:1.55; padding:4px 0 4px 16px; position:relative; color:var(--text); border-bottom:1px solid var(--border); }
+.news-bullet:last-child { border-bottom:none; }
+.news-bullet::before { content:'•'; position:absolute; left:0; color:var(--text3); }
+.news-tag { display:inline-block; font-size:0.85em; color:var(--blue); margin-left:4px; white-space:nowrap; }
+.news-tooltip { display:none; position:fixed; z-index:400; max-width:360px; background:var(--bg2); border:1px solid var(--border2); border-radius:6px; box-shadow:var(--card-shadow); padding:10px 12px; font-size:0.76em; line-height:1.5; pointer-events:none; }
+.news-tooltip-item { padding:5px 0; border-bottom:1px solid var(--border); }
+.news-tooltip-item:last-child { border-bottom:none; }
+.news-tooltip-headline { color:var(--text); }
+.news-tooltip-source { color:var(--text3); font-size:0.9em; margin-top:2px; }
 
 /* ── TH Energy page ─────────────────────────────────── */
 .energy-kpi-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(160px,1fr)); gap:8px; margin-bottom:14px; }
@@ -380,6 +378,8 @@ input[type=range] { width:80px; accent-color:var(--blue); }
     </div>
   </div>
 </div>
+
+<div id="news-tooltip" class="news-tooltip"></div>
 
 <!-- META POPUP -->
 <div id="meta-popup" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:300;align-items:center;justify-content:center;padding:20px" onclick="if(event.target===this)closeMeta()">
@@ -1746,15 +1746,8 @@ window.closeMeta = closeMeta;
 window.openStructureModal = openStructureModal;
 window.closeStructureModal = closeStructureModal;
 
-// ลำดับ theme สำหรับแสดงผล ให้ตรงกับ THEMES ใน news-pipeline/fetch_news.R
-const NEWS_THEME_ORDER = [
-  'สงครามการค้า',
-  'สงครามอิหร่าน',
-  'Fed/ดอกเบี้ย/เงินเฟ้อ',
-  'เศรษฐกิจไทย/SEA',
-  'ตลาดทุน/SET',
-  'อื่นๆ'
-];
+const NEWS_BULLETS_PER_SESSION = 10;
+const SESSION_LABEL = { morning: 'เช้า', afternoon: 'บ่าย' };
 
 function renderNews() {
   const container = document.getElementById('news-container');
@@ -1762,57 +1755,52 @@ function renderNews() {
   if (!NEWS.length) { container.innerHTML = '<div class="empty">ยังไม่มีข้อมูล news</div>'; return; }
 
   container.innerHTML = '';
-  // group by date
-  const byDate = {};
-  NEWS.forEach(doc => {
-    if (!byDate[doc.date]) byDate[doc.date] = [];
-    byDate[doc.date].push(...doc.news);
-  });
 
-  // แสดงแค่ NEWS_DAYS_SHOWN วันล่าสุด
-  Object.keys(byDate).sort().reverse().slice(0, NEWS_DAYS_SHOWN).forEach(date => {
-    const dt = new Date(date + 'T00:00:00Z');
-    const label = dt.toLocaleDateString('en-US', {weekday:'long', day:'numeric', month:'long', year:'numeric', timeZone:'UTC'});
+  // แสดงแค่ NEWS_DAYS_SHOWN วัน x 2 รอบ/วัน ล่าสุด (NEWS เรียง docId ใหม่→เก่าอยู่แล้ว)
+  NEWS.slice(0, NEWS_DAYS_SHOWN * 2).forEach(doc => {
+    const dt = new Date(doc.date + 'T00:00:00Z');
+    const dateLabel = dt.toLocaleDateString('en-US', {weekday:'long', day:'numeric', month:'long', year:'numeric', timeZone:'UTC'});
+    const sessionLabel = SESSION_LABEL[doc.session] || doc.session;
+
     const section = document.createElement('div');
     section.className = 'news-day';
-    section.innerHTML = `<div class="news-day-header">${label}</div>`;
+    section.innerHTML = `<div class="news-day-header">${dateLabel}${sessionLabel ? ' · ' + sessionLabel : ''}</div>`;
 
-    // group ข่าวในวันนั้นตาม theme เรียงตาม NEWS_THEME_ORDER
-    const byTheme = {};
-    byDate[date].forEach(item => {
-      const t = item.theme || 'อื่นๆ';
-      if (!byTheme[t]) byTheme[t] = [];
-      byTheme[t].push(item);
+    const list = document.createElement('ul');
+    list.className = 'news-list';
+    doc.news.slice(0, NEWS_BULLETS_PER_SESSION).forEach(item => {
+      const li = document.createElement('li');
+      li.className = 'news-bullet';
+      const text = item.summary_th || item.headline;
+      li.innerHTML = `${text} <span class="news-tag">#${item.theme.replace(/\s+/g,'')}</span>`;
+      if (item.sources && item.sources.length) attachNewsTooltip(li, item.sources);
+      list.appendChild(li);
     });
-    Object.keys(byTheme).sort((a, b) => {
-      const ia = NEWS_THEME_ORDER.indexOf(a), ib = NEWS_THEME_ORDER.indexOf(b);
-      return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib);
-    }).forEach(theme => {
-      const themeBlock = document.createElement('div');
-      themeBlock.className = 'news-theme-block';
-      themeBlock.innerHTML = `<div class="news-theme-header">${theme}</div>`;
-      const grid = document.createElement('div');
-      grid.className = 'news-grid';
-      byTheme[theme].forEach(item => {
-        const el = document.createElement('div');
-        el.className = 'news-item';
-        const sourceNames = item.sources.map(s => s.source).filter(Boolean).join(', ');
-        const sourceLinks = item.sources.map((s, i) =>
-          `<a href="${s.url}" target="_blank" rel="noopener">${s.source || `แหล่งที่ ${i+1}`}</a>`
-        ).join(' · ');
-        el.innerHTML = `
-          <div class="news-source">${sourceNames || 'Unknown'}</div>
-          <div class="news-title">${item.headline || item.summary_th}</div>
-          ${item.summary_th ? `<div class="news-summary">${item.summary_th}</div>` : ''}
-          ${sourceLinks ? `<div class="news-links">${sourceLinks}</div>` : ''}`;
-        grid.appendChild(el);
-      });
-      themeBlock.appendChild(grid);
-      section.appendChild(themeBlock);
-    });
+    section.appendChild(list);
 
     container.appendChild(section);
   });
+}
+
+// hover บน bullet ข่าว → popup ลอยแสดงพาดหัวต้นฉบับ + แหล่งข่าว (ภาษาตาม source เดิม ไม่แปล)
+function attachNewsTooltip(el, sources) {
+  const tip = document.getElementById('news-tooltip');
+  el.addEventListener('mouseenter', () => {
+    tip.innerHTML = sources.map(s => `
+      <div class="news-tooltip-item">
+        <div class="news-tooltip-headline">${s.title || ''}</div>
+        <div class="news-tooltip-source">${s.url ? `<a href="${s.url}" target="_blank" rel="noopener">${s.source || 'แหล่งข่าว'}</a>` : (s.source || 'แหล่งข่าว')}</div>
+      </div>`).join('');
+    tip.style.display = 'block';
+    const r = el.getBoundingClientRect();
+    const top = r.bottom + 6;
+    let left = r.left;
+    const maxLeft = window.innerWidth - tip.offsetWidth - 12;
+    if (left > maxLeft) left = Math.max(12, maxLeft);
+    tip.style.top = top + 'px';
+    tip.style.left = left + 'px';
+  });
+  el.addEventListener('mouseleave', () => { tip.style.display = 'none'; });
 }
 
 // refresh news ถ้ากำลังดูอยู่

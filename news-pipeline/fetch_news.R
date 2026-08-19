@@ -211,8 +211,14 @@ call_gemini <- function(prompt, max_retries = 3) {
       resp <- request("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent") |>
         req_url_query(key = GEMINI_API_KEY) |>
         req_headers("Content-Type" = "application/json") |>
-        req_body_json(list(contents = list(list(parts = list(list(text = prompt)))))) |>
-        req_timeout(150) |>  # เพิ่มจาก 90s — prompt clustering ใหม่ทำให้ Gemini คิดนานขึ้น
+        req_body_json(list(
+          contents = list(list(parts = list(list(text = prompt)))),
+          # gemini-2.5-flash เปิด "thinking" เป็น default — งาน clustering/summarize
+          # นี้ไม่ต้องการ deep reasoning ขนาดนั้น แต่กลับกินเวลาคิดจนเกิน timeout แม้ 150s
+          # (เห็น 0 bytes received แปลว่าโมเดลยังไม่เริ่มตอบเลย ไม่ใช่ network fail) ปิดไปเลย
+          generationConfig = list(thinkingConfig = list(thinkingBudget = 0))
+        )) |>
+        req_timeout(180) |>  # buffer เผื่อไว้ แม้ปิด thinking แล้วก็ตาม
         req_error(is_error = function(resp) FALSE) |>  # ไม่ throw เอง — เช็ค status ข้างล่างเพื่อ print body ได้
         req_perform()
       list(ok = TRUE, resp = resp)
