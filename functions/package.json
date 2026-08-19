@@ -1,0 +1,13 @@
+{
+  "name": "functions",
+  "description": "LINE webhook -> parse PEIT oil price broadcast -> Firestore",
+  "engines": {
+    "node": "20"
+  },
+  "main": "index.js",
+  "dependencies": {
+    "firebase-admin": "^14.2.0",
+    "firebase-functions": "^7.3.2"
+  },
+  "private": true
+}
