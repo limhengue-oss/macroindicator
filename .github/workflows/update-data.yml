@@ -23,14 +23,26 @@ jobs:
       - name: Install system deps (pdftools)
         # apt mirror (azure.archive.ubuntu.com) เคยค้างไม่ตอบสนองแล้ว job แขวนหลายชม.
         # เพราะ apt-get ไม่มี timeout ของตัวเอง — ใส่ Acquire options ให้ fail เร็วแทน
-        # แขวนเงียบๆ (retry เอง 3 ครั้ง, timeout ต่อ connection 15s) บวก job-level
-        # timeout-minutes ด้านบนเป็นตาข่ายรองรับอีกชั้น
+        # แขวนเงียบๆ (retry เอง 3 ครั้ง, timeout ต่อ connection 15s) แต่พบว่า Acquire
+        # timeout ไม่ครอบคลุมกรณี transfer ค้างกลางทาง (connect ผ่านแล้วแต่ data
+        # หยุดไหลกลางคัน) — เจอเคสจริง 2026-08-19 ที่ apt-get update ค้าง ~29 นาที
+        # หลัง "Get" เริ่ม download แล้วไม่จบ จนชน job-level timeout ทั้ง job (30 นาที)
+        # โดยที่ Rscript ยังไม่ทันเริ่มรันเลย — ห่อด้วย `timeout` ของ shell (บังคับ
+        # kill จริงไม่สนใจ apt's internal timeout) + step-level timeout-minutes กันไม่
+        # ให้ step เดียวกินเวลาทั้ง job budget
+        id: sysdeps
+        continue-on-error: true
+        timeout-minutes: 5
         run: |
-          sudo apt-get update -o Acquire::Retries=3 -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15
-          sudo apt-get install -y libpoppler-cpp-dev
+          timeout 180 sudo apt-get update -o Acquire::Retries=3 -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15
+          timeout 180 sudo apt-get install -y libpoppler-cpp-dev
 
       - name: Install and run
         id: run
+        # ถ้า apt (sysdeps) fail/timeout ไป pdftools จะ build/load ไม่ได้อยู่ดี — ข้าม
+        # ไปเลยแทนที่จะปล่อยให้ Rscript พังคาไว้กลางทาง จะได้ error message ที่ชัดเจน
+        # กว่าจากขั้นตอน summarize/email แทน
+        if: steps.sysdeps.outcome == 'success'
         continue-on-error: true
         env:
           FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
@@ -62,11 +74,11 @@ jobs:
         if: always()
         id: summary
         run: |
-          SKIPPED=$(grep -E "skip ทั้งไฟล์|missing products|HEADER_MISMATCH" run.log || true)
-          CHANGES=$(grep -E "^PRICE_CHANGE:" run.log || true)
-          FRESH=$(grep -E "^STALE_CHECK:" run.log || true)
-          STALE=$(grep -E "^STALE_ALERT:" run.log || true)
-          DAILY_DUE=$(grep -E "^DAILY_REPORT_DUE: true" run.log || true)
+          SKIPPED=$(grep -E "skip ทั้งไฟล์|missing products|HEADER_MISMATCH" run.log 2>/dev/null || true)
+          CHANGES=$(grep -E "^PRICE_CHANGE:" run.log 2>/dev/null || true)
+          FRESH=$(grep -E "^STALE_CHECK:" run.log 2>/dev/null || true)
+          STALE=$(grep -E "^STALE_ALERT:" run.log 2>/dev/null || true)
+          DAILY_DUE=$(grep -E "^DAILY_REPORT_DUE: true" run.log 2>/dev/null || true)
           {
             echo "skipped<<EOF"
             if [ -n "$SKIPPED" ]; then echo "$SKIPPED"; else echo "(none)"; fi
@@ -75,7 +87,7 @@ jobs:
             if [ -n "$CHANGES" ]; then echo "$CHANGES"; else echo "(none)"; fi
             echo "EOF"
             echo "freshness<<EOF"
-            if [ -n "$FRESH" ]; then echo "$FRESH"; else echo "(ไม่พบ log — อาจ error ก่อนถึงขั้นตอนนี้)"; fi
+            if [ -n "$FRESH" ]; then echo "$FRESH"; else echo "(ไม่พบ log — fetch script ยังไม่ทันรันถึงขั้นตอนนี้)"; fi
             echo "EOF"
             echo "stale<<EOF"
             if [ -n "$STALE" ]; then echo "$STALE"; else echo "(none — ข้อมูลยังไม่ล่าช้าเกินเกณฑ์)"; fi
@@ -85,8 +97,23 @@ jobs:
           if [ -n "$CHANGES" ]; then echo "has_change=true" >> "$GITHUB_OUTPUT"; else echo "has_change=false" >> "$GITHUB_OUTPUT"; fi
           if [ -n "$DAILY_DUE" ]; then echo "daily_due=true" >> "$GITHUB_OUTPUT"; else echo "daily_due=false" >> "$GITHUB_OUTPUT"; fi
 
+      - name: Determine overall status
+        if: always()
+        id: status
+        run: |
+          if [ "${{ steps.sysdeps.outcome }}" != "success" ]; then
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "label=❌ FAILED (apt-get ติดตั้ง system deps ไม่สำเร็จ/ค้าง — ดู step \"Install system deps\")" >> "$GITHUB_OUTPUT"
+          elif [ "${{ steps.run.outcome }}" != "success" ]; then
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "label=❌ FAILED (fetch script error — ดู run.log)" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+            echo "label=✅ SUCCESS" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Send notification email
-        if: always() && (steps.run.outcome != 'success' || steps.summary.outputs.has_skip == 'true' || steps.summary.outputs.has_change == 'true' || steps.summary.outputs.daily_due == 'true')
+        if: always() && (steps.status.outputs.ok != 'true' || steps.summary.outputs.has_skip == 'true' || steps.summary.outputs.has_change == 'true' || steps.summary.outputs.daily_due == 'true')
         uses: dawidd6/action-send-mail@v3
         with:
           server_address: smtp.gmail.com
@@ -95,23 +122,37 @@ jobs:
           password: ${{ secrets.GMAIL_APP_PASSWORD }}
           from: ${{ secrets.GMAIL_USER }}
           to: limhengue@gmail.com, wasinr@bot.or.th
-          subject: "[macroindicator] Update Data — ${{ steps.run.outcome == 'success' && 'SUCCESS' || 'FAILED' }}"
+          subject: "[macroindicator] Update Data — ${{ steps.status.outputs.ok == 'true' && 'SUCCESS' || 'FAILED' }}"
+          convert_markdown: true
           body: |
-            fetch_and_push.R / fetch_eppo.R run: ${{ steps.run.outcome }}
+            # 🛢️ Macroindicator — ${{ steps.status.outputs.label }}
 
-            รายงานความสด (OFFO/EPPO oil price) — รอบแรกของวันนี้:
+            | ขั้นตอน | สถานะ |
+            |---|---|
+            | Install system deps (apt) | ${{ steps.sysdeps.outcome }} |
+            | fetch_and_push.R / fetch_eppo.R | ${{ steps.run.outcome }} |
+
+            ## 📊 ความสดของข้อมูล (OFFO/EPPO oil price) — รอบแรกของวันนี้
+            ```
             ${{ steps.summary.outputs.freshness }}
             ${{ steps.summary.outputs.stale }}
+            ```
 
-            Price changes (DIESEL RETAIL / GASOHOL 95 RETAIL):
+            ## 💰 Price changes (DIESEL RETAIL / GASOHOL 95 RETAIL)
+            ```
             ${{ steps.summary.outputs.changes }}
+            ```
 
-            EPPO/OFFO skipped files (missing products, or HEADER_MISMATCH = โครงสร้างคอลัมน์ไฟล์เปลี่ยน ต้องแก้ fetch_eppo.R):
+            ## ⚠️ EPPO/OFFO skipped files
+            _(missing products หรือ HEADER_MISMATCH = โครงสร้างคอลัมน์ไฟล์เปลี่ยน ต้องแก้ `fetch_eppo.R`)_
+            ```
             ${{ steps.summary.outputs.skipped }}
+            ```
 
-            Dashboard: https://limhengue-oss.github.io/macroindicator/
-            Full run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+            ---
+
+            📈 [Dashboard](https://limhengue-oss.github.io/macroindicator/) · 📋 [Full run log](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
 
       - name: Fail job if run failed
-        if: steps.run.outcome != 'success'
+        if: steps.status.outputs.ok != 'true'
         run: exit 1
