@@ -43,6 +43,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 html { overflow-x: hidden; }
@@ -339,6 +340,7 @@ input[type=range] { width:80px; accent-color:var(--blue); }
     <span style="font-size:0.78em;color:var(--text2);text-transform:uppercase;letter-spacing:0.06em">TH Energy — ราคาพลังงานไทย</span>
     <div class="page-actions">
       <button class="btn" id="energy-export-btn" onclick="exportEnergyPDF()">⬇ Export PDF</button>
+      <button class="btn" id="energy-export-xlsx-btn" onclick="exportEnergyExcel()">⬇ Export Excel</button>
       <button class="btn" onclick="openStructureModal()">ℹ โครงสร้างราคา</button>
     </div>
   </div>
@@ -3856,6 +3858,111 @@ window.exportEnergyPDF = async function() {
     hero.classList.remove('pdf-export');
     restoreEnergyChartsZoomAfterExport();
     resizeEnergyCharts();
+    btn.disabled = false;
+    btn.textContent = originalLabel;
+  }
+};
+
+// ── TH Energy: Export Excel (โครงสร้างราคาทุกผลิตภัณฑ์ EPPO_ORDER) ──
+// รูปแบบตารางเลียนแบบ eppo_sample.xlsx ที่ user เก็บเองมาก่อน (wide format:
+// 1 แถว = 1 วัน, กลุ่มคอลัมน์ต่อผลิตภัณฑ์ = Refin/Tax/MTax/OilFund/ConsFund/
+// MM/VAT/Retail) — ดึงจาก field ดิบใน Firestore ตรง ๆ ไม่ผ่าน priceAtDate
+// (ไม่ fallback ไปวันก่อนหน้า) เพื่อให้ตารางว่างจริงตรงวันที่ไม่มีข้อมูลจริง
+// แทนที่จะ interpolate ให้ดูเหมือนมีข้อมูลทุกวัน
+const EXCEL_FIELD_DEFS = [
+  { label:'Refin',    keys:['EX_REFIN'] },
+  { label:'Tax',       keys:['EXCISE_TAX'] },
+  { label:'MTax',      keys:['M_TAX'] },
+  { label:'OilFund',   keys:['OIL_FUND'] },
+  { label:'ConsFund',  keys:['CONSV_FUND'] },
+  { label:'MM',        keys:['MARKETING_MARGIN'] },
+  { label:'VAT',       keys:['VAT_WS','VAT_MM'] },  // eppo_sample เก็บ VAT รวม WS+MM เป็นคอลัมน์เดียว
+];
+
+// สร้าง Map(date -> value) จาก series.data ({x,y}) — ใช้ exact match เท่านั้น
+function seriesToDateMap(base, field) {
+  const s = getEppoSeries(base, field);
+  const m = new Map();
+  if (!s || !s.data) return m;
+  s.data.forEach(p => { if (p.x && p.y !== null && p.y !== undefined) m.set(p.x.slice(0,10), p.y); });
+  return m;
+}
+
+window.exportEnergyExcel = function() {
+  const btn = document.getElementById('energy-export-xlsx-btn');
+  if (!Object.keys(SERIES).length) { alert('ข้อมูลยังโหลดไม่เสร็จ ลองใหม่อีกครั้ง'); return; }
+  if (typeof XLSX === 'undefined') { alert('โหลด Excel library ไม่สำเร็จ ลอง refresh หน้า'); return; }
+
+  const originalLabel = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'กำลังสร้าง Excel…';
+
+  try {
+    // แต่ละ product: เตรียม date-map ของ retail/wholesale field (anchor — ถ้า
+    // field นี้มีข้อมูลวันไหนแปลว่าวันนั้นถูก parse แล้วจริง) + field ย่อยอื่น ๆ
+    const productMaps = EPPO_ORDER.map(prod => {
+      const anchorMap = seriesToDateMap(prod.base, prod.field);
+      const fieldMaps = EXCEL_FIELD_DEFS.map(fd => ({
+        label: fd.label,
+        maps: fd.keys.map(k => seriesToDateMap(prod.base, k)),
+      }));
+      const retailMap = { label: prod.field === 'WHOLESALE' ? 'Wholesale' : 'Retail', maps: [anchorMap] };
+      return { prod, anchorMap, fieldMaps: [...fieldMaps, retailMap] };
+    });
+
+    // union วันที่ทั้งหมดจาก anchor ของทุกผลิตภัณฑ์ — จำกัดแค่ 90 วันย้อนหลัง
+    // กันไฟล์ใหญ่/โหลดช้าเกินไป (ถ้าอยากได้ประวัติเต็ม ยังมี eppo_sample.xlsx
+    // ที่ user เก็บเองอยู่แล้วสำหรับช่วงยาวกว่านี้)
+    const EXPORT_DAYS_BACK = 90;
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - EXPORT_DAYS_BACK);
+    const cutoffStr = cutoff.toISOString().slice(0,10);
+
+    const allDates = new Set();
+    productMaps.forEach(pm => pm.anchorMap.forEach((_, d) => { if (d >= cutoffStr) allDates.add(d); }));
+    const dates = Array.from(allDates).sort();
+    if (!dates.length) { alert('ไม่พบข้อมูลราคาน้ำมันให้ export'); return; }
+
+    // แถวหัวตาราง 2 แถว: กลุ่มผลิตภัณฑ์ (merge) + ชื่อ field ย่อย
+    const groupRow = ['Date'];
+    const fieldRow = [''];
+    productMaps.forEach(pm => {
+      pm.fieldMaps.forEach((fm, i) => {
+        groupRow.push(i === 0 ? pm.prod.label : '');
+        fieldRow.push(fm.label);
+      });
+    });
+
+    const dataRows = dates.map(d => {
+      const row = [d];
+      productMaps.forEach(pm => {
+        pm.fieldMaps.forEach(fm => {
+          const vals = fm.maps.map(m => m.get(d)).filter(v => v !== undefined);
+          row.push(vals.length ? vals.reduce((a,b) => a+b, 0) : '');
+        });
+      });
+      return row;
+    });
+
+    const ws = XLSX.utils.aoa_to_sheet([groupRow, fieldRow, ...dataRows]);
+
+    // merge เซลล์หัวกลุ่มผลิตภัณฑ์ในแถวแรก (แต่ละกลุ่มกว้าง fieldMaps.length คอลัมน์)
+    const merges = [];
+    let col = 1;
+    productMaps.forEach(pm => {
+      const width = pm.fieldMaps.length;
+      if (width > 1) merges.push({ s:{r:0,c:col}, e:{r:0,c:col+width-1} });
+      col += width;
+    });
+    ws['!merges'] = merges;
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Structure_Daily');
+    XLSX.writeFile(wb, `eppo_structure_export_${new Date().toISOString().slice(0,10)}.xlsx`);
+  } catch (e) {
+    console.error(e);
+    alert('สร้าง Excel ไม่สำเร็จ: ' + e.message);
+  } finally {
     btn.disabled = false;
     btn.textContent = originalLabel;
   }
