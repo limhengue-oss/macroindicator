@@ -1,0 +1,14 @@
+name: DEBUG print service account email
+
+on:
+  workflow_dispatch:
+
+jobs:
+  print:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Print client_email from GCP_SA_KEY
+        env:
+          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+        run: |
+          echo "$GCP_SA_KEY" | node -e "let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{const j=JSON.parse(d);console.log('client_email:', j.client_email);console.log('project_id:', j.project_id);});"
