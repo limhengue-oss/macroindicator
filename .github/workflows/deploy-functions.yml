@@ -22,10 +22,15 @@ jobs:
         run: npm ci
 
       - name: Deploy to Firebase Functions
+        # --force: deploy สำเร็จจริงแล้วแต่ยังพัง exit code เพราะไม่มี cleanup
+        # policy ตั้งไว้ที่ container registry region asia-southeast1 (เจอ
+        # เคสนี้แล้ว 2026-08-21 — log มี "Successful update operation" ก่อนหน้า
+        # error message เสมอ ถ้าเจอแบบนี้อีกแปลว่า deploy จริงผ่านแล้ว) --force
+        # สั่งให้ firebase-tools ตั้ง cleanup policy อัตโนมัติแทนที่จะ error ทิ้ง
         env:
           GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
         run: |
           echo "$GCP_SA_KEY" > /tmp/sa-key.json
           export GOOGLE_APPLICATION_CREDENTIALS=/tmp/sa-key.json
-          npx firebase-tools@latest deploy --only functions --project macroindicator-6b265 --non-interactive
+          npx firebase-tools@latest deploy --only functions --project macroindicator-6b265 --non-interactive --force
           rm -f /tmp/sa-key.json
