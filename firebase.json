@@ -10,5 +10,23 @@
         "firebase-debug.*.log"
       ]
     }
-  ]
+  ],
+  "hosting": {
+    "public": ".",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**",
+      "functions/**",
+      "excel-vba/**",
+      "workfile/**",
+      "scripts/**",
+      "R/**",
+      "news-pipeline/**",
+      "*.R",
+      "*.md",
+      "*.csv",
+      "*.xlsx"
+    ]
+  }
 }

@@ -2,7 +2,8 @@ name: Update Macro Data
 
 on:
   schedule:
-    - cron: '0 */6 * * *'
+    - cron: '0 23 * * *'   # 06:00 ICT — ลดจากทุก 6 ชม. เหลือวันละครั้ง กัน GitHub Actions
+                            # minutes เกินโควตาฟรี 2000 นาที/เดือนถ้าจะย้ายไป private repo
   workflow_dispatch:
 
 jobs:
