@@ -1,21 +1,20 @@
 # ══════════════════════════════════════════════════════════════════
 #  push_oil_prices_sg_backfill.R
-#  Backfill ราคาน้ำมันสิงคโปร์ (ULG95_SG / DIESEL_SG) ที่ผู้ใช้เก็บเองรายวันไว้ใน
-#  eppo_sample.xlsx (คอลัมน์ "SG_ULG95 (PEIT)" / "SG_HSD (10ppm)") ย้อนหลัง
-#  เข้า collection `oil_prices` — collection เดียวกับที่ Cloud Function
-#  lineOilWebhook (functions/index.js) เขียนทุกวันจากข้อความ broadcast ของ
-#  PEIT LINE OA (ดู functions/parseOilMessage.js: ULG 95 (S'pore) -> ULG95_SG,
-#  GO 0.001%S -> DIESEL_SG — ตรงกับ "10ppm" ในไฟล์ผู้ใช้เป๊ะ, 0.001%S = 10ppm)
+#  Backfill ราคาน้ำมันสิงคโปร์/ดูไบ (ULG95_SG / DIESEL_SG / DUBAI) ที่ผู้ใช้เก็บเอง
+#  รายวันไว้ใน eppo_sample.xlsx (คอลัมน์ "SG_ULG95 (PEIT)" / "SG_HSD (10ppm)" /
+#  "Dubai (PEIT)") ย้อนหลัง เข้า collection `oil_prices` ก่อน (staging area)
+#  แล้วค่อยรัน migrate_oil_prices_to_series.R ย้ายเข้า `series/*` อีกที
+#  (ดู functions/parseOilMessage.js: ULG 95 (S'pore) -> ULG95_SG,
+#  GO 0.001%S -> DIESEL_SG — ตรงกับ "10ppm" เป๊ะ, 0.001%S = 10ppm, Dubai -> DUBAI)
 #
-#  doc id = วันที่ (YYYY-MM-DD) ตรงกับ pattern ของ webhook — เขียนด้วย PATCH +
-#  updateMask จำกัดเฉพาะ ULG95_SG/DIESEL_SG (ไม่แตะ `receivedAt` ที่ webhook
-#  อาจเขียนไว้แล้วสำหรับวันที่ทับซ้อนช่วงปลาย) ปลอดภัยรันซ้ำได้ (idempotent)
+#  doc id = วันที่ (YYYY-MM-DD) — เขียนด้วย PATCH + updateMask จำกัดเฉพาะ field
+#  ที่มีค่าจริงในแถวนั้น ปลอดภัยรันซ้ำได้ (idempotent)
 #
 #  input: workfile/oil_prices_sg_backfill.csv (สร้างจาก eppo_sample.xlsx,
-#  6,743 แถว, 2002-02-01 ถึง 2026-08-19 — ULG95_SG มีทั้งช่วง, DIESEL_SG มีตั้งแต่
-#  2020-07-01 เท่านั้นเพราะไฟล์ต้นทางไม่มีข้อมูลก่อนหน้านั้น)
+#  6,764 แถว, 2002-02-01 ถึง 2026-08-19 — ULG95_SG/DUBAI มีเกือบทั้งช่วง,
+#  DIESEL_SG มีตั้งแต่ 2020-07-01 เท่านั้นเพราะไฟล์ต้นทางไม่มีข้อมูลก่อนหน้านั้น)
 #
-#  one-off script — ยังไม่เคยรัน ตรวจสอบ CSV ให้ดีก่อนรันจริง
+#  one-off script — รันไปแล้วรอบแรก (ULG95_SG/DIESEL_SG), รอบนี้เพิ่ม DUBAI
 #  รัน (จาก repo root): Rscript scripts/oneoff/push_oil_prices_sg_backfill.R
 # ══════════════════════════════════════════════════════════════════
 
@@ -48,11 +47,12 @@ get_token <- function(sa) {
 
 # PATCH 1 doc ต่อวันที่ — updateMask จำกัดเฉพาะ field ที่มีค่าจริงในแถวนั้น
 # (บาง field ก่อน 2020-07 ไม่มี DIESEL_SG — อย่าเขียนทับด้วย null)
-push_one <- function(token, date_str, ulg, dsl) {
+push_one <- function(token, date_str, ulg, dsl, dubai) {
   fields <- list()
   mask   <- c()
-  if (!is.na(ulg)) { fields$ULG95_SG  <- list(doubleValue = ulg); mask <- c(mask, "ULG95_SG") }
-  if (!is.na(dsl)) { fields$DIESEL_SG <- list(doubleValue = dsl); mask <- c(mask, "DIESEL_SG") }
+  if (!is.na(ulg))   { fields$ULG95_SG  <- list(doubleValue = ulg);   mask <- c(mask, "ULG95_SG") }
+  if (!is.na(dsl))   { fields$DIESEL_SG <- list(doubleValue = dsl);   mask <- c(mask, "DIESEL_SG") }
+  if (!is.na(dubai)) { fields$DUBAI     <- list(doubleValue = dubai); mask <- c(mask, "DUBAI") }
   if (length(mask) == 0) return(invisible(NULL))
 
   url <- sprintf(
@@ -76,12 +76,12 @@ push_one <- function(token, date_str, ulg, dsl) {
 # ── Main ──────────────────────────────────────────────────────────
 message("── Reading ", CSV_PATH)
 df <- read_csv(CSV_PATH, col_types = cols(
-  date = col_date(), ULG95_SG = col_double(), DIESEL_SG = col_double()
+  date = col_date(), ULG95_SG = col_double(), DIESEL_SG = col_double(), DUBAI = col_double()
 ))
 df <- df |> filter(!is.na(date)) |> arrange(date) |> distinct(date, .keep_all = TRUE)
 message(sprintf("  %d rows, %s → %s", nrow(df), min(df$date), max(df$date)))
-message(sprintf("  ULG95_SG: %d rows, DIESEL_SG: %d rows",
-                sum(!is.na(df$ULG95_SG)), sum(!is.na(df$DIESEL_SG))))
+message(sprintf("  ULG95_SG: %d rows, DIESEL_SG: %d rows, DUBAI: %d rows",
+                sum(!is.na(df$ULG95_SG)), sum(!is.na(df$DIESEL_SG)), sum(!is.na(df$DUBAI))))
 
 message("── Authenticating...")
 token <- get_token(sa)
@@ -90,7 +90,7 @@ message("  ✓ token OK")
 message("── Pushing to Firestore (", COLLECTION, ")...")
 ok <- 0; fail <- 0
 for (i in seq_len(nrow(df))) {
-  r <- push_one(token, as.character(df$date[i]), df$ULG95_SG[i], df$DIESEL_SG[i])
+  r <- push_one(token, as.character(df$date[i]), df$ULG95_SG[i], df$DIESEL_SG[i], df$DUBAI[i])
   if (isTRUE(r)) ok <- ok + 1 else if (isFALSE(r)) fail <- fail + 1
   if (i %% 200 == 0) {
     message(sprintf("  ... %d/%d (ok=%d, fail=%d)", i, nrow(df), ok, fail))
