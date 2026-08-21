@@ -21,6 +21,19 @@ jobs:
         working-directory: functions
         run: npm ci
 
+      - name: Sync secrets to Secret Manager
+        # ตั้ง/อัพเดทค่า secret ที่ functions ใช้ (defineSecret) ให้ตรงกับ
+        # GitHub secret เสมอก่อน deploy — ต้องทำแบบ non-interactive เพราะ
+        # `firebase functions:secrets:set` ปกติถามค่าทาง prompt ไม่ได้ในนี้
+        env:
+          EXPORT_API_KEY: ${{ secrets.EXPORT_API_KEY }}
+          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+        run: |
+          echo "$GCP_SA_KEY" > /tmp/sa-key.json
+          export GOOGLE_APPLICATION_CREDENTIALS=/tmp/sa-key.json
+          printf '%s' "$EXPORT_API_KEY" | npx firebase-tools@latest functions:secrets:set EXPORT_API_KEY --project macroindicator-6b265 --data-file -
+          rm -f /tmp/sa-key.json
+
       - name: Deploy to Firebase Functions
         # --force: deploy สำเร็จจริงแล้วแต่ยังพัง exit code เพราะไม่มี cleanup
         # policy ตั้งไว้ที่ container registry region asia-southeast1 (เจอ

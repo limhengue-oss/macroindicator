@@ -11,6 +11,7 @@ const db = getFirestore();
 
 const LINE_CHANNEL_SECRET = defineSecret("LINE_CHANNEL_SECRET");
 const LINE_CHANNEL_ACCESS_TOKEN = defineSecret("LINE_CHANNEL_ACCESS_TOKEN");
+const EXPORT_API_KEY = defineSecret("EXPORT_API_KEY");
 
 async function replyMessage(replyToken, text, accessToken) {
   const resp = await fetch("https://api.line.me/v2/bot/message/reply", {
@@ -130,5 +131,54 @@ exports.lineOilWebhook = onRequest(
 
     // ต้องตอบ 200 เสมอ ไม่งั้น LINE จะ retry webhook ซ้ำ
     res.status(200).send("OK");
+  }
+);
+
+// ── exportSeriesData ─────────────────────────────────────────────
+// ช่องทางเดียวที่ Excel/VBA (หรือ tool ภายนอกอื่นๆ) ใช้ดึงข้อมูล series ได้
+// — gate ด้วย X-API-Key แทนการยิง Firestore REST ตรง (ซึ่งจะโดน App Check
+// บล็อกเมื่อเปิด enforcement) เขียนผ่าน Admin SDK ฝั่ง server บทบาทนี้จึง
+// bypass App Check ได้เองโดยธรรมชาติ ไม่ต้องทำอะไรเพิ่มฝั่งนี้
+//
+// GET /exportSeriesData?docId=EPPO_DIESEL_RETAIL
+// header: X-API-Key: <secret จาก Secret Manager, แจกให้ทีมผ่าน SharePoint>
+// response: text/csv "date,value\n2013-03-07,29.99\n..." (เรียงตามวันที่)
+//   — เลือกส่ง CSV แทน JSON ดิบของ Firestore เพราะ parse ใน VBA ง่ายกว่ามาก
+//   (แค่ split บรรทัด/comma ไม่ต้องพึ่ง regex เดาโครงสร้าง JSON เหมือนตอนยิง
+//   Firestore REST ตรง)
+exports.exportSeriesData = onRequest(
+  { secrets: [EXPORT_API_KEY], region: "asia-southeast1" },
+  async (req, res) => {
+    if (req.method !== "GET") {
+      res.status(405).send("Method Not Allowed");
+      return;
+    }
+
+    const key = req.get("x-api-key");
+    if (!key || key !== EXPORT_API_KEY.value()) {
+      logger.warn("exportSeriesData: invalid or missing X-API-Key");
+      res.status(401).send("Unauthorized");
+      return;
+    }
+
+    const docId = req.query.docId;
+    if (!docId || typeof docId !== "string") {
+      res.status(400).send("Missing docId query param");
+      return;
+    }
+
+    const snap = await db.collection("series").doc(docId).get();
+    if (!snap.exists) {
+      res.status(404).send(`series/${docId} not found`);
+      return;
+    }
+
+    const data = snap.data().data || [];
+    const sorted = [...data].sort((a, b) => (a.d < b.d ? -1 : a.d > b.d ? 1 : 0));
+    const csv = ["date,value", ...sorted.map((p) => `${p.d},${p.v}`)].join("\n");
+
+    logger.info(`exportSeriesData: served series/${docId} (${sorted.length} points)`);
+    res.set("Content-Type", "text/csv; charset=utf-8");
+    res.status(200).send(csv);
   }
 );
