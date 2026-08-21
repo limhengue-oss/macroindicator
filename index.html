@@ -819,9 +819,30 @@ const GLOBALCPI_ID_RE = /^IMF_[A-Z0-9]{3,4}_CPI_\d{2}$/;
 
 // Phase 2: series ที่เหลือ (โหลด background หลัง render หน้าแรกแล้ว) — ยกเว้น
 // IMF CPI by-country-category (ดู GLOBALCPI_ID_RE ด้านบน)
+//
+// เดิม getDocs(collection(db,'series')) ดึงทั้ง collection มาก่อนแล้วค่อยกรอง
+// GLOBALCPI_ID_RE ทิ้งทีหลัง — แต่ series กลุ่ม IMF_*_CPI_* มีอยู่ 1,942 จาก
+// 2,230 doc ทั้ง collection (87%!, วัดจริงด้วย Firestore aggregation query
+// 2026-08-21) แต่ละ doc ~50-250KB → ดาวน์โหลดทิ้งเปล่าๆ ทุกครั้งที่เปิดเว็บ
+// รวม ~190-290MB โดยไม่ได้ใช้เลยนอกจากตอนเปิดหน้า GlobalCPI (ซึ่ง fetch เอง
+// แยกอยู่แล้วผ่าน fetchGlobalCPI()) — เปลี่ยนมาตัด "IMF_" ออกจาก query ตรงๆ
+// (2 range query คนละฝั่งของ "IMF_" แล้วรวมผล) กันไม่ให้ Firestore ส่งข้อมูล
+// ที่จะถูกทิ้งมาตั้งแต่แรก
+//
+// ⚠ ถ้าอนาคต fetch_imf.R (GDP/FSI/CPI aggregate — ตอนนี้ยังเป็น DRY_RUN ไม่
+// เคย deploy จริง ยืนยันแล้วว่า series กลุ่มนี้ยังไม่มีใน Firestore เลย) ถูก
+// deploy ขึ้นจริง จะได้ doc_id ขึ้นต้นด้วย "IMF_" เหมือนกัน (เช่น IMF_THA_GDP,
+// IMF_G001_CPI_WCA) ซึ่งจะโดน exclude ผิดไปด้วย — ต้องกลับมาแก้ query นี้ให้
+// เจาะจงเฉพาะ pattern ที่ตรงกับ GLOBALCPI_ID_RE จริงๆ ตอนนั้น (เช่น query
+// แยกเป็นช่วงย่อยตาม ISO3 code หรือเปลี่ยนไปใช้ doc_id prefix ที่ต่างกันชัดเจน
+// ระหว่าง 2 กลุ่มนี้ตั้งแต่ตอนออกแบบ fetch_imf.R)
 async function fetchRest() {
-  const snap = await getDocs(collection(db, 'series'));
-  snap.forEach(doc => { if (!SERIES[doc.id] && !GLOBALCPI_ID_RE.test(doc.id)) storeDoc(doc); });
+  const [beforeImf, afterImf] = await Promise.all([
+    getDocs(query(collection(db, 'series'), where(documentId(), '<', 'IMF_'))),
+    getDocs(query(collection(db, 'series'), where(documentId(), '>=', 'IMF`'))),  // ` คือ char ถัดจาก _ ใน ASCII
+  ]);
+  beforeImf.forEach(doc => { if (!SERIES[doc.id]) storeDoc(doc); });
+  afterImf.forEach(doc => { if (!SERIES[doc.id]) storeDoc(doc); });
 }
 
 // GLOBALCPI_SERIES: object แยกจาก SERIES โดยเจตนา — หน้า GlobalCPI เท่านั้น
@@ -3879,16 +3900,31 @@ const EXCEL_FIELD_DEFS = [
   { label:'VAT',       keys:['VAT_WS','VAT_MM'] },  // eppo_sample เก็บ VAT รวม WS+MM เป็นคอลัมน์เดียว
 ];
 
-// สร้าง Map(date -> value) จาก series.data ({x,y}) — ใช้ exact match เท่านั้น
-function seriesToDateMap(base, field) {
-  const s = getEppoSeries(base, field);
+// สร้าง Map(date -> value) จาก series object ที่มีอยู่แล้วตรงๆ (ไม่ผ่าน
+// eppoDocId — ใช้กับ series ที่ไม่ใช่ EPPO เช่น ULG95_SG/DIESEL_SG/DUBAI)
+function seriesToDateMapRaw(s) {
   const m = new Map();
   if (!s || !s.data) return m;
   s.data.forEach(p => { if (p.x && p.y !== null && p.y !== undefined) m.set(p.x.slice(0,10), p.y); });
   return m;
 }
 
-window.exportEnergyExcel = function() {
+// สร้าง Map(date -> value) จาก series.data ({x,y}) — ใช้ exact match เท่านั้น
+function seriesToDateMap(base, field) {
+  return seriesToDateMapRaw(getEppoSeries(base, field));
+}
+
+// คอลัมน์ท้ายตาราง — ราคาสิงคโปร์/ดูไบที่ LINE ScraperBOT เก็บจาก broadcast ของ
+// PEIT — อยู่ใน collection `series` เดียวกับ EPPO/BOT/ฯลฯ แล้ว (doc id
+// ULG95_SG/DIESEL_SG/DUBAI, schema {name,updated,data:[{d,v}]} เหมือนกันหมด
+// ดู functions/index.js) โหลดมาพร้อม fetchRest() อยู่แล้ว ไม่ต้อง query แยก
+const SG_PRICE_COLS = [
+  { label:'SG_ULG', docId:'ULG95_SG' },
+  { label:'SG_HDS', docId:'DIESEL_SG' },
+  { label:'DUBAI',  docId:'DUBAI' },
+];
+
+window.exportEnergyExcel = async function() {
   const btn = document.getElementById('energy-export-xlsx-btn');
   if (!Object.keys(SERIES).length) { alert('ข้อมูลยังโหลดไม่เสร็จ ลองใหม่อีกครั้ง'); return; }
   if (typeof XLSX === 'undefined') { alert('โหลด Excel library ไม่สำเร็จ ลอง refresh หน้า'); return; }
@@ -3910,16 +3946,25 @@ window.exportEnergyExcel = function() {
       return { prod, anchorMap, fieldMaps: [...fieldMaps, retailMap] };
     });
 
-    // union วันที่ทั้งหมดจาก anchor ของทุกผลิตภัณฑ์ — จำกัดแค่ 90 วันย้อนหลัง
-    // กันไฟล์ใหญ่/โหลดช้าเกินไป (ถ้าอยากได้ประวัติเต็ม ยังมี eppo_sample.xlsx
-    // ที่ user เก็บเองอยู่แล้วสำหรับช่วงยาวกว่านี้)
+    // จำกัดแค่ 90 วันย้อนหลัง กันไฟล์ใหญ่/โหลดช้าเกินไป (ถ้าอยากได้ประวัติเต็ม
+    // ยังมี eppo_sample.xlsx ที่ user เก็บเองอยู่แล้วสำหรับช่วงยาวกว่านี้)
     const EXPORT_DAYS_BACK = 90;
     const cutoff = new Date();
     cutoff.setDate(cutoff.getDate() - EXPORT_DAYS_BACK);
     const cutoffStr = cutoff.toISOString().slice(0,10);
 
+    // SG_ULG/SG_HDS/DUBAI — อ่านตรงจาก SERIES (โหลดมาพร้อม fetchRest() แล้ว
+    // เหมือน series อื่นทุกตัว ไม่ต้อง query Firestore แยกอีกต่อไป)
+    const sgMaps = SG_PRICE_COLS.map(c => ({
+      col: c,
+      map: (SERIES[c.docId] ? seriesToDateMapRaw(SERIES[c.docId]) : new Map()),
+    }));
+
+    // union วันที่ทั้งหมดจาก anchor ของทุกผลิตภัณฑ์ + วันที่ที่มี SG/Dubai
+    // (เผื่อบางวันมีแค่ราคา SG/Dubai จาก LINE bot แต่ EPPO ยังไม่อัพเดท)
     const allDates = new Set();
     productMaps.forEach(pm => pm.anchorMap.forEach((_, d) => { if (d >= cutoffStr) allDates.add(d); }));
+    sgMaps.forEach(sm => sm.map.forEach((_, d) => { if (d >= cutoffStr) allDates.add(d); }));
     const dates = Array.from(allDates).sort();
     if (!dates.length) { alert('ไม่พบข้อมูลราคาน้ำมันให้ export'); return; }
 
@@ -3932,6 +3977,10 @@ window.exportEnergyExcel = function() {
         fieldRow.push(fm.label);
       });
     });
+    SG_PRICE_COLS.forEach((c, i) => {
+      groupRow.push(i === 0 ? 'PEIT (Singapore/Dubai)' : '');
+      fieldRow.push(c.label);
+    });
 
     const dataRows = dates.map(d => {
       const row = [d];
@@ -3941,12 +3990,13 @@ window.exportEnergyExcel = function() {
           row.push(vals.length ? vals.reduce((a,b) => a+b, 0) : '');
         });
       });
+      sgMaps.forEach(sm => { const v = sm.map.get(d); row.push(v !== undefined ? v : ''); });
       return row;
     });
 
     const ws = XLSX.utils.aoa_to_sheet([groupRow, fieldRow, ...dataRows]);
 
-    // merge เซลล์หัวกลุ่มผลิตภัณฑ์ในแถวแรก (แต่ละกลุ่มกว้าง fieldMaps.length คอลัมน์)
+    // merge เซลล์หัวกลุ่มในแถวแรก (แต่ละกลุ่มผลิตภัณฑ์ + กลุ่ม PEIT ท้ายตาราง)
     const merges = [];
     let col = 1;
     productMaps.forEach(pm => {
@@ -3954,6 +4004,7 @@ window.exportEnergyExcel = function() {
       if (width > 1) merges.push({ s:{r:0,c:col}, e:{r:0,c:col+width-1} });
       col += width;
     });
+    if (SG_PRICE_COLS.length > 1) merges.push({ s:{r:0,c:col}, e:{r:0,c:col+SG_PRICE_COLS.length-1} });
     ws['!merges'] = merges;
 
     const wb = XLSX.utils.book_new();
