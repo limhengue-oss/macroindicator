@@ -86,14 +86,17 @@ push_series <- function(token, doc_id, name, df, is_incremental = FALSE, meta = 
     data    = list(arrayValue = list(values = all_points))
   )
 
+  # generic: รับ key ไหนก็ได้ใน meta ไม่ใช่แค่ 5 field เดิม (fullName/
+  # currency/unit/freq/source) — เผื่อ field เพิ่มเติมเฉพาะ dataset เช่น
+  # CPI's recommendedIndexType/isRecommended (ดู R/imf_core.R) ตัวเดิม 5
+  # field ยัง output เหมือนเดิมทุกตัวอักษรสำหรับ caller ที่ไม่ได้ส่ง field
+  # อื่นมา (backward compatible)
   if (!is.null(meta)) {
-    fields$meta <- list(mapValue = list(fields = list(
-      fullName = list(stringValue = meta$fullName %||% ""),
-      currency = list(stringValue = meta$currency %||% ""),
-      unit     = list(stringValue = meta$unit     %||% ""),
-      freq     = list(stringValue = meta$freq     %||% ""),
-      source   = list(stringValue = meta$source   %||% "")
-    )))
+    meta_fields <- lapply(meta, function(v) {
+      if (is.logical(v)) list(booleanValue = isTRUE(v))
+      else list(stringValue = as.character(v %||% ""))
+    })
+    fields$meta <- list(mapValue = list(fields = meta_fields))
   }
 
   body <- list(fields = fields)

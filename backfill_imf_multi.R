@@ -38,21 +38,47 @@ country_map <- read_csv("data/imf_country_codes.csv", show_col_types = FALSE)
 config <- read_csv("data/imf_dataset_config.csv", show_col_types = FALSE)
 
 DATASET_IDS <- c(
-  "CPI", "CPI_WCA", "CTOT", "EER", "ER", "FSIC", "IL", "ITG",
+  "CPI", "CPI_WCA", "CTOT", "EER", "ER", "IL", "ITG",
   "MFS_CBS", "MFS_FC", "MFS_FMP", "MFS_IR", "MFS_MA", "MFS_ODC", "MFS_OFC",
   "PCPS", "PI", "PI_WCA", "PPI", "QGDP_WCA", "QNEA"
 )
+# หมายเหตุ 2026-08-16: ตัด FSIC ออกจาก scope แล้ว (user ตัดสินใจ) — ซับซ้อน
+# เกินไป (398 indicator, 11 sector) เทียบกับประโยชน์ที่ได้ ตอนนี้เหลือ 20 dataset
+
+# รองรับ push แบบแบ่ง batch — ตั้ง IMF_BACKFILL_DATASETS="CPI,CPI_WCA,..."
+# (comma-separated) เพื่อรันแค่บาง dataset ใน DATASET_IDS ข้างบน โดยไม่ต้อง
+# แก้ไฟล์นี้แล้วต้องจำ revert — เว้นว่างไว้ = รันครบทุก dataset (ค่า default)
+subset_env <- Sys.getenv("IMF_BACKFILL_DATASETS")
+if (nzchar(subset_env)) {
+  requested <- trimws(strsplit(subset_env, ",")[[1]])
+  DATASET_IDS <- intersect(DATASET_IDS, requested)
+  message(sprintf("── IMF_BACKFILL_DATASETS set — จำกัดเหลือ %d dataset: %s",
+                   length(DATASET_IDS), paste(DATASET_IDS, collapse = ", ")))
+}
 
 token <- NULL
+token_time <- NULL
 if (!DRY_RUN) {
   message("── Authenticating with Firestore...")
   token <- get_access_token(sa)
+  token_time <- Sys.time()
   message("  ✓ token acquired")
 }
 
 log_rows <- list()
 
 for (dataset_id in DATASET_IDS) {
+  # JWT token หมดอายุ 1 ชม. (ดู get_access_token ใน R/firestore.R) — batch
+  # ที่มีหลาย dataset รวมกันอาจรันนานเกิน 1 ชม. ได้ (เจอจริงตอน push batch 1:
+  # QNEA เป็น dataset สุดท้าย token หมดอายุพอดีระหว่างรัน push ล้มเหลวทั้ง
+  # 3,537 series) — refresh token ใหม่ทุกครั้งที่ขึ้น dataset ใหม่ถ้าเก่ากว่า
+  # 45 นาทีแล้ว (เผื่อ margin ก่อนหมดอายุจริงที่ 60 นาที) — ตัดสินใจ 2026-08-16
+  if (!DRY_RUN && !is.null(token_time) && difftime(Sys.time(), token_time, units = "mins") > 45) {
+    message("── Token ใกล้หมดอายุ (>45 นาที) — ขอ token ใหม่...")
+    token <- get_access_token(sa)
+    token_time <- Sys.time()
+    message("  ✓ token refreshed")
+  }
   message(sprintf("\n══ %s ══", dataset_id))
   csv_path <- sprintf("scratch_imf/cleaned/%s_clean.csv", dataset_id)
   if (!file.exists(csv_path)) {
@@ -71,9 +97,94 @@ for (dataset_id in DATASET_IDS) {
   df <- imf_drop_pct_change_rows(df)
   n_after_pct <- nrow(df)
 
-  # 2) splice เฉพาะ CPI (Audit 2)
+  # 2) splice เฉพาะ CPI (Audit 2) + เก็บแค่ความถี่ละเอียดสุดต่อ series
+  # (Monthly ถ้ามี ไม่งั้น Quarterly, ไม่งั้น Annual — ตัดสินใจ 2026-08-16)
   if (dataset_id == "CPI") {
     df <- imf_splice_cpi(df)
+    df <- imf_cpi_drop_raw_weight(df)
+    df <- imf_finest_freq_only(df, c("COUNTRY", "INDEX_TYPE", "COICOP_1999", "TYPE_OF_TRANSFORMATION"))
+  }
+  # PPI: เก็บทั้ง PPI และ WPI แยก 2 series ตามเดิม (dual-measurement เหมือน
+  # CPI/HICP — ไม่บังคับเลือก) แค่เอาความถี่ละเอียดสุดต่อ (ประเทศ, ประเภท)
+  if (dataset_id == "PPI") {
+    df <- imf_finest_freq_only(df, c("COUNTRY", "INDICATOR"))
+  }
+  # PI: เก็บ Index/SA-Index (S_ADJUSTMENT ซ้ำข้อมูลกับ TYPE_OF_TRANSFORMATION
+  # อยู่แล้ว ไม่บังคับเลือก) แยก 7 หมวดอุตสาหกรรมตามเดิม แค่เอาความถี่
+  # ละเอียดสุดต่อ (ประเทศ, หมวด, Index/SA) — ตัดสินใจ 2026-08-16
+  if (dataset_id == "PI") {
+    df <- imf_finest_freq_only(df, c("COUNTRY", "PRODUCTION_INDEX", "TYPE_OF_TRANSFORMATION"))
+  }
+  # ITG: เก็บ FOB/CIF ของ "Imports of goods" แยก 2 series ตามเดิม
+  # (dual-measurement, คำนวณจากกันไม่ได้ตรงๆ) ใส่ VALUATION เข้า key ด้วย
+  # กันปนกันตอนเลือกความถี่ละเอียดสุด (Track 1/bulk CSV มี VALUATION แยก
+  # column ตรงๆ — Track 2/live API ไม่มี column นี้เลย แต่ฝัง FOB/CIF ไว้ใน
+  # TYPE_OF_TRANSFORMATION แทน เช่น "CIF_USD"/"FOB_USD" — ใส่ทั้งคู่ไว้ใน
+  # key เผื่อไว้ ตัวไหนไม่มีจริงจะถูกตัดออกอัตโนมัติโดย imf_finest_freq_only)
+  # ตัดสินใจ 2026-08-16
+  if (dataset_id == "ITG") {
+    df <- imf_finest_freq_only(df, c("COUNTRY", "INDICATOR", "VALUATION", "TYPE_OF_TRANSFORMATION"))
+  }
+  # PCPS: ตัด Index ที่ซ้ำกับ US dollars ทิ้ง (เก็บ 28 composite index ที่
+  # ไม่มี USD คู่กันไว้เหมือนเดิม) + เอาความถี่ละเอียดสุดต่อสินค้า
+  if (dataset_id == "PCPS") {
+    df <- imf_pcps_drop_redundant_index(df)
+    df <- imf_finest_freq_only(df, c("INDICATOR", "DATA_TRANSFORMATION"))
+  }
+  # EER: 4 indicator ต่างกันจริง (NEER/REER x วิธีถ่วงน้ำหนัก) เก็บไว้ครบ
+  # แค่เอาความถี่ละเอียดสุดต่อ (ประเทศ, indicator) — ตัดสินใจ 2026-08-16
+  if (dataset_id == "EER") {
+    df <- imf_finest_freq_only(df, c("COUNTRY", "INDICATOR"))
+  }
+  # IL: ตัด SDR ที่ derivable จาก USD ทิ้ง (เก็บ indicator ที่มีแค่ SDR
+  # อย่างเดียวไว้ เช่น Gold reserves at 35 SDRs per ounce) + finest-freq
+  if (dataset_id == "IL") {
+    df <- imf_il_prefer_usd(df)
+    df <- imf_finest_freq_only(df, c("COUNTRY", "INDICATOR", "UNIT"))
+  }
+  # MFS_CBS: ตัด "Net" row ที่คำนวณคืนได้จาก Assets-Liabilities ทิ้ง +
+  # finest-freq (เก็บ Euro area wide residency และสกุลเงินไว้ตามเดิม —
+  # ซับซ้อนกว่า ยังไม่แตะ) — ตัดสินใจ 2026-08-16
+  if (dataset_id == "MFS_CBS") {
+    df <- imf_drop_net_derived_rows(df)
+    df <- imf_finest_freq_only(df, c("COUNTRY", "INDICATOR", "TYPE_OF_TRANSFORMATION"))
+  }
+  # MFS_FC/MFS_ODC/MFS_OFC: งบดุลเหมือน MFS_CBS — ตัด "Net" row (verify
+  # สูตรซ้ำแล้วกับ MFS_ODC: diff ≈ 0) + finest-freq (คอลัมน์สกุลเงินคนละชื่อ
+  # กันต่อ dataset: MFS_FC ใช้ UNIT, MFS_ODC/OFC ใช้ TYPE_OF_TRANSFORMATION)
+  # MFS_FMP/MFS_IR/MFS_MA: ไม่ใช่งบดุล ไม่มี Net row แค่ finest-freq พอ —
+  # ตัดสินใจ 2026-08-16
+  if (dataset_id == "MFS_FC") {
+    df <- imf_drop_net_derived_rows(df)
+    df <- imf_finest_freq_only(df, c("COUNTRY", "INDICATOR", "UNIT"))
+  }
+  if (dataset_id == "MFS_ODC") {
+    df <- imf_drop_net_derived_rows(df)
+    df <- imf_finest_freq_only(df, c("COUNTRY", "INDICATOR", "TYPE_OF_TRANSFORMATION"))
+  }
+  if (dataset_id == "MFS_OFC") {
+    df <- imf_drop_net_derived_rows(df)
+    df <- imf_finest_freq_only(df, c("COUNTRY", "INDICATOR", "TYPE_OF_TRANSFORMATION"))
+  }
+  if (dataset_id == "MFS_FMP") {
+    df <- imf_finest_freq_only(df, c("COUNTRY", "INDICATOR", "TYPE_OF_TRANSFORMATION"))
+  }
+  if (dataset_id == "MFS_IR") {
+    df <- imf_finest_freq_only(df, c("COUNTRY", "INDICATOR"))
+  }
+  if (dataset_id == "MFS_MA") {
+    df <- imf_finest_freq_only(df, c("COUNTRY", "INDICATOR", "UNIT"))
+  }
+  # QNEA: เก็บเฉพาะ 18 indicator ที่เป็นองค์ประกอบหลักของ GDP (ตัดรายละเอียด
+  # ย่อย 9 ตัวที่ประเทศรายงานน้อยอยู่แล้ว — ตัดเพื่อลดความสับสน) —
+  # ตัดสินใจร่วมกับ user 2026-08-16
+  if (dataset_id == "QNEA") {
+    df <- imf_qnea_gdp_components_only(df)
+  }
+  # 2b) ER: ตัดคู่สกุลเงินอื่นออก เหลือแค่เทียบ USD (คำนวณคู่อื่นคืนได้เอง
+  # ด้วย cross-rate ถ้ามี USD ของทุกประเทศ — ตัดสินใจ 2026-08-16)
+  if (dataset_id == "ER") {
+    df <- imf_filter_er_usd_only(df)
   }
   n_after_splice <- nrow(df)
 
@@ -121,8 +232,9 @@ for (dataset_id in DATASET_IDS) {
   df <- df %>% filter(!is.na(date), is.finite(OBS_VALUE))
 
   # meta text columns available (varies per dataset) for currency detection + fullName
+  # (INDEX_TYPE/COICOP_1999 ใช้เฉพาะ CPI สำหรับสร้างชื่อ+recommended flag)
   text_cols <- intersect(c("INDICATOR", "TYPE_OF_TRANSFORMATION", "UNIT", "TRANSFORMATION",
-                            "SERIES_NAME", "FREQUENCY"), names(df))
+                            "SERIES_NAME", "FREQUENCY", "INDEX_TYPE", "COICOP_1999"), names(df))
 
   series_keys <- df %>% distinct(doc_id, iso3, .keep_all = TRUE) %>% select(doc_id, iso3, all_of(text_cols))
   df_split <- split(df %>% select(doc_id, date, OBS_VALUE), df$doc_id)
@@ -137,11 +249,21 @@ for (dataset_id in DATASET_IDS) {
       arrange(date) %>% transmute(date, value = OBS_VALUE)
     if (nrow(pts) == 0) next
 
-    fullname_parts <- na.omit(unlist(row[intersect(c("INDICATOR", "SERIES_NAME"), names(row))]))
-    full_name <- if (length(fullname_parts) > 0) paste(unique(fullname_parts), collapse = " — ") else dataset_id
     freq_val <- if ("FREQUENCY" %in% names(row)) row$FREQUENCY[[1]] else ""
     currency_val <- imf_detect_currency(unlist(row[text_cols]))
     unit_val <- if ("UNIT" %in% names(row)) row$UNIT[[1]] else ""
+
+    if (dataset_id == "CPI") {
+      # CPI ไม่มี INDICATOR/SERIES_NAME text column เลย (ต่างจาก dataset
+      # อื่น) — ชื่อทั่วไปจะกลายเป็นแค่ "CPI" เฉยๆ ไม่บอกหมวด/ประเภท เลย
+      # สร้างชื่อเฉพาะจาก COICOP_1999 (หมวด) + TYPE_OF_TRANSFORMATION
+      # (Index/Weight) + INDEX_TYPE แบบย่อ (CPI/HICP) แทน
+      cpi_idx_short <- imf_cpi_index_type_short(row$INDEX_TYPE[[1]])
+      full_name <- sprintf("%s — %s (%s)", row$COICOP_1999[[1]], row$TYPE_OF_TRANSFORMATION[[1]], cpi_idx_short)
+    } else {
+      fullname_parts <- na.omit(unlist(row[intersect(c("INDICATOR", "SERIES_NAME"), names(row))]))
+      full_name <- if (length(fullname_parts) > 0) paste(unique(fullname_parts), collapse = " — ") else dataset_id
+    }
 
     meta <- list(
       fullName = sprintf("%s (%s)", full_name, row$iso3),
@@ -150,6 +272,11 @@ for (dataset_id in DATASET_IDS) {
       freq = if (is.null(freq_val) || is.na(freq_val)) "" else freq_val,
       source = sprintf("IMF STA %s %s", dataset_id, version)
     )
+    if (dataset_id == "CPI") {
+      rec_type <- imf_cpi_recommended_type(row$iso3)
+      meta$recommendedIndexType <- rec_type
+      meta$isRecommended <- identical(cpi_idx_short, rec_type)
+    }
 
     if (DRY_RUN) {
       ok_count <- ok_count + 1

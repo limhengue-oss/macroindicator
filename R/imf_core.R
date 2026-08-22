@@ -118,6 +118,152 @@ imf_splice_cpi <- function(df) {
   bind_rows(native, spliced_full, other)
 }
 
+# ── ER USD-only filter — ตัดสินใจ 2026-08-16: ER เก็บอัตราแลกเปลี่ยน
+# bilateral หลายสกุล (Domestic vs USD/SDR/ECU/EUR) แต่ถ้ามีเรทเทียบ USD ของ
+# ทุกประเทศครบแล้ว เรทคู่อื่น (เทียบ SDR/ECU/EUR) คำนวณคืนได้เองด้วย
+# cross-rate (rate(A/B) = rate(A/USD) / rate(B/USD)) จึงเก็บไว้แค่คู่ USD
+# พอ (2 ทิศทาง: Domestic per USD, USD per Domestic) ลด series ~70%
+# โค้ด IMF ใช้ "USD" เป็น substring เสมอทั้ง bulk CSV (text: "US Dollar")
+# และ live SDMX API (code: "XDC_USD"/"USD_XDC") — verify แล้วจากข้อมูลจริง
+imf_filter_er_usd_only <- function(df) {
+  if (!"INDICATOR" %in% names(df)) return(df)
+  df[grepl("USD|US Dollar", df$INDICATOR, ignore.case = FALSE), ]
+}
+
+# ── เลือกความถี่ละเอียดสุดที่มีจริงต่อกลุ่ม (Monthly > Quarterly > Annual)
+# — ตัดสินใจ 2026-08-16 สำหรับ CPI: ส่วนใหญ่มีครบ 3 ความถี่ซ้อนกันจากข้อมูล
+# ชุดเดียวกัน (ไม่ใช่คนละชุด) เก็บแค่ที่ละเอียดสุดพอ ลด ~30% โดยไม่เสีย
+# ประเทศที่มีแค่ Quarterly/Annual (เช่น New Zealand) ไปเลยแบบตัด Monthly-only
+# ตรงๆ — ต้องกำหนด key_cols ให้ตรงกับ "series ที่แท้จริง" ของ dataset นั้น
+# (รวม TYPE_OF_TRANSFORMATION ด้วยเสมอ เพราะ verify แล้วว่า Weight ก็มีหลาย
+# ความถี่เหมือน Index ไม่ใช่แค่รายปี — ถ้า group ผิดจะเลือก freq ผิดฝั่ง)
+# ── CPI/HICP recommended type ต่อประเทศ — ตัดสินใจ 2026-08-16: เก็บทั้ง
+# CPI และ HICP ไว้ครบ (ไม่ตัดออก, dual-measurement ตาม Audit 3) แต่ติดป้าย
+# เพิ่มว่าตัวไหนคือ "ตัวที่ระบบแนะนำ" ต่อประเทศ ใช้ไฟล์ data/imf_index_type.csv
+# เดิม (ที่ fetch_imf_cpi.R ใช้อยู่แล้ว — 32 ประเทศที่มีทั้งคู่จริงๆ: 5
+# ประเทศเลือก CPI, 27 ประเทศเลือก HICP) ประเทศที่ไม่อยู่ในไฟล์ (มีแค่แบบ
+# เดียวอยู่แล้ว) fallback เป็น "CPI" เสมอ (ไม่มีผลจริงเพราะไม่มี HICP ให้เลือก)
+IMF_CPI_INDEX_TYPE_MAP <- local({
+  path <- "data/imf_index_type.csv"
+  if (!file.exists(path)) return(character(0))
+  df <- read.csv(path, stringsAsFactors = FALSE)
+  setNames(df$index_type, df$iso3)
+})
+
+imf_cpi_recommended_type <- function(iso3) {
+  rec <- unname(IMF_CPI_INDEX_TYPE_MAP[iso3])
+  ifelse(is.na(rec), "CPI", rec)
+}
+
+# แยก "CPI"/"HICP" สั้นๆ จาก INDEX_TYPE ดิบ (เช่น "Consumer price index (CPI)"
+# หรือ "Harmonised index of consumer prices (HICP)") — ใช้ regex จับคำใน
+# วงเล็บท้ายสุด กันเปราะบางถ้า IMF เปลี่ยนคำเต็มแต่ตัวย่อในวงเล็บคงเดิม
+imf_cpi_index_type_short <- function(index_type_raw) {
+  m <- regmatches(index_type_raw, regexpr("\\(([A-Z]+)\\)$", index_type_raw))
+  out <- gsub("[()]", "", m)
+  ifelse(nchar(out) == 0, index_type_raw, out)
+}
+
+# ── ตัด CPI raw "Weight" ออก เหลือแค่ "Weight, Percent" — ตัดสินใจ
+# 2026-08-16: verify แล้วว่าสอง field ครอบคลุม (ประเทศ×ประเภท×หมวด×ความถี่×
+# ช่วงเวลา) เท่ากันเป๊ะ 100% (619,070 จุดทั้งคู่ ไม่มีจุดไหนขาดฝั่งใดฝั่งหนึ่ง)
+# แต่ "Weight" ดิบใช้สเกลตามแต่ละประเทศเอง (บางประเทศฐาน 10/100/1000/10000/
+# 100000 ไม่เท่ากัน) ส่วน "Weight, Percent" normalize ให้รวม 100 เสมอ —
+# เก็บแค่ตัวหลัง เปรียบเทียบข้ามประเทศได้ตรงๆ ไม่เสี่ยงใช้ผิดสเกล
+imf_cpi_drop_raw_weight <- function(df) {
+  if (!"TYPE_OF_TRANSFORMATION" %in% names(df)) return(df)
+  df[df$TYPE_OF_TRANSFORMATION != "Weight", ]
+}
+
+# ── PCPS: ตัด "Index" ทิ้งเฉพาะสินค้าที่มี "US dollars" คู่กันอยู่แล้ว —
+# ตัดสินใจ 2026-08-16: verify แล้วว่า Index derivable จาก US dollars ตรงๆ
+# (ratio คงที่เกือบสมบูรณ์ทุกสินค้า, coefficient of variation ≈ 0) แต่มี 28
+# ดัชนีรวม (composite เช่น "Energy index", "All Metals Index") ที่มีแค่
+# Index อย่างเดียว ไม่มี US dollars คู่กันเลย (ธรรมชาติของ composite index
+# ไม่มีราคา $/หน่วยเดียว) — ห้ามตัด Index ของ 28 ตัวนี้ทิ้ง ไม่งั้นเสียไปเลย
+imf_pcps_drop_redundant_index <- function(df) {
+  if (!all(c("DATA_TRANSFORMATION", "INDICATOR") %in% names(df))) return(df)
+  usd_indicators <- unique(df$INDICATOR[df$DATA_TRANSFORMATION == "US dollars"])
+  drop_mask <- df$DATA_TRANSFORMATION == "Index" & df$INDICATOR %in% usd_indicators
+  df[!drop_mask, ]
+}
+
+# ── IL: ตัด SDR ทิ้งเฉพาะ (ประเทศ, indicator) ที่มี US dollar คู่กันอยู่แล้ว
+# — ตัดสินใจ 2026-08-16: verify แล้วว่า USD/SDR ratio เท่ากันทุกประเทศใน
+# เวลาเดียวกัน (เช่น Germany/Japan/UK/US ratio=1.27 พร้อมกันหมด ณ ปี 2026)
+# และเปลี่ยนตามเวลาจริง (1.0 ปี 1950 -> 1.37 ปัจจุบัน) ตรงกับอัตราแลกเปลี่ยน
+# USD/SDR ทั่วโลก แปลว่า derivable จาก USD ด้วยเรตเดียวกันทุกประเทศ ไม่ใช่
+# ต้องรู้อะไรเพิ่มเฉพาะประเทศ — แต่บาง indicator (เช่น "Gold reserves at 35
+# SDRs per ounce" ซึ่งเป็นค่าตรึงประวัติศาสตร์) มีแค่ SDR อย่างเดียว ไม่มี
+# USD คู่กันเลย ต้องเก็บไว้ ไม่ตัดทิ้ง (เหมือนกรณี PCPS's composite index)
+imf_il_prefer_usd <- function(df) {
+  if (!all(c("UNIT", "INDICATOR", "COUNTRY") %in% names(df))) return(df)
+  key <- paste(df$COUNTRY, df$INDICATOR)
+  usd_keys <- unique(key[df$UNIT == "US dollar"])
+  drop_mask <- df$UNIT == "SDR" & key %in% usd_keys
+  df[!drop_mask, ]
+}
+
+# ── ตัดแถว "Net (assets...)" ที่คำนวณคืนได้จาก Assets - Liabilities ของ
+# indicator เดียวกัน — ใช้กับ MFS_CBS/MFS_ODC/MFS_FC/MFS_OFC (งบดุลสถาบัน
+# การเงิน มีรูปแบบ "Net (assets minus/less liabilities), ..." ซ้ำกันหมด)
+# ตัดสินใจ 2026-08-16: verify แล้วกับ MFS_CBS ว่า Net = Liabilities - Assets
+# ตรงเป๊ะ (diff_pct median = 0 จาก 38,994 คู่ที่เทียบได้)
+imf_drop_net_derived_rows <- function(df) {
+  if (!"INDICATOR" %in% names(df)) return(df)
+  df[!grepl("^Net \\(assets", df$INDICATOR), ]
+}
+
+# ── QNEA: เก็บเฉพาะ 18 indicator ที่เป็นองค์ประกอบหลักของ GDP (expenditure
+# approach) ตัดรายละเอียดย่อย 9 ตัว (ภาษี/เงินอุดหนุน, แยกย่อยผู้บริโภคตาม
+# สถาบัน, แยกย่อยสินค้าคงคลังตามภาคส่วน, valuables ที่ derivable) — ตัดสินใจ
+# 2026-08-16 ร่วมกับ user ทีละตัว (ดู scratch_imf/DESIGN.md) ตัดได้แค่ 11.3%
+# ของ series เพราะ 9 ตัวที่ตัดมีประเทศรายงานน้อยอยู่แล้ว (ส่วนใหญ่ <45
+# ประเทศ) — ตัดเพื่อลดความสับสน (indicator ซ้อนกันเยอะ) ไม่ใช่เพื่อลดขนาด
+IMF_QNEA_GDP_COMPONENTS <- c(
+  "Gross domestic product (GDP)",
+  "Final consumption expenditure",
+  "Final consumption expenditure, General government",
+  "Final consumption expenditure, Private sector",
+  "Gross capital formation",
+  "Gross fixed capital formation",
+  "Changes in inventories",
+  "Acquisitions less disposals of fixed assets: machinery and equipment",
+  "Acquisitions less disposals of fixed assets: residential structures",
+  "Acquisitions less disposals of fixed assets non-residential structures",
+  "Exports of goods and services",
+  "Exports of goods",
+  "Exports of services",
+  "Imports of goods and services",
+  "Imports of goods",
+  "Imports of services",
+  "External balance of goods and services",
+  "Statistical discrepancy (expenditure approach)"
+)
+
+imf_qnea_gdp_components_only <- function(df) {
+  if (!"INDICATOR" %in% names(df)) return(df)
+  df[df$INDICATOR %in% IMF_QNEA_GDP_COMPONENTS, ]
+}
+
+imf_finest_freq_only <- function(df, key_cols) {
+  if (!"FREQUENCY" %in% names(df)) return(df)
+  # ตัด key_cols ที่ไม่มีจริงใน df ออกอัตโนมัติ — Track 1 (bulk CSV) กับ
+  # Track 2 (live SDMX API) บาง dataset มี column ไม่ตรงกันเป๊ะ (เช่น ITG's
+  # VALUATION มีแค่ใน bulk CSV ไม่อยู่ใน dimension_order ของ live API) ถ้า
+  # ไม่กันไว้ across(all_of()) จะ error ทันทีตอนรันจริงบน Track 2
+  key_cols <- intersect(key_cols, names(df))
+  freq_rank <- c(Monthly = 3L, Quarterly = 2L, Annual = 1L)
+  df$.freq_rank <- unname(freq_rank[df$FREQUENCY])
+  best <- df %>%
+    group_by(across(all_of(key_cols))) %>%
+    summarise(.best_rank = max(.freq_rank, na.rm = TRUE), .groups = "drop")
+  df %>%
+    left_join(best, by = key_cols) %>%
+    filter(.freq_rank == .best_rank) %>%
+    select(-.freq_rank, -.best_rank)
+}
+
 # ── period string -> Date, รองรับ "YYYY", "YYYY-Qn", "YYYY-Mnn"
 imf_period_to_date <- function(period) {
   period <- as.character(period)
