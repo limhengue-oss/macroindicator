@@ -63,11 +63,13 @@ for (i in seq_len(nrow(config))) {
     message("  ✓ token refreshed")
   }
   cfg <- config[i, ]
-  dataset_id <- cfg$dataset_id
-  agency     <- cfg$agency
-  version    <- cfg$version
-  dims       <- strsplit(cfg$dimension_order, ",")[[1]]
-  n_dims     <- length(dims)
+  dataset_id    <- cfg$dataset_id
+  agency        <- cfg$agency
+  version       <- cfg$version
+  category_label <- cfg$category_label
+  dims          <- strsplit(cfg$dimension_order, ",")[[1]]
+  n_dims        <- length(dims)
+  dim_roles     <- imf_parse_dimension_roles(cfg$dimension_order, cfg$dimension_roles)
 
   message(sprintf("\n══ %s ══", dataset_id))
   df <- imf_fetch_wildcard(agency, dataset_id, version, n_dims, START_PERIOD)
@@ -170,13 +172,27 @@ for (i in seq_len(nrow(config))) {
     log_rows[[length(log_rows) + 1]] <- tibble(dataset_id = dataset_id, status = "missing_dims", n_series = 0, n_obs = 0)
     next
   }
-  df$series_suffix <- do.call(paste, c(df[non_country_dims], sep = "."))
-  df$doc_id <- map2_chr(df$COUNTRY, df$series_suffix, ~imf_build_doc_id(dataset_id, .x, .y))
+  # doc_id ใหม่ (schema 2026-08-22): derive-forward จาก dims ที่ role เป็น
+  # component/variant เท่านั้น (ไม่ใช่ paste ทุก non_country_dims ดิบๆ แบบ
+  # เดิม) — ต่อแถวเพราะ imf_build_dims ทำงานทีละ row ไม่ vectorize ได้ตรงๆ
+  df$doc_id <- pmap_chr(df[c("COUNTRY", non_country_dims)], function(...) {
+    row <- list(...)
+    row_dims <- imf_build_dims(row[non_country_dims], dim_roles)
+    imf_build_doc_id(dataset_id, row$COUNTRY, row_dims)
+  })
   df$date <- imf_period_to_date(df$TIME_PERIOD)
   df <- df %>% filter(!is.na(date), is.finite(OBS_VALUE))
 
-  text_cols <- intersect(c("INDICATOR", "TYPE_OF_TRANSFORMATION", "UNIT", "TRANSFORMATION",
-                            "SERIES_NAME", "FREQUENCY", "INDEX_TYPE", "COICOP_1999"), names(df))
+  # text_cols ต้องครอบคลุม non_country_dims ทั้งหมดด้วย (ไม่ใช่แค่ list
+  # เดิม) ไม่งั้น series_keys จะขาด column ที่ต้องใช้สร้าง dims/meta ต่อ
+  # series ในลูปข้างล่าง (bug ที่จะเกิดถ้าไม่แก้: dataset ที่มี WGT_TYPE/
+  # DATA_TRANSFORMATION/PRODUCTION_INDEX/PRICE_TYPE/S_ADJUSTMENT จะหาย)
+  text_cols <- union(
+    c("INDICATOR", "TYPE_OF_TRANSFORMATION", "UNIT", "TRANSFORMATION",
+      "SERIES_NAME", "FREQUENCY", "INDEX_TYPE", "COICOP_1999"),
+    non_country_dims
+  )
+  text_cols <- intersect(text_cols, names(df))
   series_keys <- df %>% distinct(doc_id, COUNTRY, .keep_all = TRUE) %>% select(doc_id, COUNTRY, all_of(text_cols))
   df_split <- split(df %>% select(doc_id, date, OBS_VALUE), df$doc_id)
 
@@ -202,12 +218,17 @@ for (i in seq_len(nrow(config))) {
       full_name <- if (length(fullname_parts) > 0) paste(unique(fullname_parts), collapse = " — ") else dataset_id
     }
 
+    row_dims <- imf_build_dims(as.list(row[intersect(non_country_dims, names(row))]), dim_roles)
+
     meta <- list(
       fullName = sprintf("%s (%s)", full_name, row$COUNTRY),
       currency = if (is.null(currency_val)) "" else currency_val,
       unit = if (is.null(unit_val) || is.na(unit_val)) "" else unit_val,
       freq = if (is.null(freq_val) || is.na(freq_val)) "" else freq_val,
-      source = sprintf("IMF STA %s %s", dataset_id, version)
+      source = sprintf("IMF STA %s %s", dataset_id, version),
+      country = list(code = row$COUNTRY, label = imf_country_name(row$COUNTRY)),
+      category = list(code = dataset_id, label = category_label),
+      dims = row_dims
     )
     if (dataset_id == "CPI") {
       rec_type <- imf_cpi_recommended_type(row$COUNTRY)
