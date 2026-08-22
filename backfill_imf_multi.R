@@ -65,6 +65,13 @@ if (!DRY_RUN) {
   message("  ✓ token acquired")
 }
 
+# manifest: doc_id ทุกตัวที่ push สำเร็จรอบนี้ (schema ใหม่) — ใช้โดย
+# scripts/oneoff/cleanup_old_imf_docs.R เป็นตัวตัดสินว่า doc เก่า (schema
+# เดิม) ตัวไหนเป็น "orphan" ที่ลบทิ้งได้ปลอดภัย (เขียนทันทีที่ push สำเร็จ
+# ไม่ใช่ตอนจบ script — กัน manifest หายถ้า process ถูก interrupt กลางทาง)
+dir.create("scratch_imf/test_results", showWarnings = FALSE, recursive = TRUE)
+manifest_con <- if (!DRY_RUN) file("scratch_imf/test_results/backfill_doc_ids.txt", open = "a") else NULL
+
 log_rows <- list()
 
 for (dataset_id in DATASET_IDS) {
@@ -313,6 +320,7 @@ for (dataset_id in DATASET_IDS) {
     } else {
       if (push_series(token, row$doc_id, meta$fullName, pts, is_incremental = FALSE, meta = meta, quiet = TRUE)) {
         ok_count <- ok_count + 1
+        writeLines(row$doc_id, manifest_con)
       }
       if (i %% 200 == 0) message(sprintf("    ... %d/%d pushed", i, n_series))
     }
@@ -323,8 +331,9 @@ for (dataset_id in DATASET_IDS) {
                                               n_series = ok_count, n_obs = nrow(df))
 }
 
+if (!DRY_RUN) close(manifest_con)
+
 log_df <- bind_rows(log_rows)
-dir.create("scratch_imf/test_results", showWarnings = FALSE, recursive = TRUE)
 write_csv(log_df, "scratch_imf/test_results/backfill_log.csv")
 message("\n══ SUMMARY ══")
 print(log_df)
