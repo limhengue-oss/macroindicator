@@ -530,7 +530,7 @@ input[type=range] { width:80px; accent-color:var(--blue); }
 
 <script type="module">
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
-import { getFirestore, collection, getDocs, query, where, documentId } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
+import { getFirestore, collection, getDocs, query, where, documentId, orderBy, limit, startAfter } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
 import { initializeAppCheck, ReCaptchaV3Provider } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app-check.js';
 
 const firebaseConfig = {
@@ -608,26 +608,28 @@ const INFLATION_GROUPS = [
     ['SLV','El Salvador'],['URY','Uruguay'],
   ]},
 ];
-// ตรงกับ CATEGORY_NAMES ใน fetch_imf_cpi.R (COICOP 1999, 12 หมวด)
+// code ตรงกับ dims.COICOP_1999.code จริงในเว็บ (imf_dim_slug() ของ label
+// จาก IMF SDMX ตรงๆ, ตรวจสอบแล้วจากข้อมูลจริงทั้ง collection 2026-08-23 —
+// เสถียร ไม่ใช่ text ที่แปลเองแบบ 2-digit COICOP code เดิม)
 const INFLATION_CATEGORIES = [
-  ['00','All items (headline)'],
-  ['01','Food and non-alcoholic beverages'],
-  ['02','Alcoholic beverages, tobacco and narcotics'],
-  ['03','Clothing and footwear'],
-  ['04','Housing, water, electricity, gas and other fuels'],
-  ['05','Furnishings, household equipment and routine household maintenance'],
-  ['06','Health'],
-  ['07','Transport'],
-  ['08','Information and communication'],
-  ['09','Recreation, sport and culture'],
-  ['10','Education'],
-  ['11','Restaurants and accommodation services'],
-  ['12','Insurance and financial services / Miscellaneous goods and services'],
+  ['ALL_ITEMS','All Items (headline)'],
+  ['FOOD_AND_NON_ALCOHOLIC_BEVERAGES','Food and non-alcoholic beverages'],
+  ['ALCOHOLIC_BEVERAGES_TOBACCO_AND_NARCOTICS','Alcoholic beverages, tobacco and narcotics'],
+  ['CLOTHING_AND_FOOTWEAR','Clothing and footwear'],
+  ['HOUSING_WATER_ELECTRICITY_GAS_AND_OTHER_FUELS','Housing, water, electricity, gas and other fuels'],
+  ['FURNISHINGS_HOUSEHOLD_EQUIPMENT_AND_ROUTINE_HOUSEHOLD_MAINTENANCE','Furnishings, household equipment and routine household maintenance'],
+  ['HEALTH','Health'],
+  ['TRANSPORT','Transport'],
+  ['COMMUNICATION','Communication'],
+  ['RECREATION_AND_CULTURE','Recreation and culture'],
+  ['EDUCATION','Education'],
+  ['RESTAURANTS_AND_HOTELS','Restaurants and hotels'],
+  ['MISCELLANEOUS_GOODS_AND_SERVICES','Miscellaneous goods and services'],
 ];
 const INFLATION_GRAY = 'rgba(136,136,136,0.32)';
 const INFLATION_HL_COLORS = COLORS.filter(c => c !== '#888888');
 const inflationState = {
-  category: '00',       // '00'=headline, '01'..'12'=COICOP division
+  category: 'ALL_ITEMS',  // ALL_ITEMS=headline, อื่นๆ=COICOP division code
   window: '10y',
   // 'OTHER' เพิ่มเองที่นี่ (นอกเหนือ INFLATION_GROUPS) เพราะกลุ่ม Other
   // Countries คำนวณ dynamic จากข้อมูลจริงที่โหลดมา ไม่ใช่รายชื่อ hardcode
@@ -815,67 +817,29 @@ async function fetchOilFund() {
   snap.forEach(storeDoc);
 }
 
-// IMF CPI by-country-category docs (fetch_imf_cpi.R): จงใจ "กัน" ไม่ให้เข้า
-// SERIES กลาง — ต้องเรียกผ่าน fetchGlobalCPI() ของหน้า GlobalCPI เท่านั้น
-// หน้าอื่น (Dashboard/catalog/custom chart) อ่าน SERIES เป็นแหล่งเดียว เลย
-// ไม่มีทางเห็น/เลือกใช้ series กลุ่มนี้ได้เลยแม้จะรู้ doc id ตรงๆ
-const GLOBALCPI_ID_RE = /^IMF_[A-Z0-9]{3,4}_CPI_\d{2}$/;
-
-// Phase 2: series ที่เหลือ (โหลด background หลัง render หน้าแรกแล้ว) — ยกเว้น
-// IMF CPI by-country-category (ดู GLOBALCPI_ID_RE ด้านบน)
-//
-// เดิม getDocs(collection(db,'series')) ดึงทั้ง collection มาก่อนแล้วค่อยกรอง
-// GLOBALCPI_ID_RE ทิ้งทีหลัง — แต่ series กลุ่ม IMF_*_CPI_* มีอยู่ 1,942 จาก
-// 2,230 doc ทั้ง collection (87%!, วัดจริงด้วย Firestore aggregation query
-// 2026-08-21) แต่ละ doc ~50-250KB → ดาวน์โหลดทิ้งเปล่าๆ ทุกครั้งที่เปิดเว็บ
-// รวม ~190-290MB โดยไม่ได้ใช้เลยนอกจากตอนเปิดหน้า GlobalCPI (ซึ่ง fetch เอง
-// แยกอยู่แล้วผ่าน fetchGlobalCPI()) — เปลี่ยนมาตัด "IMF_" ออกจาก query ตรงๆ
-// (2 range query คนละฝั่งของ "IMF_" แล้วรวมผล) กันไม่ให้ Firestore ส่งข้อมูล
-// ที่จะถูกทิ้งมาตั้งแต่แรก
-//
-// ⚠ ถ้าอนาคต fetch_imf.R (GDP/FSI/CPI aggregate — ตอนนี้ยังเป็น DRY_RUN ไม่
-// เคย deploy จริง ยืนยันแล้วว่า series กลุ่มนี้ยังไม่มีใน Firestore เลย) ถูก
-// deploy ขึ้นจริง จะได้ doc_id ขึ้นต้นด้วย "IMF_" เหมือนกัน (เช่น IMF_THA_GDP,
-// IMF_G001_CPI_WCA) ซึ่งจะโดน exclude ผิดไปด้วย — ต้องกลับมาแก้ query นี้ให้
-// เจาะจงเฉพาะ pattern ที่ตรงกับ GLOBALCPI_ID_RE จริงๆ ตอนนั้น (เช่น query
-// แยกเป็นช่วงย่อยตาม ISO3 code หรือเปลี่ยนไปใช้ doc_id prefix ที่ต่างกันชัดเจน
-// ระหว่าง 2 กลุ่มนี้ตั้งแต่ตอนออกแบบ fetch_imf.R)
+// เดิม GlobalCPI (fetch_imf_cpi.R, doc_id 2-digit COICOP code) ถูกตัดออก
+// จาก SERIES กลางไว้ตั้งใจ (87% ของ collection, ~190-290MB ที่ไม่ได้ใช้
+// นอกหน้า GlobalCPI) — ตอนนี้ลบ doc กลุ่มนั้นทิ้งแล้ว (verify แล้วว่า
+// fetch_imf_multi.R's "CPI"/"CPI_WCA" dataset ครอบคลุมแทนได้ครบ 2026-08-23)
+// เลยไม่ต้อง exclude "IMF_" prefix ออกจากการโหลดหลักอีกต่อไป — โหลดทั้ง
+// collection เป็นก้อนเดียวตรงๆ ได้เลย
+// paginate ทีละ 500 doc แทนการ getDocs(collection(db,'series')) เดียวรวด
+// ทั้ง collection — เจอจริง 2026-08-23: หลัง migrate schema ใหม่ collection
+// มีเกือบ 16,000 doc (บาง doc data array ยาวหลักพันจุด) ยิงทีเดียวชน
+// deadline-exceeded ของ Firestore ทุกครั้ง ต้อง paginate ด้วย orderBy +
+// startAfter(documentId) เหมือนที่ backend script ใช้กับ documents.list
 async function fetchRest() {
-  const [beforeImf, afterImf] = await Promise.all([
-    getDocs(query(collection(db, 'series'), where(documentId(), '<', 'IMF_'))),
-    getDocs(query(collection(db, 'series'), where(documentId(), '>=', 'IMF`'))),  // ` คือ char ถัดจาก _ ใน ASCII
-  ]);
-  beforeImf.forEach(doc => { if (!SERIES[doc.id]) storeDoc(doc); });
-  afterImf.forEach(doc => { if (!SERIES[doc.id]) storeDoc(doc); });
-}
-
-// GLOBALCPI_SERIES: object แยกจาก SERIES โดยเจตนา — หน้า GlobalCPI เท่านั้น
-// ที่อ่านจากตัวนี้ ป้องกันไม่ให้ series กลุ่มนี้ไปโผล่ใน Dashboard/catalog/
-// custom chart ของหน้าอื่น
-const GLOBALCPI_SERIES = {};
-let globalCpiLoaded = false;
-function storeGlobalCpiDoc(doc) {
-  const d = doc.data();
-  GLOBALCPI_SERIES[doc.id] = {
-    name: cleanSeriesName(d.name || doc.id),
-    updated: d.updated || '',
-    meta: d.meta || null,
-    data: (d.data||[]).map(p=>({x:p.d, y:p.v})).sort((a,b)=>a.x<b.x?-1:1)
-  };
-}
-// เรียกเฉพาะตอนเปิดหน้า GlobalCPI (lazy) — query prefix "IMF_" ทั้งก้อนแล้ว
-// กรองด้วย GLOBALCPI_ID_RE ฝั่ง client (Firestore range query กรอง mid-string
-// ไม่ได้ตรงๆ) ตัวที่ไม่เข้าเงื่อนไข (series จาก fetch_imf_multi.R, doc_id
-// รูปแบบ IMF_{ISO3}_{DATASET}_{suffix}) จะถูกละทิ้ง ไม่เก็บเข้าที่นี่ —
-// ไปโผล่ใน SERIES กลางผ่าน fetchRest() แทน (ดู classifySeries)
-async function fetchGlobalCPI() {
-  if (globalCpiLoaded) return;
-  const q = query(collection(db, 'series'),
-    where(documentId(), '>=', 'IMF_'),
-    where(documentId(), '<', 'IMF`'));  // ` คือ char ถัดจาก _ ใน ASCII
-  const snap = await getDocs(q);
-  snap.forEach(doc => { if (GLOBALCPI_ID_RE.test(doc.id)) storeGlobalCpiDoc(doc); });
-  globalCpiLoaded = true;
+  const alreadyLoaded = new Set(Object.keys(SERIES));
+  let cursor = null;
+  for (;;) {
+    let q = query(collection(db, 'series'), orderBy(documentId()), limit(500));
+    if (cursor) q = query(collection(db, 'series'), orderBy(documentId()), startAfter(cursor), limit(500));
+    const snap = await getDocs(q);
+    if (snap.empty) break;
+    snap.forEach(doc => { if (!alreadyLoaded.has(doc.id)) storeDoc(doc); });
+    if (snap.size < 500) break;
+    cursor = snap.docs[snap.docs.length - 1].id;
+  }
 }
 
 async function fetchNews() {
@@ -1896,10 +1860,8 @@ window.loadData = async function() {
     if (activePageId === '__energy__')    renderEnergyPage();
     if (activePageId === '__news__')      renderNews();
     if (activePageId === '__dashboard__') renderDashboard();  // โชว์ loading ของตัวเองถ้า Phase 2 ยังไม่เสร็จ
-    // GlobalCPI ไม่ได้อยู่ในสอง phase นี้เลย — โหลดข้อมูลของตัวเองแยกต่างหาก
-    // ตอนกดเข้าหน้า (ดู fetchGlobalCPI/nav onclick) จงใจไม่ผูกกับ loadData()
-
     // Phase 2: series ที่เหลือ โหลด background — ไม่บล็อกหน้าไหนแล้ว
+    // (GlobalCPI ก็อ่านจาก SERIES กลางนี้เหมือนหน้าอื่นแล้ว ดู nav onclick)
     await fetchRest();
     seriesFullyLoaded = true;
 
@@ -2307,9 +2269,10 @@ function renderNav() {
   };
   nav.appendChild(energyBtn);
 
-  // special GlobalCPI page — ข้อมูล IMF CPI by-country-category โหลดผ่าน
-  // fetchGlobalCPI() ของหน้านี้เท่านั้น (ดู GLOBALCPI_SERIES ด้านบน) ไม่ได้
-  // มาจาก Phase 1/2 ของ loadData() แล้ว เลยยิง fetch เองตอนกดเข้าหน้า
+  // special GlobalCPI page — ข้อมูลมาจาก CPI/CPI_WCA dataset ใน SERIES กลาง
+  // เหมือนหน้าอื่นแล้ว (เดิมแยกโหลดเองผ่าน fetchGlobalCPI ก่อน schema ใหม่
+  // 2026-08-23) — ถ้า Phase 2 (fetchRest) ยังโหลดไม่เสร็จ รอแบบเดียวกับปุ่ม
+  // TH Energy ข้างบน
   const inflBtn = document.createElement('button');
   inflBtn.className = 'nb' + (activePageId === '__inflation__' ? ' active' : '');
   inflBtn.textContent = 'GlobalCPI';
@@ -2321,8 +2284,13 @@ function renderNav() {
     document.querySelectorAll('.nb').forEach(b=>b.classList.remove('active'));
     document.getElementById('page-inflation').classList.add('active');
     inflBtn.classList.add('active');
-    if (!globalCpiLoaded) fetchGlobalCPI().then(renderInflationPage);
-    else renderInflationPage();
+    if (!seriesFullyLoaded) {
+      const wait = setInterval(() => {
+        if (seriesFullyLoaded) { clearInterval(wait); renderInflationPage(); }
+      }, 300);
+    } else {
+      renderInflationPage();
+    }
   };
   nav.appendChild(inflBtn);
 
@@ -2683,7 +2651,41 @@ function drawChart(page,chart) {
 // ════════════════════════════════════════════════════
 //  INFLATION BY COUNTRY PAGE
 // ════════════════════════════════════════════════════
-function inflationSeriesId(code, category) { return `IMF_${code}_CPI_${category}`; }
+// ดัชนี (country code -> COICOP code -> doc id) สร้างครั้งเดียวจาก SERIES
+// กลาง (schema ใหม่ 2026-08-23: meta.country/category/dims เป็น field จริง
+// ไม่ต้อง parse doc_id/regex ชื่ออีกต่อไป) — เลือกเฉพาะ series ที่เป็น
+// "recommended" index type (CPI หรือ HICP แล้วแต่ประเทศ) + เป็น native Index
+// (ไม่ใช่ Weight,Percent) ตรงกับที่ GlobalCPI เดิมเคยทำ — รวม "CPI_WCA"
+// (World/regional aggregate, ใช้กับกลุ่ม WORLD ใน INFLATION_GROUPS) ด้วย
+// ไม่มี isRecommended field เลย (fetch_imf_multi.R ไม่ได้ set ให้ dataset นี้
+// เพราะไม่มี CPI/HICP ให้เลือกแบบ dataset "CPI" ปกติ ตัวเดียวก็ default อยู่แล้ว)
+let _inflationIndex = null;
+function getInflationIndex() {
+  if (_inflationIndex) return _inflationIndex;
+  const idx = {};
+  Object.keys(SERIES).forEach(id => {
+    const meta = SERIES[id].meta;
+    if (!meta || !meta.category) return;
+    const isCpiWca = meta.category.code === 'CPI_WCA';
+    if (meta.category.code !== 'CPI' && !isCpiWca) return;
+    if (!isCpiWca && !meta.isRecommended) return;
+    const dims = meta.dims || {};
+    const tt = dims.TYPE_OF_TRANSFORMATION && dims.TYPE_OF_TRANSFORMATION.label;
+    // CPI_WCA ไม่มี dims.COICOP_1999 เลย (headline-only aggregate ไม่มี
+    // COICOP breakdown ให้ตั้งแต่ต้น) — ถือเป็น ALL_ITEMS (headline) โดย
+    // implicit แทนที่จะ require ว่าต้องมี dim นี้เสมอแบบ dataset "CPI" ปกติ
+    const coicopCode = isCpiWca ? 'ALL_ITEMS' : dims.COICOP_1999 && dims.COICOP_1999.code;
+    if (!tt || !tt.startsWith('Index') || !coicopCode || !meta.country) return;
+    if (!idx[meta.country.code]) idx[meta.country.code] = {};
+    idx[meta.country.code][coicopCode] = id;
+  });
+  _inflationIndex = idx;
+  return idx;
+}
+function inflationSeriesId(code, category) {
+  const idx = getInflationIndex();
+  return (idx[code] && idx[code][category]) || null;
+}
 
 function renderInflationPage() {
   const body = document.getElementById('inflation-body');
@@ -2717,24 +2719,20 @@ function renderInflationPage() {
   renderInflationCards();
 }
 
-// กลุ่ม "Other Countries" — ประเทศไหนก็ตามที่มีข้อมูล GlobalCPI จริง
-// (GLOBALCPI_SERIES) แต่ไม่อยู่ใน G7/EU/AE/EA/ASEAN/LATAM เลย คำนวณสดจาก
+// กลุ่ม "Other Countries" — ประเทศไหนก็ตามที่มีข้อมูล CPI จริง (ผ่าน
+// getInflationIndex()) แต่ไม่อยู่ใน G7/EU/AE/EA/ASEAN/LATAM เลย คำนวณสดจาก
 // ข้อมูลที่โหลดมาแทนการ hardcode รายชื่อ ~100 ประเทศที่เหลือเอง — ชื่อประเทศ
-// ดึงจาก doc's own "name" field ("IMF CPI Index — {country}: {category}")
+// ดึงจาก meta.country.label ตรงๆ (R เขียนไว้ตอน push แล้ว)
 function inflationOtherGroup() {
   const known = new Set();
   INFLATION_GROUPS.forEach(g => g.countries.forEach(([code]) => known.add(code)));
-  const seen = new Set();
-  const countries = [];
-  Object.keys(GLOBALCPI_SERIES).forEach(id => {
-    const m = id.match(/^IMF_([A-Z]{3})_CPI_\d{2}$/);
-    if (!m) return;
-    const code = m[1];
-    if (known.has(code) || seen.has(code)) return;
-    seen.add(code);
-    const nameMatch = GLOBALCPI_SERIES[id]?.name?.match(/^IMF CPI Index — (.+?): /);
-    countries.push([code, nameMatch ? nameMatch[1] : code]);
-  });
+  const idx = getInflationIndex();
+  const countries = Object.keys(idx)
+    .filter(code => !known.has(code))
+    .map(code => {
+      const anyId = Object.values(idx[code])[0];
+      return [code, SERIES[anyId]?.meta?.country?.label || code];
+    });
   countries.sort((a, b) => a[1].localeCompare(b[1]));
   return { key: 'OTHER', title: 'Other Countries', countries };
 }
@@ -2800,7 +2798,8 @@ function drawInflationCard(key) {
 
   const rawSeries = [];
   g.countries.forEach(([code, fallbackName]) => {
-    const src = GLOBALCPI_SERIES[inflationSeriesId(code, category)];
+    const seriesId = inflationSeriesId(code, category);
+    const src = seriesId ? SERIES[seriesId] : null;
     if (!src || !src.data.length) return;
     const yoy = applyFn(src.data, 'yoy');
     const pts = cutByPeriod(yoy, win);
@@ -2817,7 +2816,7 @@ function drawInflationCard(key) {
   const chartKey = 'infl-'+key;
   if (!rawSeries.length) {
     if (charts[chartKey]) { charts[chartKey].destroy(); delete charts[chartKey]; }
-    if (tblEl && globalCpiLoaded) tblEl.innerHTML = '<span style="color:var(--text3)">no data</span>';
+    if (tblEl && seriesFullyLoaded) tblEl.innerHTML = '<span style="color:var(--text3)">no data</span>';
     return;
   }
 
@@ -3293,6 +3292,17 @@ const IMF_DATASET_RE_ALT = Object.keys(IMF_DATASET_INFO)
 const IMF_MULTI_RE = new RegExp(`^IMF_([A-Z0-9]{2,4})_(${IMF_DATASET_RE_ALT})_(.+)$`);
 
 function classifySeries(id) {
+  // schema ใหม่ (2026-08-22/23): ถ้า doc มี meta.country/category (R เขียน
+  // ตอน push โดยตรงแล้ว) ใช้ค่านี้ตรงๆ ไม่ต้อง parse doc_id/regex อีกเลย —
+  // ครอบคลุมอัตโนมัติทั้ง IMF multi-dataset family (CPI/CTOT/ER/QNEA/ฯลฯ) และ
+  // BOT/SET/BIS/THAIBMA ที่ migrate ไปแล้ว รวมถึง dataset ที่จะ migrate เพิ่ม
+  // ทีหลัง (IL/MFS_*) โดยไม่ต้องกลับมาแก้ไฟล์นี้อีก — ตัวที่ยัง "ไม่มี" field
+  // นี้ (doc เก่าที่ยังไม่ migrate) จะ fallback ไปใช้ regex/list เดิมด้านล่าง
+  const meta = SERIES[id]?.meta;
+  if (meta?.country && meta?.category) {
+    return { country: meta.country.label, category: meta.category.label };
+  }
+
   // BIS multi-country series: BIS_{CTY}_{SUFFIX}
   const bisMatch = id.match(/^BIS_([A-Z]{2})_(CBPOL|CREDIT_GAP|CREDIT_PRIVATE_GDP|CREDIT_HH_GDP|CREDIT_CORP_GDP|RPP_REAL|RPP_NOMINAL)$/);
   if (bisMatch) {
@@ -3311,11 +3321,6 @@ function classifySeries(id) {
       return { country, sector: info.sector, category: info.category };
     }
   }
-  // หมายเหตุ: IMF CPI by-country-category (IMF_{ISO3}_CPI_{00..12}, จาก
-  // fetch_imf_cpi.R) ไม่มี branch ที่นี่โดยตั้งใจ — ข้อมูลกลุ่มนี้ไม่เข้า
-  // SERIES กลาง (ดู GLOBALCPI_ID_RE) เลยไม่มีทางถูกจัดหมวด/เลือกใช้ผ่าน
-  // catalog ของหน้าอื่นได้ ต้องเข้าผ่านหน้า GlobalCPI เท่านั้น
-
   // Thailand
   if (id === 'BOT_SET_BOT' || id === 'SET' || id.startsWith('SET_'))
     return { country: 'Thailand', sector: 'financial', category: 'Equity Indices' };
@@ -3471,6 +3476,15 @@ let catalogTarget = { type: 'chart' };
 function allSelectableIds() {
   const set = new Set();
   Object.values(SERIES_GROUPS).forEach(ids => ids.forEach(id => set.add(id)));
+  // schema ใหม่ (2026-08-22/23): series ไหนก็ตามที่มี meta.country/category
+  // (R เขียนตอน push แล้ว) เลือกได้ใน catalog เสมอ ไม่ต้อง maintain
+  // SERIES_GROUPS ตายตัวแยกอีกชุด — ก่อนหน้านี้ series กลุ่ม IMF multi-dataset
+  // (CPI/CTOT/ER/QNEA ฯลฯ 14,000+ series) ไม่เคยเลือกได้เลยเพราะไม่มีใน list
+  // นี้ตั้งแต่ต้น (bug ที่เจอจริง 2026-08-23 ตอนทดสอบบน browser)
+  Object.keys(SERIES).forEach(id => {
+    const meta = SERIES[id].meta;
+    if (meta && meta.country && meta.category) set.add(id);
+  });
   return set;
 }
 function catalogEntries() {

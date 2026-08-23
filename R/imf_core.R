@@ -288,14 +288,67 @@ imf_period_to_date <- function(period) {
   out
 }
 
-# ── doc_id: IMF_{ISO3}_{DATASET}_{series suffix ตัด country ออก, sanitize}
-imf_build_doc_id <- function(dataset_id, country_iso3, series_code) {
-  # SERIES_CODE มักขึ้นต้นด้วย {COUNTRY}. เสมอ (ยืนยันจากตัวอย่างจริงหลาย
-  # dataset) — ตัด segment แรกออกถ้าตรงกับ country code
-  suffix <- series_code
-  parts <- str_split(series_code, "\\.", n = 2)[[1]]
-  if (length(parts) == 2 && parts[1] == country_iso3) suffix <- parts[2]
-  suffix <- str_replace_all(suffix, "[^A-Za-z0-9_.-]", "_")
+# ── ISO3 -> ชื่อประเทศเต็ม (265 ประเทศ) — เดิมเป็น IMF_ISO3_NAME hardcode
+# ฝั่ง index.html เท่านั้น ย้ายมาไว้ที่ R ตาม schema ใหม่ (ตัดสินใจ 2026-08-22):
+# R เป็นคนกำหนด label ทุกอย่างตอน push, เว็บอ่านอย่างเดียวไม่มี lookup table
+# ของตัวเองอีกต่อไป (ที่มา: data/imf_country_names.csv สกัดจาก IMF_ISO3_NAME เดิม)
+IMF_COUNTRY_NAME_MAP <- local({
+  path <- "data/imf_country_names.csv"
+  if (!file.exists(path)) return(character(0))
+  df <- read.csv(path, stringsAsFactors = FALSE)
+  setNames(df$name, df$iso3)
+})
+
+imf_country_name <- function(iso3) {
+  nm <- unname(IMF_COUNTRY_NAME_MAP[iso3])
+  if (length(nm) == 0 || is.na(nm)) iso3 else nm
+}
+
+# ── แปลง dimension_roles string (จาก imf_dataset_config.csv, comma list
+# เรียงตรงกับ dimension_order) เป็น named vector: dim name -> role
+# ("country"/"component"/"variant"/"fixed") ตัดสินใจร่วมกับ user 2026-08-22
+# ระหว่างออกแบบ schema ใหม่ — role ต้องกำหนดต่อ dataset เพราะเดาจากชื่อ
+# dimension อย่างเดียวไม่ได้ (INDICATOR ไม่ได้แปลว่า "component" เสมอไป)
+imf_parse_dimension_roles <- function(dimension_order, dimension_roles) {
+  dims  <- str_split(dimension_order, ",")[[1]]
+  roles <- str_split(dimension_roles, ",")[[1]]
+  setNames(roles, dims)
+}
+
+# ── slug: ข้อความอ่านง่ายจาก IMF (เช่น "Private sector consumption") ->
+# code สั้นใช้ต่อ doc_id/query (ตัดอักขระที่ไม่ใช่ A-Za-z0-9 ทิ้ง, upper-case)
+imf_dim_slug <- function(text) {
+  s <- str_replace_all(as.character(text), "[^A-Za-z0-9]+", "_")
+  s <- str_replace_all(s, "^_+|_+$", "")
+  toupper(s)
+}
+
+# ── สร้าง "dims" field ของ schema ใหม่: เฉพาะ dimension ที่ role เป็น
+# "component"/"variant" (ตัด "country" ออกเพราะแยกเป็น field ของตัวเองแล้ว,
+# ตัด "fixed" ออกเพราะเป็นมิติที่ไม่ควรโผล่เป็นตัวเลือกในเมนู — เช่น
+# FREQUENCY ที่ user ตัดสินใจ clean ข้อมูลให้เหลือ freq เดียวต่อ series แล้ว
+# ไม่ต้องมีเป็น axis ในเมนูอีก) แต่ละ dim เก็บทั้ง code (ใช้ต่อ doc_id/query)
+# + label (ข้อความอ่านง่ายจาก IMF ตรงๆ ไม่ต้องมี lookup table แปลซ้ำฝั่งเว็บ)
+# + role (ฝัง role ไว้ในตัว doc เลย เว็บจะได้ไม่ต้องมี config อีกไฟล์แยก —
+# ตัดสินใจ 2026-08-22 ปิด sync-2-ที่ ที่เคยเป็นปัญหากับ IMF_DATASET_INFO เดิม)
+imf_build_dims <- function(dim_values, roles) {
+  dims <- list()
+  for (nm in names(dim_values)) {
+    role <- unname(roles[nm])
+    if (is.na(role) || role %in% c("country", "fixed")) next
+    val <- dim_values[[nm]]
+    dims[[nm]] <- list(code = imf_dim_slug(val), label = as.character(val), role = role)
+  }
+  dims
+}
+
+# ── doc_id: derive-forward จาก dims ที่ผ่าน imf_build_dims() มาแล้ว
+# (component code มาก่อน ตามด้วย variant code ตามลำดับใน dimension_order)
+# ไม่ parse doc_id ย้อนกลับอีกต่อไปเหมือนเวอร์ชันเดิม (ตัดสินใจ 2026-08-22:
+# ไม่ต้องคง backward-compat กับ doc_id เดิม เพราะไม่มี Excel/VBA user ผูกไว้จริง)
+imf_build_doc_id <- function(dataset_id, country_iso3, dims) {
+  codes <- vapply(dims, function(d) d$code, character(1))
+  suffix <- paste(codes, collapse = "_")
   sprintf("IMF_%s_%s_%s", country_iso3, dataset_id, suffix)
 }
 

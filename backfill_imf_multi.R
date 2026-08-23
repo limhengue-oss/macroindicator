@@ -65,6 +65,13 @@ if (!DRY_RUN) {
   message("  ✓ token acquired")
 }
 
+# manifest: doc_id ทุกตัวที่ push สำเร็จรอบนี้ (schema ใหม่) — ใช้โดย
+# scripts/oneoff/cleanup_old_imf_docs.R เป็นตัวตัดสินว่า doc เก่า (schema
+# เดิม) ตัวไหนเป็น "orphan" ที่ลบทิ้งได้ปลอดภัย (เขียนทันทีที่ push สำเร็จ
+# ไม่ใช่ตอนจบ script — กัน manifest หายถ้า process ถูก interrupt กลางทาง)
+dir.create("scratch_imf/test_results", showWarnings = FALSE, recursive = TRUE)
+manifest_con <- if (!DRY_RUN) file("scratch_imf/test_results/backfill_doc_ids.txt", open = "a") else NULL
+
 log_rows <- list()
 
 for (dataset_id in DATASET_IDS) {
@@ -89,6 +96,10 @@ for (dataset_id in DATASET_IDS) {
 
   cfg_row <- config %>% filter(.data$dataset_id == !!dataset_id)
   version <- cfg_row$version[1]
+  category_label <- cfg_row$category_label[1]
+  dataset_dims <- strsplit(cfg_row$dimension_order[1], ",")[[1]]
+  non_country_dims <- setdiff(dataset_dims, "COUNTRY")
+  dim_roles <- imf_parse_dimension_roles(cfg_row$dimension_order[1], cfg_row$dimension_roles[1])
 
   df <- read_csv(csv_path, show_col_types = FALSE, guess_max = 100000)
 
@@ -226,15 +237,32 @@ for (dataset_id in DATASET_IDS) {
     next
   }
 
-  # 4) build doc_id per row, then group into series
-  df$doc_id <- map2_chr(df$iso3, df$SERIES_CODE, ~imf_build_doc_id(dataset_id, .x, .y))
+  # 4) build doc_id per row (schema 2026-08-22: derive-forward จาก dims ที่
+  # role เป็น component/variant เท่านั้น แทนการต่อ SERIES_CODE ดิบทั้งก้อน
+  # แบบเดิม — ใช้ column ตามชื่อ dimension จริง (INDICATOR/COICOP_1999/ฯลฯ)
+  # เพราะ bulk CSV เก็บ text อ่านง่ายในคอลัมน์เหล่านี้อยู่แล้ว ไม่ต้องพึ่ง
+  # SERIES_CODE ที่เป็นแค่รหัสต่อกันด้วย "." ซึ่งไม่มีความหมายแยกเป็นชิ้นๆ)
+  available_dims <- intersect(non_country_dims, names(df))
+  df$doc_id <- pmap_chr(df[c("iso3", available_dims)], function(...) {
+    row <- list(...)
+    row_dims <- imf_build_dims(row[available_dims], dim_roles)
+    imf_build_doc_id(dataset_id, row$iso3, row_dims)
+  })
   df$date <- imf_period_to_date(df$TIME_PERIOD)
   df <- df %>% filter(!is.na(date), is.finite(OBS_VALUE))
 
   # meta text columns available (varies per dataset) for currency detection + fullName
   # (INDEX_TYPE/COICOP_1999 ใช้เฉพาะ CPI สำหรับสร้างชื่อ+recommended flag)
-  text_cols <- intersect(c("INDICATOR", "TYPE_OF_TRANSFORMATION", "UNIT", "TRANSFORMATION",
-                            "SERIES_NAME", "FREQUENCY", "INDEX_TYPE", "COICOP_1999"), names(df))
+  # ต้องรวม non_country_dims ทั้งหมดด้วย ไม่งั้น series_keys จะขาด column ที่
+  # ต้องใช้สร้าง dims/meta ต่อ series ในลูปข้างล่าง (เจอปัญหาเดียวกับ
+  # fetch_imf_multi.R — WGT_TYPE/DATA_TRANSFORMATION/PRODUCTION_INDEX/
+  # PRICE_TYPE/S_ADJUSTMENT จะหายไปถ้าไม่รวมเข้ามา)
+  text_cols <- union(
+    c("INDICATOR", "TYPE_OF_TRANSFORMATION", "UNIT", "TRANSFORMATION",
+      "SERIES_NAME", "FREQUENCY", "INDEX_TYPE", "COICOP_1999"),
+    available_dims
+  )
+  text_cols <- intersect(text_cols, names(df))
 
   series_keys <- df %>% distinct(doc_id, iso3, .keep_all = TRUE) %>% select(doc_id, iso3, all_of(text_cols))
   df_split <- split(df %>% select(doc_id, date, OBS_VALUE), df$doc_id)
@@ -265,12 +293,17 @@ for (dataset_id in DATASET_IDS) {
       full_name <- if (length(fullname_parts) > 0) paste(unique(fullname_parts), collapse = " — ") else dataset_id
     }
 
+    row_dims <- imf_build_dims(as.list(row[intersect(available_dims, names(row))]), dim_roles)
+
     meta <- list(
       fullName = sprintf("%s (%s)", full_name, row$iso3),
       currency = if (is.null(currency_val)) "" else currency_val,
       unit = if (is.null(unit_val) || is.na(unit_val)) "" else unit_val,
       freq = if (is.null(freq_val) || is.na(freq_val)) "" else freq_val,
-      source = sprintf("IMF STA %s %s", dataset_id, version)
+      source = sprintf("IMF STA %s %s", dataset_id, version),
+      country = list(code = row$iso3, label = imf_country_name(row$iso3)),
+      category = list(code = dataset_id, label = category_label),
+      dims = row_dims
     )
     if (dataset_id == "CPI") {
       rec_type <- imf_cpi_recommended_type(row$iso3)
@@ -287,6 +320,7 @@ for (dataset_id in DATASET_IDS) {
     } else {
       if (push_series(token, row$doc_id, meta$fullName, pts, is_incremental = FALSE, meta = meta, quiet = TRUE)) {
         ok_count <- ok_count + 1
+        writeLines(row$doc_id, manifest_con)
       }
       if (i %% 200 == 0) message(sprintf("    ... %d/%d pushed", i, n_series))
     }
@@ -297,8 +331,9 @@ for (dataset_id in DATASET_IDS) {
                                               n_series = ok_count, n_obs = nrow(df))
 }
 
+if (!DRY_RUN) close(manifest_con)
+
 log_df <- bind_rows(log_rows)
-dir.create("scratch_imf/test_results", showWarnings = FALSE, recursive = TRUE)
 write_csv(log_df, "scratch_imf/test_results/backfill_log.csv")
 message("\n══ SUMMARY ══")
 print(log_df)
