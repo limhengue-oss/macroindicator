@@ -60,11 +60,25 @@ for (i in seq_len(n)) {
     token_time <- Sys.time()
   }
   row <- map_df[i, ]
-  meta <- list(
+  # patch_series_meta() เขียนทับ field "meta" ทั้งก้อน (ไม่ merge) — ต้อง GET
+  # ของเดิมมาก่อนแล้วค่อยแก้เฉพาะ country/category/dims ไม่งั้น fullName/
+  # currency/unit/freq/source ที่ script อื่น (fetch_bot.R ฯลฯ) เขียนไว้จะหาย
+  # (บั๊กที่เจอจริง 2026-08-23 ตอน rerun ครั้งแรก — แก้ตรงนี้กันไม่ให้ซ้ำ)
+  existing_meta <- tryCatch({
+    url <- sprintf("https://firestore.googleapis.com/v1/projects/%s/databases/(default)/documents/%s/%s",
+                    PROJECT_ID, COLLECTION, row$doc_id)
+    r <- request(url) |> req_auth_bearer_token(token) |> req_error(is_error = \(r) FALSE) |> req_perform()
+    if (resp_status(r) != 200) return(list())
+    fields <- resp_body_json(r)$fields$meta$mapValue$fields
+    if (is.null(fields)) return(list())
+    lapply(fields, function(f) f$stringValue %||% f$booleanValue %||% NA)
+  }, error = function(e) list())
+  existing_meta$country <- NULL; existing_meta$category <- NULL; existing_meta$dims <- NULL
+  meta <- c(existing_meta, list(
     country  = list(code = row$country_code, label = row$country_label),
     category = list(code = row$category_code, label = row$category_label),
     dims     = list()
-  )
+  ))
   if (patch_series_meta(token, row$doc_id, meta, quiet = TRUE)) {
     ok_count <- ok_count + 1
     writeLines(row$doc_id, progress_con)

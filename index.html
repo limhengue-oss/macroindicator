@@ -216,6 +216,7 @@ input[type=range] { width:80px; accent-color:var(--blue); }
 .cat-item.leaf input[type=checkbox] { margin:0; flex-shrink:0; }
 .cat-item.leaf span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .cat-empty-hint { padding:16px 10px; font-size:0.78em; color:var(--text3); }
+.cat-group-header { padding:10px 10px 4px; font-size:0.68em; font-weight:700; letter-spacing:0.05em; text-transform:uppercase; color:var(--text3); }
 
 /* ── Global loading overlay ── */
 #global-loading { position:fixed; inset:0; z-index:500; display:flex; align-items:center; justify-content:center;
@@ -416,32 +417,47 @@ input[type=range] { width:80px; accent-color:var(--blue); }
         <b>Non-group — สร้างอิสระ</b>
         <span>ไล่เลือกจาก data catalog ทีละประเทศ / หมวด / กลุ่มข้อมูล</span>
       </button>
+      <button class="picker-option secondary" onclick="startThDashboardFlow()">
+        <b>TH Economic Dashboard — ข้อมูลเฉพาะไทย</b>
+        <span>เลือกจาก series ไทยล้วน (ไม่รวม IMF/BIS) ไล่แค่หมวด → series</span>
+      </button>
     </div>
     <div class="modal-actions"><button class="btn" onclick="closeChartTypeModal()">Cancel</button></div>
   </div>
 </div>
 
-<!-- Group Flow: เลือก indicator ก่อน แล้วค่อยเลือกประเทศ (2 ขั้นตอน) -->
+<!-- Group Flow: เลือก Dataset (IMF/BIS) → เลือก sub-item → เลือกประเทศ
+     (schema-driven, ตัดสินใจ 2026-08-23 แทน INDICATOR_FAMILIES hardcode เดิม) -->
 <div class="modal-bg" id="group-modal">
   <div class="modal">
-    <!-- Step 1: เลือก indicator -->
-    <div id="grp-step-indicator">
-      <h3>Group — เลือก Indicator</h3>
+    <!-- Step 1: เลือก Dataset -->
+    <div id="grp-step-dataset">
+      <h3>Group — เลือก Dataset</h3>
       <div class="field">
-        <div id="grp-indicator-list"></div>
+        <div id="grp-dataset-list"></div>
       </div>
       <div class="modal-actions">
         <button class="btn" onclick="backToChartType('group-modal')">Back</button>
       </div>
     </div>
-    <!-- Step 2: เลือกประเทศ (โผล่หลังเลือก indicator แล้ว) -->
+    <!-- Step 2: เลือก sub-item (component/variant ภายใน dataset) -->
+    <div id="grp-step-subitem" style="display:none">
+      <h3 id="grp-subitem-title">เลือก Sub-item</h3>
+      <div class="field">
+        <div id="grp-subitem-list"></div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn" onclick="backToGroupDataset()">Back</button>
+      </div>
+    </div>
+    <!-- Step 3: เลือกประเทศ (เฉพาะประเทศที่มี sub-item นี้จริง) -->
     <div id="grp-step-countries" style="display:none">
       <h3 id="grp-countries-title">เลือกประเทศ</h3>
       <div class="field">
         <div id="grp-countries"></div>
       </div>
       <div class="modal-actions">
-        <button class="btn" onclick="backToGroupIndicator()">Back</button>
+        <button class="btn" onclick="backToGroupSubitem()">Back</button>
         <button class="btn btn-primary" onclick="confirmGroupSelection()">Next</button>
       </div>
     </div>
@@ -461,6 +477,23 @@ input[type=range] { width:80px; accent-color:var(--blue); }
     <div class="modal-actions">
       <button class="btn" onclick="catalogModalBack()">Back</button>
       <button class="btn btn-primary" id="cat-confirm-btn" onclick="confirmCatalogSelection()">Next</button>
+    </div>
+  </div>
+</div>
+
+<!-- TH Economic Dashboard Flow: series ไทยล้วน (ไม่รวม IMF/BIS) — 2 คอลัมน์
+     (Category → Series) ไม่ต้องมี Country เพราะเป็นไทยทั้งหมดอยู่แล้ว -->
+<div class="modal-bg" id="th-dash-modal">
+  <div class="modal" style="max-width:640px">
+    <h3>TH Economic Dashboard</h3>
+    <div class="cat-columns">
+      <div class="cat-col" id="th-dash-col-category"></div>
+      <div class="cat-col" id="th-dash-col-series"></div>
+    </div>
+    <div class="hint" id="th-dash-selected-count" style="margin-top:8px">ยังไม่เลือก series</div>
+    <div class="modal-actions">
+      <button class="btn" onclick="thDashModalBack()">Back</button>
+      <button class="btn btn-primary" id="th-dash-confirm-btn" onclick="confirmThDashSelection()">Next</button>
     </div>
   </div>
 </div>
@@ -3300,7 +3333,7 @@ function classifySeries(id) {
   // นี้ (doc เก่าที่ยังไม่ migrate) จะ fallback ไปใช้ regex/list เดิมด้านล่าง
   const meta = SERIES[id]?.meta;
   if (meta?.country && meta?.category) {
-    return { country: meta.country.label, category: meta.category.label };
+    return { country: meta.country.label, category: meta.category.label, countryCode: meta.country.code, categoryCode: meta.category.code };
   }
 
   // BIS multi-country series: BIS_{CTY}_{SUFFIX}
@@ -3338,6 +3371,11 @@ function classifySeries(id) {
     return { country: 'Thailand', sector: 'financial', category: 'Commodities' };
   if (id.startsWith('PTTOR_') || id.startsWith('EPPO_'))
     return { country: 'Thailand', sector: 'real', category: 'Energy Prices' };
+  // PEIT (Platts-style benchmark, ดึงผ่าน LINE bot scraper) — ราคาน้ำมันดิบ/
+  // สำเร็จรูปอ้างอิงภูมิภาค ไม่ใช่ตัวเลขเศรษฐกิจของประเทศใดประเทศหนึ่งโดยตรง
+  // จัดเป็น Global แทน Thailand (ตัดสินใจ 2026-08-23)
+  if (id === 'DUBAI' || id === 'ULG95_SG' || id === 'DIESEL_SG')
+    return { country: 'Global', sector: 'real', category: 'Energy Prices' };
   if (id === 'USDTHB')
     return { country: 'Thailand', sector: 'financial', category: 'FX' };
 
@@ -3369,7 +3407,10 @@ function classifySeries(id) {
   if (id === 'USDINR') return { country: 'India', sector: 'financial', category: 'FX' };
   if (id === 'IDX')    return { country: 'Indonesia', sector: 'financial', category: 'Equity Indices' };
   if (id === 'USDIDR') return { country: 'Indonesia', sector: 'financial', category: 'FX' };
-  if (id === 'HSI')    return { country: 'Hong Kong', sector: 'financial', category: 'Equity Indices' };
+  // ใช้ label เดียวกับ meta.country.label ของ HKG (IMF schema ใหม่) +
+  // countryCode ให้ตรงกัน จะได้รวมเป็นประเทศเดียวในเมนู ไม่ขึ้นซ้ำ 2 อัน
+  // (ตัดสินใจ 2026-08-23)
+  if (id === 'HSI')    return { country: 'Hong Kong Special Administrative Region', countryCode: 'HKG', sector: 'financial', category: 'Equity Indices' };
 
   // Global / cross-country
   if (['WTI','BRENT','GOLD','SILVER','COPPER','NATGAS'].includes(id))
@@ -3379,42 +3420,6 @@ function classifySeries(id) {
 
   return { country: 'Other', sector: 'financial', category: 'Other' };
 }
-
-// Group mode: indicator เดียวกัน เทียบหลายประเทศ — เลือกเฉพาะกรณีที่มี
-// series เทียบเท่ากันจริงข้ามประเทศ (ไม่ใช่ทุก series จะมีคู่เทียบ)
-const INDICATOR_FAMILIES = [
-  { label: 'Headline Equity Index', members: [
-    { country: 'United States', id: 'SPX' }, { country: 'Eurozone', id: 'STOXX50' },
-    { country: 'Germany', id: 'DAX' }, { country: 'United Kingdom', id: 'FTSE' },
-    { country: 'Japan', id: 'NIKKEI' }, { country: 'Thailand', id: 'SET' },
-    { country: 'South Korea', id: 'KOSPI' }, { country: 'India', id: 'NIFTY' },
-    { country: 'Indonesia', id: 'IDX' }, { country: 'Hong Kong', id: 'HSI' },
-  ]},
-  { label: 'USD Exchange Rate', members: [
-    { country: 'Thailand', id: 'USDTHB' }, { country: 'Japan', id: 'USDJPY' },
-    { country: 'South Korea', id: 'USDKRW' }, { country: 'India', id: 'USDINR' },
-    { country: 'Indonesia', id: 'USDIDR' }, { country: 'Eurozone (EUR/USD)', id: 'EURUSD' },
-  ]},
-  { label: 'Government Bond Yield 10Y', members: [
-    { country: 'United States', id: 'DGS10' },
-    { country: 'Thailand (รายเดือน, BOT)', id: 'BOT_YIELD_10Y' },
-    { country: 'Thailand (รายวัน, ThaiBMA)', id: 'THAIBMA_YIELD_10Y' },
-  ]},
-  { label: 'Government Bond Yield 2Y', members: [
-    { country: 'United States', id: 'DGS2' },
-    { country: 'Thailand (รายเดือน, BOT)', id: 'BOT_YIELD_2Y' },
-    { country: 'Thailand (รายวัน, ThaiBMA)', id: 'THAIBMA_YIELD_2Y' },
-  ]},
-  { label: 'Central Bank Policy / Reference Rate', members: [
-    { country: 'United States (Fed Funds)', id: 'FEDFUNDS' }, { country: 'Eurozone (ECB Deposit Rate)', id: 'ECBRATE' },
-  ]},
-  { label: 'Consumer Price Index (%YoY)', members: [
-    { country: 'United States', id: 'CPI', fn: 'yoy' }, { country: 'Eurozone', id: 'EUCPI', fn: 'yoy' },
-  ]},
-  { label: 'Unemployment Rate', members: [
-    { country: 'United States', id: 'UNRATE' }, { country: 'Thailand', id: 'BOT_UNEMP' },
-  ]},
-];
 
 let chartPickerPageId = null;
 window.openChartTypeModal = function(pageId) {
@@ -3427,45 +3432,122 @@ window.backToChartType = function(closeId) {
   openChartTypeModal(chartPickerPageId);
 };
 
-// ── Group flow: Step 1 เลือก indicator (ข้อมูล) ก่อน → Step 2 เลือกประเทศ ──
-let groupState = { familyIdx: null, selectedIds: new Set() };
+// ════════════════════════════════════════════════════
+//  GROUP MODE — schema-driven (แทน INDICATOR_FAMILIES hardcode เดิม ที่ตัด
+//  ทิ้งแล้ว 2026-08-23) — เลือก Dataset (IMF 20 ตัว + BIS แยกเป็น 2
+//  pseudo-dataset) → เลือก sub-item (component+variant รวมกัน คล้าย Non-group
+//  Series แต่ไม่ผูกกับประเทศ) → เลือกประเทศที่มี sub-item นั้นจริง → เทียบกราฟ
+// ════════════════════════════════════════════════════
+const BIS_SUFFIX_LABELS = {
+  CBPOL: 'Policy Rate', CREDIT_GAP: 'Credit Gap',
+  CREDIT_PRIVATE_GDP: 'Credit to Private Non-Financial Sector (% GDP)',
+  CREDIT_HH_GDP: 'Household Credit (% GDP)', CREDIT_CORP_GDP: 'Corporate Credit (% GDP)',
+  RPP_REAL: 'Residential Property Price (Real)', RPP_NOMINAL: 'Residential Property Price (Nominal)',
+};
+// รายชื่อ Dataset ที่มีข้อมูลจริงตอนนี้ (สแกนจาก SERIES สด ไม่ hardcode
+// เพราะจะได้ตามทันอัตโนมัติเมื่อ dataset ใหม่มีข้อมูลเพิ่ม/Batch 2 มาถึง)
+function groupDatasetList() {
+  const seen = {};
+  Object.keys(SERIES).forEach(id => {
+    const meta = SERIES[id]?.meta;
+    const code = meta?.category?.code;
+    if (code && CATALOG_SUPERCATEGORY_MAP[code] !== undefined) seen[code] = meta.category.label;
+  });
+  const list = Object.entries(seen).map(([code, label]) => ({ code, label, kind: 'imf' }));
+  const hasBisPolicy = Object.keys(SERIES).some(id => /^BIS_[A-Z]{2}_CBPOL$/.test(id));
+  const hasBisCredit = Object.keys(SERIES).some(id => /^BIS_[A-Z]{2}_(CREDIT|RPP)/.test(id));
+  if (hasBisPolicy) list.push({ code: 'BIS_POLICY', label: 'Policy Rate (BIS)', kind: 'bis' });
+  if (hasBisCredit) list.push({ code: 'BIS_CREDIT', label: 'Credit & Property (BIS)', kind: 'bis' });
+  return list.sort((a, b) => a.label.localeCompare(b.label));
+}
+// sub-item ต่อ dataset: signature ไม่รวมประเทศ (dims ล้วนสำหรับ IMF, suffix
+// สำหรับ BIS) → { label, members: {countryLabel: seriesId} }
+function groupSubItemsFor(dataset) {
+  const items = {};
+  Object.keys(SERIES).forEach(id => {
+    const meta = SERIES[id]?.meta;
+    if (!meta?.country) return;
+    let sig, label;
+    if (dataset.kind === 'imf') {
+      if (meta.category?.code !== dataset.code) return;
+      const dims = meta.dims || {};
+      const keys = Object.keys(dims).sort();
+      sig = keys.map(k => dims[k].code).join('|') || '(none)';
+      label = keys.map(k => dims[k].label).join(' — ') || dataset.label;
+    } else {
+      const m = id.match(/^BIS_([A-Z]{2})_(.+)$/);
+      if (!m) return;
+      const suffix = m[2];
+      const isPolicy = suffix === 'CBPOL';
+      if (dataset.code === 'BIS_POLICY' && !isPolicy) return;
+      if (dataset.code === 'BIS_CREDIT' && isPolicy) return;
+      sig = suffix;
+      label = BIS_SUFFIX_LABELS[suffix] || suffix;
+    }
+    if (!items[sig]) items[sig] = { label, members: {} };
+    items[sig].members[meta.country.label] = id;
+  });
+  return items;
+}
+
+let groupState = { dataset: null, subItems: null, sig: null, selectedCountries: new Set() };
 window.startGroupFlow = function() {
   closeChartTypeModal();
-  groupState = { familyIdx: null, selectedIds: new Set() };
-  document.getElementById('grp-indicator-list').innerHTML = INDICATOR_FAMILIES.map((f, i) => `
-    <div class="cat-item" style="padding:10px" onclick="selectGroupIndicator(${i})">
-      ${f.label} <span class="arrow">›</span>
-    </div>`).join('');
-  document.getElementById('grp-step-indicator').style.display = 'block';
+  groupState = { dataset: null, subItems: null, sig: null, selectedCountries: new Set() };
+  const datasets = groupDatasetList();
+  document.getElementById('grp-dataset-list').innerHTML = datasets.length
+    ? datasets.map((d, i) => `<div class="cat-item" style="padding:10px" onclick="selectGroupDataset(${i})">${d.label} <span class="arrow">›</span></div>`).join('')
+    : '<div class="cat-empty-hint">ยังไม่มีข้อมูล</div>';
+  window._groupDatasets = datasets; // เก็บไว้ใช้ index lookup (ไม่ผูก global const อีกแล้ว)
+  document.getElementById('grp-step-dataset').style.display = 'block';
+  document.getElementById('grp-step-subitem').style.display = 'none';
   document.getElementById('grp-step-countries').style.display = 'none';
   document.getElementById('group-modal').classList.add('show');
 };
-window.selectGroupIndicator = function(idx) {
-  groupState = { familyIdx: idx, selectedIds: new Set() };
-  const family = INDICATOR_FAMILIES[idx];
-  document.getElementById('grp-countries-title').textContent = `${family.label} — เลือกประเทศ`;
-  document.getElementById('grp-countries').innerHTML = family.members.map(m => `
+window.selectGroupDataset = function(idx) {
+  const dataset = window._groupDatasets[idx];
+  groupState.dataset = dataset;
+  groupState.subItems = groupSubItemsFor(dataset);
+  document.getElementById('grp-subitem-title').textContent = `${dataset.label} — เลือก Sub-item`;
+  const sigs = Object.keys(groupState.subItems).sort((a, b) => groupState.subItems[a].label.localeCompare(groupState.subItems[b].label));
+  document.getElementById('grp-subitem-list').innerHTML = sigs.map(sig => `
+    <div class="cat-item" style="padding:10px" onclick="selectGroupSubitem('${sig.replace(/'/g, "\\'")}')">
+      ${groupState.subItems[sig].label} <span class="hint" style="margin-right:6px">(${Object.keys(groupState.subItems[sig].members).length} ประเทศ)</span><span class="arrow">›</span>
+    </div>`).join('');
+  document.getElementById('grp-step-dataset').style.display = 'none';
+  document.getElementById('grp-step-subitem').style.display = 'block';
+};
+window.backToGroupDataset = function() {
+  document.getElementById('grp-step-subitem').style.display = 'none';
+  document.getElementById('grp-step-dataset').style.display = 'block';
+};
+window.selectGroupSubitem = function(sig) {
+  groupState.sig = sig;
+  groupState.selectedCountries = new Set();
+  const item = groupState.subItems[sig];
+  document.getElementById('grp-countries-title').textContent = `${item.label} — เลือกประเทศ`;
+  document.getElementById('grp-countries').innerHTML = Object.entries(item.members).sort((a, b) => a[0].localeCompare(b[0])).map(([country, id]) => `
     <label class="grp-country-row">
-      <input type="checkbox" value="${m.id}" onchange="toggleGroupCountry('${m.id}',this.checked)">
-      ${m.country} <span class="grp-series-name">(${SERIES[m.id]?.name || m.id})</span>
+      <input type="checkbox" value="${id}" onchange="toggleGroupCountry('${country.replace(/'/g, "\\'")}',this.checked)">
+      ${country} <span class="grp-series-name">(${SERIES[id]?.name || id})</span>
     </label>`).join('');
-  document.getElementById('grp-step-indicator').style.display = 'none';
+  document.getElementById('grp-step-subitem').style.display = 'none';
   document.getElementById('grp-step-countries').style.display = 'block';
 };
-window.backToGroupIndicator = function() {
+window.backToGroupSubitem = function() {
   document.getElementById('grp-step-countries').style.display = 'none';
-  document.getElementById('grp-step-indicator').style.display = 'block';
+  document.getElementById('grp-step-subitem').style.display = 'block';
 };
-window.toggleGroupCountry = function(id, checked) {
-  if (checked) groupState.selectedIds.add(id); else groupState.selectedIds.delete(id);
+window.toggleGroupCountry = function(country, checked) {
+  if (checked) groupState.selectedCountries.add(country); else groupState.selectedCountries.delete(country);
 };
 window.confirmGroupSelection = function() {
-  const family = INDICATOR_FAMILIES[groupState.familyIdx];
-  const picked = family.members.filter(m => groupState.selectedIds.has(m.id));
+  const item = groupState.subItems[groupState.sig];
+  const picked = [...groupState.selectedCountries].map(c => item.members[c]);
   if (!picked.length) { alert('เลือกอย่างน้อย 1 ประเทศ'); return; }
   document.getElementById('group-modal').classList.remove('show');
-  const seriesList = picked.map((m, i) => ({ id: m.id, axis: 'L', fn: m.fn || 'raw', color: COLORS[i % COLORS.length] }));
-  openChartModal(chartPickerPageId, null, seriesList, family.label);
+  const seriesList = picked.map((id, i) => ({ id, axis: 'L', fn: 'raw', color: COLORS[i % COLORS.length] }));
+  openChartModal(chartPickerPageId, null, seriesList, `${groupState.dataset.label} — ${item.label}`);
 };
 
 // ── Non-group (catalog) flow — ใช้ร่วมกันทั้ง "+ Chart" (custom page) และ
@@ -3525,34 +3607,161 @@ window.catalogModalBack = function() {
   document.getElementById('catalog-modal').classList.remove('show');
   if (catalogTarget.type !== 'dashboard-card') openChartTypeModal(chartPickerPageId);
 };
-// ประเทศที่มี series น้อยเกินไป (เช่น aggregate/entity code แปลกๆ ที่มีแค่
-// 1-2 series) ซ่อนออกจากเมนูเลือกประเทศอิสระ — กันเมนูยาวเปล่าประโยชน์ด้วย
-// ประเทศที่แทบไม่มีอะไรให้เลือก (ตัดสินใจ 2026-08-23 ร่วมกับ user)
-const CATALOG_MIN_SERIES_PER_COUNTRY = 3;
+// เมนูเลือกประเทศอิสระ (custom chart picker) กรองเหลือ ~100 ประเทศ (ตัดสินใจ
+// 2026-08-23 ร่วมกับ user — เกณฑ์เดิมทั้งหมด (จำนวน series ขั้นต่ำ / GDP
+// threshold ตัวเดียว) ตัดประเทศสำคัญทิ้งไปด้วยเสมอ เปลี่ยนมาใช้ allowlist ที่
+// สร้างจาก: ASEAN 10 + EU 27 + HKG/MAC (เก็บพิเศษ) + อีก 61 ประเทศเรียงตาม
+// GDP จริงจาก IMF DataMapper API (NGDPD) จนครบ 100 — ตัดกลุ่ม "การเมือง/
+// มนุษยธรรม" (สงคราม/วิกฤต) ออกจากการเรียงแม้ GDP จะเข้าเกณฑ์ก็ตาม เพื่อไม่ให้
+// ประเทศพวกนี้แย่งที่ประเทศอื่นที่ใหญ่กว่าจริง — สำคัญ: filter นี้ใช้เฉพาะ
+// เมนู "เลือกประเทศอิสระ" นี้จุดเดียว ไม่กระทบโหมด "เปรียบเทียบทุกประเทศ"
+// (group mode, ดึงมาครบไม่กรอง) และไม่กระทบข้อมูลฝั่ง backend/Firestore เลย
+const CATALOG_FREE_PICKER_ALLOWED_CODES = new Set([
+  // COD (DR Congo) ตัดออก 2026-08-23 — ข้อมูลเก่าเกิน (ล่าสุดปี 2017) แทนที่
+  // ด้วย Nepal ตามลำดับ GDP ถัดไป
+  'AGO','ARE','ARG','AUS','AUT','AZE','BEL','BGD','BGR','BLR','BOL','BRA',
+  'BRN','CAN','CHE','CHL','CHN','CIV','CMR','COL','CRI','CYP','CZE',
+  'DEU','DNK','DOM','DZA','ECU','EGY','ESP','EST','ETH','FIN','FRA','GBR',
+  'GHA','GRC','GTM','HKG','HRV','HUN','IDN','IND','IRL','IRN','IRQ','ISR',
+  'ITA','JOR','JPN','KAZ','KEN','KHM','KOR','KWT','LAO','LKA','LTU','LUX',
+  'LVA','MAC','MAR','MEX','MLT','MMR','MYS','NGA','NLD','NOR','NPL','NZL','OMN',
+  'PAK','PAN','PER','PHL','POL','PRT','PRY','QAT','ROU','RUS','SAU','SGP',
+  'SRB','SVK','SVN','SWE','THA','TKM','TUR','TWN','TZA','UGA','UKR','URY',
+  'USA','UZB','VNM','ZAF',
+  // เพิ่มคืนตามที่ user ขอ 2026-08-23 (ไม่ต้องกรองแม้จะเข้าเกณฑ์การเมือง/
+  // มนุษยธรรมเดิม) — ทำให้รวมเป็น 103 ไม่ใช่ 100 แล้ว
+  'VEN','ZWE','GEO',
+  // region/aggregate code — กรองเหลือแค่ตัวที่มีข้อมูลหลากหลาย dataset จริง
+  // (ตัดสินใจ 2026-08-23: เอาที่รายงานมากกว่า 1 dataset เท่านั้น แล้วตัด
+  // Africa/Oceania/Americas ออกเพิ่มตามที่ user ขอ — เหลือ 7 ตัว)
+  'G163','G001','G110','G200','G119','G120','U142',
+]);
+const CATALOG_REGIONAL_CODES = new Set(['G163','G001','G110','G200','G119','G120','U142']);
+// จัดกลุ่มเมนูเลือกประเทศอิสระเป็นกลุ่มหลัก + กลุ่มย่อย (ตัดสินใจ 2026-08-23
+// ร่วมกับ user) — Advanced Economies แตกเป็น G7/EU/Other, Emerging Asia
+// แตกเป็น ASEAN (ไทยขึ้นก่อนเสมอ)/Other — ประเทศที่ไม่เข้ากลุ่มไหนเลยตกไปที่
+// "Others" อัตโนมัติ อิงเกณฑ์ IMF Advanced Economies classification เป็นหลัก
+// — ลำดับความสำคัญ: G7 มาก่อน EU เสมอ (กันประเทศอย่าง France/Germany/Italy
+// ที่เป็นทั้งคู่ ถูก list ซ้ำ 2 ที่)
+const CATALOG_ASEAN_ORDER = ['THA','BRN','IDN','KHM','LAO','MMR','MYS','PHL','VNM']; // ไทยก่อนเสมอ ที่เหลือ A-Z
+const CATALOG_COUNTRY_GROUPS = [
+  ['Advanced Economies', [
+    ['G7', new Set(['CAN','FRA','DEU','GBR','ITA','JPN','USA'])],
+    ['EU', new Set(['AUT','BEL','CYP','CZE','DNK','ESP','EST','FIN','GRC','IRL','LTU','LUX','LVA','MLT','NLD','PRT','SVK','SVN','SWE'])],
+    ['Other', new Set(['AUS','CHE','HKG','ISR','KOR','MAC','NZL','NOR','SGP','TWN'])],
+  ]],
+  ['Emerging Asia', [
+    ['ASEAN', new Set(CATALOG_ASEAN_ORDER)],
+    ['Other', new Set(['AZE','BGD','CHN','IND','KAZ','LKA','NPL','PAK','TKM','UZB'])],
+  ]],
+  ['Latin America', [['', new Set(['ARG','BOL','BRA','CHL','COL','CRI','DOM','ECU','GTM','MEX','PAN','PER','PRY','URY','VEN'])]]],
+];
+function catalogGroupFor(countryCode) {
+  if (countryCode && CATALOG_REGIONAL_CODES.has(countryCode)) return ['Global & Regional', ''];
+  if (countryCode) {
+    for (const [label, subgroups] of CATALOG_COUNTRY_GROUPS) {
+      for (const [subLabel, codes] of subgroups) if (codes.has(countryCode)) return [label, subLabel];
+    }
+  }
+  return ['Others', ''];
+}
+const CATALOG_GROUP_ORDER = ['Advanced Economies', 'Emerging Asia', 'Latin America', 'Others', 'Global & Regional'];
 function renderCatalogCountries() {
-  const entries = catalogEntries();
-  const counts = {};
-  entries.forEach(e => { counts[e.country] = (counts[e.country] || 0) + 1; });
-  const countries = [...new Set(entries.map(e => e.country))]
-    .filter(c => counts[c] >= CATALOG_MIN_SERIES_PER_COUNTRY)
-    .sort();
-  document.getElementById('cat-col-country').innerHTML = countries.map(c => `
-    <div class="cat-item ${catalogState.country === c ? 'selected' : ''}" onclick="selectCatalogCountry('${c.replace(/'/g, "\\'")}')">
-      ${c} <span class="arrow">›</span>
-    </div>`).join('');
+  const entries = catalogEntries().filter(e => !e.countryCode || CATALOG_FREE_PICKER_ALLOWED_CODES.has(e.countryCode));
+  const byCountry = new Map(); // country label -> countryCode (ตัวแทน, ใช้หาว่ากลุ่มไหน)
+  // ชื่อประเทศเดียวกันอาจมีทั้ง series เก่า (ไม่มี countryCode เช่น demo
+  // ticker) กับ series ใหม่ (มี countryCode) ปนกัน — ต้องเลือกตัวที่ "มี code"
+  // ไว้ก่อนเสมอ ไม่งั้นจะเข้ากลุ่มผิด (บั๊กที่เจอจริง: Thailand หลุดไป
+  // "Others" เพราะ series เก่าไม่มี code มาก่อนใน entries)
+  entries.forEach(e => {
+    if (!byCountry.has(e.country) || (!byCountry.get(e.country) && e.countryCode)) {
+      byCountry.set(e.country, e.countryCode);
+    }
+  });
+  // grouped[mainGroup][subGroup] = [country label, ...]
+  const grouped = {};
+  for (const [country, code] of byCountry) {
+    const [g, sub] = catalogGroupFor(code);
+    grouped[g] = grouped[g] || {};
+    (grouped[g][sub] = grouped[g][sub] || []).push([country, code]);
+  }
+  let html = '';
+  CATALOG_GROUP_ORDER.forEach(g => {
+    if (!grouped[g]) return;
+    const subLabels = Object.keys(grouped[g]).sort((a,b) => a === '' ? -1 : b === '' ? 1 : a.localeCompare(b));
+    subLabels.forEach(sub => {
+      const headerText = sub ? `${g} — ${sub}` : g;
+      html += `<div class="cat-group-header">${headerText}</div>`;
+      let items = grouped[g][sub];
+      if (sub === 'ASEAN') {
+        // ไทยก่อนเสมอ ที่เหลือเรียงตามลำดับ CATALOG_ASEAN_ORDER
+        items = items.slice().sort((a,b) => CATALOG_ASEAN_ORDER.indexOf(a[1]) - CATALOG_ASEAN_ORDER.indexOf(b[1]));
+      } else {
+        items = items.slice().sort((a,b) => a[0].localeCompare(b[0]));
+      }
+      html += items.map(([c]) => `
+        <div class="cat-item ${catalogState.country === c ? 'selected' : ''}" onclick="selectCatalogCountry('${c.replace(/'/g, "\\'")}')">
+          ${c} <span class="arrow">›</span>
+        </div>`).join('');
+    });
+  });
+  document.getElementById('cat-col-country').innerHTML = html;
+}
+// จัดกลุ่ม Category (column 2) เป็น 7 supercategory (ตัดสินใจ 2026-08-23 ร่วม
+// กับ user) — dataset ของ IMF (CPI/PPI/QNEA/ฯลฯ) map เข้า supercategory ผ่าน
+// ตารางนี้ ส่วน series กลุ่ม BOT/SET/BIS/legacy category_code ก็คือ
+// supercategory code อยู่แล้ว (migrate ไปตรงๆ ไม่ต้อง map ซ้ำ)
+const CATALOG_SUPERCATEGORY_MAP = {
+  CPI: 'Price Sector', CPI_WCA: 'Price Sector', PPI: 'Price Sector', PCPS: 'Price Sector',
+  CTOT: 'External Trade & BOP', ITG: 'External Trade & BOP',
+  EER: 'Monetary & Exchange rate', ER: 'Monetary & Exchange rate', IL: 'Monetary & Exchange rate', MFS_MA: 'Monetary & Exchange rate',
+  MFS_CBS: 'Credit & Financial Stability', MFS_FC: 'Credit & Financial Stability', MFS_ODC: 'Credit & Financial Stability', MFS_OFC: 'Credit & Financial Stability',
+  MFS_FMP: 'Financial Market, Equity & Bonds', MFS_IR: 'Financial Market, Equity & Bonds',
+  PI: 'Economic Activity', PI_WCA: 'Economic Activity', QGDP_WCA: 'Economic Activity', QNEA: 'Economic Activity',
+};
+function catalogSuperCategoryFor(e) {
+  if (e.categoryCode && CATALOG_SUPERCATEGORY_MAP[e.categoryCode]) return CATALOG_SUPERCATEGORY_MAP[e.categoryCode];
+  return e.category || 'Others'; // BOT/SET/BIS/legacy: category label ตรงนี้คือ supercategory label อยู่แล้ว
 }
 window.selectCatalogCountry = function(country) {
   catalogState.country = country; catalogState.category = null;
   renderCatalogCountries();
-  const categories = [...new Set(catalogEntries().filter(e => e.country === country).map(e => e.category))].sort();
-  document.getElementById('cat-col-category').innerHTML = categories.map(c => `
-    <div class="cat-item" onclick="selectCatalogCategory('${c.replace(/'/g, "\\'")}')">${c} <span class="arrow">›</span></div>`).join('');
+  const entries = catalogEntries().filter(e => e.country === country);
+  // grouped[superCategory][datasetCategory] = true (ใช้แค่เก็บว่ามีจริง)
+  const grouped = {};
+  entries.forEach(e => {
+    const sup = catalogSuperCategoryFor(e);
+    const sub = CATALOG_SUPERCATEGORY_MAP[e.categoryCode] ? e.category : ''; // ไม่มี sub ถ้า category เดิมคือ supercategory อยู่แล้ว
+    grouped[sup] = grouped[sup] || {};
+    grouped[sup][sub] = true;
+  });
+  let html = '';
+  Object.keys(grouped).sort().forEach(sup => {
+    const subLabels = Object.keys(grouped[sup]).sort();
+    html += `<div class="cat-group-header">${sup}</div>`;
+    if (subLabels.length === 1 && subLabels[0] === '') {
+      // supercategory เดียว ไม่มี dataset ย่อย (BOT/SET/BIS/legacy ล้วนๆ) —
+      // แสดงเป็น item เดียวใต้ header เลย ไม่ต้องมี sub-level ซ้อนอีกชั้น
+      html += `<div class="cat-item" onclick="selectCatalogCategory('${sup.replace(/'/g, "\\'")}','')">All <span class="arrow">›</span></div>`;
+    } else {
+      subLabels.forEach(sub => {
+        // sub='' = series ที่ไม่มี dataset ย่อย (BOT/NESDC เดิม, e.category ตรงกับชื่อ
+        // supercategory เป๊ะ) — ต้องส่ง sup แทน '' ตอน filter ไม่งั้น '' (falsy)
+        // จะโดนตีความว่า "เอาทั้งหมด" ปนกับ IMF dataset อื่นในหมวดเดียวกันไปด้วย
+        const label = sub || 'General';
+        const subArg = sub || sup;
+        html += `<div class="cat-item" onclick="selectCatalogCategory('${sup.replace(/'/g, "\\'")}','${subArg.replace(/'/g, "\\'")}')">${label} <span class="arrow">›</span></div>`;
+      });
+    }
+  });
+  document.getElementById('cat-col-category').innerHTML = html;
   document.getElementById('cat-col-series').innerHTML = '';
 };
-window.selectCatalogCategory = function(category) {
-  catalogState.category = category;
+window.selectCatalogCategory = function(superCategory, subDataset) {
+  catalogState.category = subDataset || superCategory;
   const entries = catalogEntries().filter(e =>
-    e.country === catalogState.country && e.category === category);
+    e.country === catalogState.country && catalogSuperCategoryFor(e) === superCategory &&
+    (subDataset ? e.category === subDataset : true));
   document.getElementById('cat-col-series').innerHTML = entries.length
     ? entries.map(e => `
       <label class="cat-item leaf">
@@ -3575,6 +3784,54 @@ window.confirmCatalogSelection = function() {
     if (card) { card.seriesIds = ids; saveConfig(); renderDashboard(); }
     return;
   }
+  const seriesList = ids.map((id, i) => ({ id, axis: 'L', fn: 'raw', color: COLORS[i % COLORS.length] }));
+  openChartModal(chartPickerPageId, null, seriesList);
+};
+
+// ════════════════════════════════════════════════════
+//  TH ECONOMIC DASHBOARD FLOW — series ไทยล้วน (ไม่รวม IMF/BIS) 2 คอลัมน์
+//  (Category [7 supercategory] → Series) ไม่มี Country เพราะเป็นไทยล้วน
+//  (ตัดสินใจ 2026-08-23 ร่วมกับ user)
+// ════════════════════════════════════════════════════
+function thDashEntries() {
+  return catalogEntries().filter(e =>
+    e.country === 'Thailand' && !e.id.startsWith('BIS_') && !CATALOG_SUPERCATEGORY_MAP[e.categoryCode]);
+}
+let thDashState = { category: null, selected: new Set() };
+window.startThDashboardFlow = function() {
+  closeChartTypeModal();
+  thDashState = { category: null, selected: new Set() };
+  const categories = [...new Set(thDashEntries().map(e => e.category))].sort();
+  document.getElementById('th-dash-col-category').innerHTML = categories.map(c => `
+    <div class="cat-item" onclick="selectThDashCategory('${c.replace(/'/g, "\\'")}')">${c} <span class="arrow">›</span></div>`).join('');
+  document.getElementById('th-dash-col-series').innerHTML = '';
+  document.getElementById('th-dash-selected-count').textContent = 'ยังไม่เลือก series';
+  document.getElementById('th-dash-modal').classList.add('show');
+};
+window.selectThDashCategory = function(category) {
+  thDashState.category = category;
+  const entries = thDashEntries().filter(e => e.category === category);
+  document.getElementById('th-dash-col-series').innerHTML = entries.length
+    ? entries.map(e => `
+      <label class="cat-item leaf">
+        <input type="checkbox" value="${e.id}" ${thDashState.selected.has(e.id) ? 'checked' : ''} onchange="toggleThDashSeries('${e.id}',this.checked)">
+        <span>${e.name}</span>
+      </label>`).join('')
+    : '<div class="cat-empty-hint">ไม่มี series ในหมวดนี้</div>';
+};
+window.toggleThDashSeries = function(id, checked) {
+  if (checked) thDashState.selected.add(id); else thDashState.selected.delete(id);
+  const n = thDashState.selected.size;
+  document.getElementById('th-dash-selected-count').textContent = n ? `เลือกไว้ ${n} series` : 'ยังไม่เลือก series';
+};
+window.thDashModalBack = function() {
+  document.getElementById('th-dash-modal').classList.remove('show');
+  openChartTypeModal(chartPickerPageId);
+};
+window.confirmThDashSelection = function() {
+  const ids = [...thDashState.selected];
+  if (!ids.length) { alert('เลือกอย่างน้อย 1 series'); return; }
+  document.getElementById('th-dash-modal').classList.remove('show');
   const seriesList = ids.map((id, i) => ({ id, axis: 'L', fn: 'raw', color: COLORS[i % COLORS.length] }));
   openChartModal(chartPickerPageId, null, seriesList);
 };
