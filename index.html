@@ -3483,7 +3483,12 @@ function allSelectableIds() {
   // นี้ตั้งแต่ต้น (bug ที่เจอจริง 2026-08-23 ตอนทดสอบบน browser)
   Object.keys(SERIES).forEach(id => {
     const meta = SERIES[id].meta;
-    if (meta && meta.country && meta.category) set.add(id);
+    if (!meta || !meta.country || !meta.category) return;
+    // IL (Batch 2) ยัง push ไม่ครบ + label บาง country ยังไม่ได้ relabel —
+    // ซ่อนออกจาก catalog ไปก่อนชั่วคราวจนกว่าจะ backfill/verify เสร็จสมบูรณ์
+    // (ตัดสินใจ 2026-08-23) ลบเงื่อนไขนี้ทิ้งได้เมื่อ IL พร้อมจริง
+    if (meta.category.code === 'IL') return;
+    set.add(id);
   });
   return set;
 }
@@ -3520,8 +3525,17 @@ window.catalogModalBack = function() {
   document.getElementById('catalog-modal').classList.remove('show');
   if (catalogTarget.type !== 'dashboard-card') openChartTypeModal(chartPickerPageId);
 };
+// ประเทศที่มี series น้อยเกินไป (เช่น aggregate/entity code แปลกๆ ที่มีแค่
+// 1-2 series) ซ่อนออกจากเมนูเลือกประเทศอิสระ — กันเมนูยาวเปล่าประโยชน์ด้วย
+// ประเทศที่แทบไม่มีอะไรให้เลือก (ตัดสินใจ 2026-08-23 ร่วมกับ user)
+const CATALOG_MIN_SERIES_PER_COUNTRY = 3;
 function renderCatalogCountries() {
-  const countries = [...new Set(catalogEntries().map(e => e.country))].sort();
+  const entries = catalogEntries();
+  const counts = {};
+  entries.forEach(e => { counts[e.country] = (counts[e.country] || 0) + 1; });
+  const countries = [...new Set(entries.map(e => e.country))]
+    .filter(c => counts[c] >= CATALOG_MIN_SERIES_PER_COUNTRY)
+    .sort();
   document.getElementById('cat-col-country').innerHTML = countries.map(c => `
     <div class="cat-item ${catalogState.country === c ? 'selected' : ''}" onclick="selectCatalogCountry('${c.replace(/'/g, "\\'")}')">
       ${c} <span class="arrow">›</span>
