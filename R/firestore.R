@@ -49,7 +49,16 @@ dedup_sort_points <- function(pts) {
 # Value แบบ recursive — ใช้กับ meta ที่เพิ่ม nested map เข้ามา (schema ใหม่
 # 2026-08-22: meta$country/meta$category/meta$dims เป็น map ซ้อน map)
 firestore_encode_value <- function(v) {
-  if (is.list(v) && !is.null(names(v)) && all(names(v) != "")) {
+  # list() ว่างเปล่า (เช่น dims ของ series ที่ไม่มี sub-item) ต้องเป็น
+  # empty map เสมอ ไม่ใช่ string ว่าง — names(list()) คืน NULL ทำให้เงื่อนไข
+  # เดิม (!is.null(names(v))) หลุดไปตกที่ stringValue="" ผิดพลาด แก้ด้วยเช็ค
+  # length(v)==0 แยกออกมาก่อน
+  if (is.list(v) && length(v) == 0) {
+    # setNames(list(), character(0)) กัน jsonlite serialize เป็น "[]" (array)
+    # แทน "{}" (object) — R list() เปล่าไม่มี names() (NULL) จึง ambiguous,
+    # ต้องบังคับ names เป็น character(0) explicit ให้ jsonlite รู้ว่าเป็น object
+    list(mapValue = list(fields = setNames(list(), character(0))))
+  } else if (is.list(v) && !is.null(names(v)) && all(names(v) != "")) {
     list(mapValue = list(fields = lapply(v, firestore_encode_value)))
   } else if (is.logical(v)) {
     list(booleanValue = isTRUE(v))
@@ -131,5 +140,35 @@ push_series <- function(token, doc_id, name, df, is_incremental = FALSE, meta = 
     if (is_incremental) message(sprintf("  ✓ %s (+%d new points)", doc_id, nrow(df)))
     else                message(sprintf("  ✓ %s (%d points)", doc_id, nrow(df)))
   }
+  TRUE
+}
+
+#' PATCH เฉพาะ field "meta" (updateMask=["meta"] เท่านั้น) — ไม่แตะ
+#' name/data/updated เลย ต่างจาก push_series() ที่บังคับเขียนทับ 3 field
+#' นั้นทุกครั้งไม่ว่าจะส่ง meta หรือไม่ก็ตาม ใช้กรณี migrate schema (เติม
+#' country/category/dims) ให้ series ที่ doc_id ไม่เปลี่ยนและ data มีอยู่แล้ว
+#' (BOT/SET/BIS/THAIBMA — ตัดสินใจ 2026-08-23 ระหว่างออกแบบ schema ใหม่)
+patch_series_meta <- function(token, doc_id, meta, quiet = FALSE) {
+  url <- sprintf(
+    "https://firestore.googleapis.com/v1/projects/%s/databases/(default)/documents/%s/%s",
+    PROJECT_ID, COLLECTION, doc_id
+  )
+  body <- list(fields = list(
+    meta = list(mapValue = list(fields = lapply(meta, firestore_encode_value)))
+  ))
+  resp <- request(url) |>
+    req_url_query(`updateMask.fieldPaths` = "meta", .multi = "explode") |>
+    req_method("PATCH") |>
+    req_auth_bearer_token(token) |>
+    req_body_json(body, auto_unbox = TRUE) |>
+    req_error(is_error = function(resp) FALSE) |>
+    req_perform()
+
+  status <- resp_status(resp)
+  if (status >= 300) {
+    warning(sprintf("  ✗ %s: HTTP %d — %s", doc_id, status, substr(resp_body_string(resp), 1, 200)))
+    return(FALSE)
+  }
+  if (!quiet) message(sprintf("  ✓ %s (meta patched)", doc_id))
   TRUE
 }

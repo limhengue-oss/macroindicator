@@ -175,14 +175,9 @@ CATALOG <- tribble(
   "BOT_USDTHB",           "FMEXRUSDAVGMDD015588", "D",   "2002-01-02",
   # ดอกเบี้ย/การเงิน
   "BOT_M2",               "EILEIM00014",          "M",   "2000-01-01",
-  "BOT_YIELD_1M",         "FMRTINTM00284",        "M",   "2024-07-01",
-  "BOT_YIELD_3M",         "FMRTINTM00285",        "M",   "2024-07-01",
-  "BOT_YIELD_6M",         "FMRTINTM00286",        "M",   "2024-07-01",
-  "BOT_YIELD_1Y",         "FMRTINTM00287",        "M",   "2024-07-01",
-  "BOT_YIELD_2Y",         "FMRTINTM00288",        "M",   "2024-07-01",
-  "BOT_YIELD_5Y",         "FMRTINTM00291",        "M",   "2024-07-01",
-  "BOT_YIELD_10Y",        "FMRTINTM00296",        "M",   "2024-07-01",
-  "BOT_YIELD_20Y",        "FMRTINTM00306",        "M",   "2024-07-01",
+  # BOT_YIELD_* (1M/3M/6M/1Y/2Y/5Y/10Y/20Y) ตัดออกแล้ว 2026-08-23 — ตัดสินใจ
+  # ร่วมกับ user: ข้อมูลชุดเดียวกับ THAIBMA_YIELD_* (fetch_thaibma.R) แต่
+  # THAIBMA เป็นรายวันและอัปเดตถี่กว่า BOT (รายเดือน) ให้ใช้ THAIBMA แทนทั้งหมด
   # การคลัง
   "BOT_GOVDEBT",          "PF00000000M00068",     "M",   "2007-01-01",
   "BOT_CASHBAL",          "PFCG000000M000465",    "M",   "2009-01-01",
