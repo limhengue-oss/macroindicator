@@ -5,3 +5,4 @@
 workfile/
 scratch_imf/
 functions/node_modules/
+.playwright-mcp/

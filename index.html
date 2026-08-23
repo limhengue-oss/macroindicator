@@ -530,7 +530,7 @@ input[type=range] { width:80px; accent-color:var(--blue); }
 
 <script type="module">
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
-import { getFirestore, collection, getDocs, query, where, documentId } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
+import { getFirestore, collection, getDocs, query, where, documentId, orderBy, limit, startAfter } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
 import { initializeAppCheck, ReCaptchaV3Provider } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app-check.js';
 
 const firebaseConfig = {
@@ -823,10 +823,23 @@ async function fetchOilFund() {
 // fetch_imf_multi.R's "CPI"/"CPI_WCA" dataset ครอบคลุมแทนได้ครบ 2026-08-23)
 // เลยไม่ต้อง exclude "IMF_" prefix ออกจากการโหลดหลักอีกต่อไป — โหลดทั้ง
 // collection เป็นก้อนเดียวตรงๆ ได้เลย
+// paginate ทีละ 500 doc แทนการ getDocs(collection(db,'series')) เดียวรวด
+// ทั้ง collection — เจอจริง 2026-08-23: หลัง migrate schema ใหม่ collection
+// มีเกือบ 16,000 doc (บาง doc data array ยาวหลักพันจุด) ยิงทีเดียวชน
+// deadline-exceeded ของ Firestore ทุกครั้ง ต้อง paginate ด้วย orderBy +
+// startAfter(documentId) เหมือนที่ backend script ใช้กับ documents.list
 async function fetchRest() {
   const alreadyLoaded = new Set(Object.keys(SERIES));
-  const snap = await getDocs(collection(db, 'series'));
-  snap.forEach(doc => { if (!alreadyLoaded.has(doc.id)) storeDoc(doc); });
+  let cursor = null;
+  for (;;) {
+    let q = query(collection(db, 'series'), orderBy(documentId()), limit(500));
+    if (cursor) q = query(collection(db, 'series'), orderBy(documentId()), startAfter(cursor), limit(500));
+    const snap = await getDocs(q);
+    if (snap.empty) break;
+    snap.forEach(doc => { if (!alreadyLoaded.has(doc.id)) storeDoc(doc); });
+    if (snap.size < 500) break;
+    cursor = snap.docs[snap.docs.length - 1].id;
+  }
 }
 
 async function fetchNews() {
@@ -2642,21 +2655,29 @@ function drawChart(page,chart) {
 // กลาง (schema ใหม่ 2026-08-23: meta.country/category/dims เป็น field จริง
 // ไม่ต้อง parse doc_id/regex ชื่ออีกต่อไป) — เลือกเฉพาะ series ที่เป็น
 // "recommended" index type (CPI หรือ HICP แล้วแต่ประเทศ) + เป็น native Index
-// (ไม่ใช่ Weight,Percent) ตรงกับที่ GlobalCPI เดิมเคยทำ
+// (ไม่ใช่ Weight,Percent) ตรงกับที่ GlobalCPI เดิมเคยทำ — รวม "CPI_WCA"
+// (World/regional aggregate, ใช้กับกลุ่ม WORLD ใน INFLATION_GROUPS) ด้วย
+// ไม่มี isRecommended field เลย (fetch_imf_multi.R ไม่ได้ set ให้ dataset นี้
+// เพราะไม่มี CPI/HICP ให้เลือกแบบ dataset "CPI" ปกติ ตัวเดียวก็ default อยู่แล้ว)
 let _inflationIndex = null;
 function getInflationIndex() {
   if (_inflationIndex) return _inflationIndex;
   const idx = {};
   Object.keys(SERIES).forEach(id => {
     const meta = SERIES[id].meta;
-    if (!meta || !meta.category || meta.category.code !== 'CPI') return;
-    if (!meta.isRecommended) return;
+    if (!meta || !meta.category) return;
+    const isCpiWca = meta.category.code === 'CPI_WCA';
+    if (meta.category.code !== 'CPI' && !isCpiWca) return;
+    if (!isCpiWca && !meta.isRecommended) return;
     const dims = meta.dims || {};
     const tt = dims.TYPE_OF_TRANSFORMATION && dims.TYPE_OF_TRANSFORMATION.label;
-    const coicop = dims.COICOP_1999;
-    if (!tt || !tt.startsWith('Index') || !coicop || !meta.country) return;
+    // CPI_WCA ไม่มี dims.COICOP_1999 เลย (headline-only aggregate ไม่มี
+    // COICOP breakdown ให้ตั้งแต่ต้น) — ถือเป็น ALL_ITEMS (headline) โดย
+    // implicit แทนที่จะ require ว่าต้องมี dim นี้เสมอแบบ dataset "CPI" ปกติ
+    const coicopCode = isCpiWca ? 'ALL_ITEMS' : dims.COICOP_1999 && dims.COICOP_1999.code;
+    if (!tt || !tt.startsWith('Index') || !coicopCode || !meta.country) return;
     if (!idx[meta.country.code]) idx[meta.country.code] = {};
-    idx[meta.country.code][coicop.code] = id;
+    idx[meta.country.code][coicopCode] = id;
   });
   _inflationIndex = idx;
   return idx;
@@ -3455,6 +3476,15 @@ let catalogTarget = { type: 'chart' };
 function allSelectableIds() {
   const set = new Set();
   Object.values(SERIES_GROUPS).forEach(ids => ids.forEach(id => set.add(id)));
+  // schema ใหม่ (2026-08-22/23): series ไหนก็ตามที่มี meta.country/category
+  // (R เขียนตอน push แล้ว) เลือกได้ใน catalog เสมอ ไม่ต้อง maintain
+  // SERIES_GROUPS ตายตัวแยกอีกชุด — ก่อนหน้านี้ series กลุ่ม IMF multi-dataset
+  // (CPI/CTOT/ER/QNEA ฯลฯ 14,000+ series) ไม่เคยเลือกได้เลยเพราะไม่มีใน list
+  // นี้ตั้งแต่ต้น (bug ที่เจอจริง 2026-08-23 ตอนทดสอบบน browser)
+  Object.keys(SERIES).forEach(id => {
+    const meta = SERIES[id].meta;
+    if (meta && meta.country && meta.category) set.add(id);
+  });
   return set;
 }
 function catalogEntries() {
