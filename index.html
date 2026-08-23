@@ -3723,6 +3723,15 @@ function catalogSuperCategoryFor(e) {
   if (e.categoryCode && CATALOG_SUPERCATEGORY_MAP[e.categoryCode]) return CATALOG_SUPERCATEGORY_MAP[e.categoryCode];
   return e.category || 'Others'; // BOT/SET/BIS/legacy: category label ตรงนี้คือ supercategory label อยู่แล้ว
 }
+// BIS ยุบทุก sub-metric (Policy Rate, Credit Gap, Credit/GDP, Property Price)
+// เข้า supercategory เดียวกันหมดตอน migrate (ไม่มี "dataset name" แยกแบบ IMF)
+// ทำให้ catalog เดิมเห็นแค่ "All" — ไม่สอดคล้องกับ Group mode ที่แยก BIS เป็น
+// "Policy Rate (BIS)"/"Credit & Property (BIS)" ไว้แล้ว แก้ให้ตรงกัน 2026-08-23
+function catalogBisSubDatasetFor(id) {
+  const m = id.match(/^BIS_[A-Z]{2}_(.+)$/);
+  if (!m) return null;
+  return m[1] === 'CBPOL' ? 'Policy Rate (BIS)' : 'Credit & Property (BIS)';
+}
 window.selectCatalogCountry = function(country) {
   catalogState.country = country; catalogState.category = null;
   renderCatalogCountries();
@@ -3731,7 +3740,8 @@ window.selectCatalogCountry = function(country) {
   const grouped = {};
   entries.forEach(e => {
     const sup = catalogSuperCategoryFor(e);
-    const sub = CATALOG_SUPERCATEGORY_MAP[e.categoryCode] ? e.category : ''; // ไม่มี sub ถ้า category เดิมคือ supercategory อยู่แล้ว
+    const bisSub = catalogBisSubDatasetFor(e.id);
+    const sub = bisSub || (CATALOG_SUPERCATEGORY_MAP[e.categoryCode] ? e.category : ''); // ไม่มี sub ถ้า category เดิมคือ supercategory อยู่แล้ว
     grouped[sup] = grouped[sup] || {};
     grouped[sup][sub] = true;
   });
@@ -3761,7 +3771,7 @@ window.selectCatalogCategory = function(superCategory, subDataset) {
   catalogState.category = subDataset || superCategory;
   const entries = catalogEntries().filter(e =>
     e.country === catalogState.country && catalogSuperCategoryFor(e) === superCategory &&
-    (subDataset ? e.category === subDataset : true));
+    (subDataset ? (catalogBisSubDatasetFor(e.id) || e.category) === subDataset : true));
   document.getElementById('cat-col-series').innerHTML = entries.length
     ? entries.map(e => `
       <label class="cat-item leaf">
