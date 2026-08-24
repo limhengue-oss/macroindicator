@@ -159,9 +159,15 @@ imf_cpi_recommended_type <- function(iso3) {
 # หรือ "Harmonised index of consumer prices (HICP)") — ใช้ regex จับคำใน
 # วงเล็บท้ายสุด กันเปราะบางถ้า IMF เปลี่ยนคำเต็มแต่ตัวย่อในวงเล็บคงเดิม
 imf_cpi_index_type_short <- function(index_type_raw) {
+  # live SDMX API (Track 2) ส่ง INDEX_TYPE เป็นโค้ดสั้นตรงๆ เช่น "CPI" ไม่มี
+  # วงเล็บแบบ bulk CSV (Track 1) เก่า — regmatches ไม่เจอ match จะคืน
+  # character(0) (ไม่ใช่ "") ทำให้ full_name/meta$fullName กลายเป็น empty
+  # vector และพัง Firestore PATCH ทุก row (บั๊กที่เจอจริง 2026-08-23 ตอน
+  # fetch_imf_multi.R รันจริงครั้งแรกหลัง backfill) — กันด้วยเช็ค length ก่อน
   m <- regmatches(index_type_raw, regexpr("\\(([A-Z]+)\\)$", index_type_raw))
+  if (length(m) == 0) return(index_type_raw)
   out <- gsub("[()]", "", m)
-  ifelse(nchar(out) == 0, index_type_raw, out)
+  if (nchar(out) == 0) index_type_raw else out
 }
 
 # ── ตัด CPI raw "Weight" ออก เหลือแค่ "Weight, Percent" — ตัดสินใจ
@@ -253,7 +259,11 @@ imf_finest_freq_only <- function(df, key_cols) {
   # VALUATION มีแค่ใน bulk CSV ไม่อยู่ใน dimension_order ของ live API) ถ้า
   # ไม่กันไว้ across(all_of()) จะ error ทันทีตอนรันจริงบน Track 2
   key_cols <- intersect(key_cols, names(df))
-  freq_rank <- c(Monthly = 3L, Quarterly = 2L, Annual = 1L)
+  # ทั้งคำเต็ม (bulk CSV export — Track 1/backfill) และโค้ดตัวย่อ (live SDMX
+  # API — Track 2/fetch_imf_multi.R) ต้อง map ได้ — เจอบั๊กจริง 2026-08-23:
+  # live API ส่ง FREQUENCY เป็น "M"/"Q"/"A" ไม่ใช่ "Monthly"/... ทำให้
+  # freq_rank[df$FREQUENCY] ได้ NA ทุกแถว แล้ว filter เหลือ 0 แถวทั้ง dataset
+  freq_rank <- c(Monthly = 3L, Quarterly = 2L, Annual = 1L, M = 3L, Q = 2L, A = 1L)
   df$.freq_rank <- unname(freq_rank[df$FREQUENCY])
   best <- df %>%
     group_by(across(all_of(key_cols))) %>%
