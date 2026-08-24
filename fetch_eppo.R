@@ -255,6 +255,31 @@ find_exrate <- function(ws) {
   suppressWarnings(as.numeric(m[!is.na(m)][1]))
 }
 
+# EPPO REST API (eppo_api_to_df) ไม่มี field อัตราแลกเปลี่ยนให้เลย (เช็คแล้วกับ
+# structure_label/structure_price จริงจาก API — ไม่มีคีย์ไหนเป็น exchange rate)
+# ต้อง fallback ไป probe ไฟล์ excel ของวันนั้นแทน เอาแค่ค่า exchange rate จาก
+# find_exrate() มาเติม ไม่ต้อง parse ทั้งไฟล์
+fetch_exrate_for_date <- function(d) {
+  for (u in eppo_candidate_urls(d)) {
+    resp <- do_get(u)
+    if (resp_status(resp) != 200) next
+    tmp <- tempfile(fileext=".xlsx")
+    writeBin(resp_body_raw(resp), tmp)
+    ws <- tryCatch(
+      read_xlsx(tmp, col_names=FALSE, col_types="text", sheet="Oil Price Structure"),
+      error=function(e) tryCatch(
+        read_xlsx(tmp, col_names=FALSE, col_types="text", sheet=1),
+        error=function(e2) NULL
+      )
+    )
+    unlink(tmp)
+    if (is.null(ws)) next
+    ex <- find_exrate(ws)
+    if (!is.na(ex)) return(ex)
+  }
+  NA_real_
+}
+
 # parse xlsx → df rows (shared by OFFO and EPPO)
 # meta_products: base product ทั้งหมดที่เคยเจอ (จาก meta/eppo_status)
 # strict: EPPO (authoritative) ต้องมีครบ ไม่งั้น skip ทั้งไฟล์เหมือนเดิม
@@ -708,6 +733,14 @@ if (!is.null(eppo_api)) {
   if (!is.na(eppo_api$last_updated) && eppo_api$last_updated > last_date) {
     df_api <- eppo_api_to_df(eppo_api, eppo_api$last_updated)
     if (!is.null(df_api)) {
+      # API ไม่มี EX_RATE ให้ — fallback probe ไฟล์ excel ของวันนี้เอาแค่ค่านี้มาเติม
+      exrate_val <- fetch_exrate_for_date(eppo_api$last_updated)
+      if (!is.na(exrate_val)) {
+        df_api$EX_RATE <- exrate_val
+        message(sprintf("  ✓ EX_RATE = %s (จากไฟล์ excel, fallback)", exrate_val))
+      } else {
+        message("  ⚠ หา EX_RATE จากไฟล์ excel ไม่เจอ — ปล่อย NA")
+      }
       eppo_rows_list[[length(eppo_rows_list)+1]] <- df_api
       eppo_latest <- eppo_api$last_updated
       message(sprintf("  ✓ [%s] จาก EPPO API โดยตรง (%d แถว)", eppo_api$last_updated, nrow(df_api)))
