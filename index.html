@@ -563,8 +563,8 @@ input[type=range] { width:80px; accent-color:var(--blue); }
 
 <script type="module">
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
-import { getFirestore, collection, getDocs, query, where, documentId, orderBy, limit, startAfter } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
-import { initializeAppCheck, ReCaptchaV3Provider } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app-check.js';
+import { getFirestore, collection, getDocs, getDoc, doc, query, where, documentId, orderBy, limit, startAfter } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
+import { initializeAppCheck, ReCaptchaV3Provider, getToken as getAppCheckToken } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app-check.js';
 
 const firebaseConfig = {
   apiKey: "AIzaSyCggg5oZZl2dUNrncisVlJuugsT2XUtls8",
@@ -575,7 +575,7 @@ const firebaseConfig = {
   appId: "1:871039169298:web:50f0f04ad17f1123a3b9cb"
 };
 const app = initializeApp(firebaseConfig);
-initializeAppCheck(app, {
+const appCheck = initializeAppCheck(app, {
   provider: new ReCaptchaV3Provider('6LconpEtAAAAAJNOGg-DIVxRe3dPnUCYF8oF3bGK'),
   isTokenAutoRefreshEnabled: true
 });
@@ -723,7 +723,12 @@ const SERIES_GROUPS = {
 //  STATE
 // ════════════════════════════════════════════════════
 const SERIES = {};
-let seriesFullyLoaded = false;  // true หลัง fetchRest() (Phase 2) เสร็จ — ใช้กันข้อความ "no data" หลอกตอนยังโหลดไม่ครบ
+// true หลัง Phase 2 metadata พร้อม (fetchMetaFast สำเร็จ หรือ fetchRest
+// fallback เต็มเสร็จ) — ไม่ได้แปลว่า .data ของทุก series พร้อมแล้วอีกต่อไป
+// (lazy-load step 2) จุดที่ต้องการ .data จริงต้อง await ensureSeriesData()/
+// ensureSeriesDataMany() เอง ตัวแปรนี้ใช้แค่กันเปิดหน้าที่ต้องรู้จัก series
+// ทั้งหมดก่อน (เช่น picker/catalog) ก่อน meta มาครบ
+let seriesMetaReady = false;
 let NEWS = [];
 const charts = {};
 let config = loadConfig();
@@ -862,16 +867,139 @@ async function fetchOilFund() {
 // deadline-exceeded ของ Firestore ทุกครั้ง ต้อง paginate ด้วย orderBy +
 // startAfter(documentId) เหมือนที่ backend script ใช้กับ documents.list
 async function fetchRest() {
-  const alreadyLoaded = new Set(Object.keys(SERIES));
+  // เช็คจาก .data ตรงๆ (ไม่ใช่แค่ "มี key อยู่ใน SERIES") เพราะ fetchMetaFast()
+  // (เรียกก่อนหน้านี้) เติม stub {meta,data:null} ไว้ก่อนแล้วสำหรับเกือบทุก
+  // doc — ต้องให้ loop นี้ทับ stub ด้วยข้อมูลเต็มจริง ไม่ใช่ข้าม
   let cursor = null;
   for (;;) {
     let q = query(collection(db, 'series'), orderBy(documentId()), limit(1000));
     if (cursor) q = query(collection(db, 'series'), orderBy(documentId()), startAfter(cursor), limit(1000));
     const snap = await getDocs(q);
     if (snap.empty) break;
-    snap.forEach(doc => { if (!alreadyLoaded.has(doc.id)) storeDoc(doc); });
+    snap.forEach(doc => { if (SERIES[doc.id]?.data == null) storeDoc(doc); });
     if (snap.size < 1000) break;
     cursor = snap.docs[snap.docs.length - 1].id;
+  }
+}
+
+// ── แปลง Firestore REST "Value" object (stringValue/mapValue/arrayValue/...)
+// ให้เป็น plain JS ตรงๆ — ใช้เฉพาะฝั่ง REST เท่านั้น (SDK's doc.data() แปลงให้
+// อัตโนมัติอยู่แล้ว ไม่ต้องใช้ตัวนี้)
+function decodeFirestoreRestValue(v) {
+  if (v == null) return null;
+  if ('stringValue' in v) return v.stringValue;
+  if ('doubleValue' in v) return v.doubleValue;
+  if ('integerValue' in v) return Number(v.integerValue);
+  if ('booleanValue' in v) return v.booleanValue;
+  if ('nullValue' in v) return null;
+  if ('mapValue' in v) {
+    const out = {};
+    const fields = v.mapValue.fields || {};
+    for (const k in fields) out[k] = decodeFirestoreRestValue(fields[k]);
+    return out;
+  }
+  if ('arrayValue' in v) return (v.arrayValue.values || []).map(decodeFirestoreRestValue);
+  return null;
+}
+
+// Step 1 ของ lazy-load: ดึงเฉพาะ name/updated/meta (ตัด data ออกด้วย
+// structuredQuery.select field mask — Firebase JS SDK's getDocs() ไม่รองรับ
+// field mask เลยต้องเรียก REST runQuery ตรงๆ แทน) ให้ picker/catalog/
+// category grouping (อ่านแค่ .meta) ใช้งานได้เร็วขึ้นมาก — เป็นฐานของ
+// lazy-load step 2: ถ้า metadata fetch สำเร็จ ระบบจะ "ไม่" โหลด .data ของ
+// ทุก series ล่วงหน้าอีกต่อไป (ตัด fetchRest() เดิมทิ้ง) แต่ดึงทีละ series
+// ผ่าน ensureSeriesData()/ensureSeriesDataMany() ตอนจะ render จริงเท่านั้น
+// (ดู loadData()) — คืนค่า true/false บอกผลสำเร็จ ให้ loadData() ตัดสินใจว่า
+// จะ fallback ไปใช้ fetchRest() แบบเดิม (โหลดทุกอย่างล่วงหน้าเหมือนเก่าเป๊ะ
+// ไม่มี regression) หรือไม่ — fail แบบไหนก็ตาม (network/App Check/parse)
+// swallow เงียบๆ คืน false ให้ loadData() ตัดสินใจแทน ไม่ throw ออกไป
+async function fetchMetaFast() {
+  try {
+    const tokenResult = await getAppCheckToken(appCheck, false);
+    const restBase = `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/(default)/documents:runQuery`;
+    let cursorId = null;
+    for (;;) {
+      const structuredQuery = {
+        from: [{ collectionId: 'series' }],
+        select: { fields: [{ fieldPath: 'name' }, { fieldPath: 'updated' }, { fieldPath: 'meta' }] },
+        orderBy: [{ field: { fieldPath: '__name__' }, direction: 'ASCENDING' }],
+        limit: 1000
+      };
+      if (cursorId) {
+        structuredQuery.startAt = {
+          values: [{ referenceValue: `projects/${firebaseConfig.projectId}/databases/(default)/documents/series/${cursorId}` }],
+          before: false
+        };
+      }
+      const resp = await fetch(restBase, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Firebase-AppCheck': tokenResult.token },
+        body: JSON.stringify({ structuredQuery })
+      });
+      if (!resp.ok) return false;
+      const rows = await resp.json();
+      let lastId = null;
+      let docCount = 0;
+      for (const row of rows) {
+        if (!row.document) continue;
+        docCount++;
+        const parts = row.document.name.split('/');
+        const id = parts[parts.length - 1];
+        lastId = id;
+        if (SERIES[id]?.data != null) continue;  // Phase 1 (EPPO/OFFO) โหลดเต็มไปแล้ว ไม่ทับ
+        const f = row.document.fields || {};
+        SERIES[id] = {
+          name: cleanSeriesName(f.name ? decodeFirestoreRestValue(f.name) : id),
+          updated: f.updated ? decodeFirestoreRestValue(f.updated) : '',
+          meta: f.meta ? decodeFirestoreRestValue(f.meta) : null,
+          data: null
+        };
+      }
+      if (docCount < 1000 || !lastId) break;
+      cursorId = lastId;
+    }
+    return true;
+  } catch (e) {
+    console.warn('fetchMetaFast: falling back to full eager fetch —', e);
+    return false;
+  }
+}
+
+// ── on-demand data fetch (lazy-load step 2) ──────────────────────────
+// SERIES[id].data === null หมายถึง "รู้จัก series นี้ (มี meta แล้ว) แต่ยัง
+// ไม่ได้ดึง data" — ensureSeriesData() ดึงทีละ doc เต็ม (ใช้ SDK's getDoc()
+// เฉยๆ ปลอดภัย ไม่ต้องเขียน REST decoder ซ้ำ เพราะเป็น single-doc อ่านเบา)
+// แล้ว mutate SERIES[id].data ให้ในตัว — cache กันเรียกซ้ำถ้ามีหลายจุดขอ
+// series เดียวกันพร้อมกัน (in-flight promise dedupe)
+const _seriesDataInflight = new Map();
+async function ensureSeriesData(id) {
+  const s = SERIES[id];
+  if (!s) return null;                // ไม่รู้จัก id นี้เลย (ไม่มีแม้แต่ meta) — ไม่มีอะไรให้ดึง
+  if (s.data != null) return s.data;  // โหลดแล้ว (จาก Phase 1, fallback เต็ม, หรือดึงมาก่อนหน้า)
+  if (_seriesDataInflight.has(id)) return _seriesDataInflight.get(id);
+  const p = (async () => {
+    try {
+      const snap = await getDoc(doc(db, 'series', id));
+      const d = snap.exists() ? snap.data() : { data: [] };
+      s.data = (d.data || []).map(pt => ({ x: pt.d, y: pt.v })).sort((a, b) => a.x < b.x ? -1 : 1);
+      return s.data;
+    } finally {
+      _seriesDataInflight.delete(id);
+    }
+  })();
+  _seriesDataInflight.set(id, p);
+  return p;
+}
+
+// ดึงหลาย series พร้อมกันแบบจำกัด concurrency (กัน browser/Firestore ยิง
+// พร้อมกันเยอะเกินไปตอน Group mode เทียบได้ถึง ~200 ประเทศ) — id ที่โหลด
+// แล้วถูกกรองออกอัตโนมัติ (ไม่ fetch ซ้ำ) — ตัวที่ fetch fail จะไม่ throw
+// ออกไปทั้งชุด (ใช้ allSettled) กราฟที่พังแค่ตัวเดียวไม่ทำให้ตัวอื่นพังตาม
+async function ensureSeriesDataMany(ids, concurrency = 25) {
+  const unique = [...new Set(ids)].filter(id => SERIES[id] && SERIES[id].data == null);
+  for (let i = 0; i < unique.length; i += concurrency) {
+    const batch = unique.slice(i, i + concurrency);
+    await Promise.allSettled(batch.map(id => ensureSeriesData(id)));
   }
 }
 
@@ -1893,10 +2021,15 @@ window.loadData = async function() {
     if (activePageId === '__energy__')    renderEnergyPage();
     if (activePageId === '__news__')      renderNews();
     if (activePageId === '__dashboard__') renderDashboard();  // โชว์ loading ของตัวเองถ้า Phase 2 ยังไม่เสร็จ
-    // Phase 2: series ที่เหลือ โหลด background — ไม่บล็อกหน้าไหนแล้ว
-    // (GlobalCPI ก็อ่านจาก SERIES กลางนี้เหมือนหน้าอื่นแล้ว ดู nav onclick)
-    await fetchRest();
-    seriesFullyLoaded = true;
+    // Phase 2: metadata ของทุก series (ไม่รวม .data — lazy-load step 2) —
+    // ถ้าสำเร็จ ระบบเข้าโหมด on-demand จริง (ดึง .data ต่อ series ตอน
+    // render เท่านั้น ผ่าน ensureSeriesData()/ensureSeriesDataMany(), ดู
+    // drawChart/renderDashboard/renderInflationCards) — ถ้า fail (เช่น
+    // App Check ใช้ไม่ได้จริงในบางสถานการณ์) fallback ไปโหลดทุกอย่างเต็ม
+    // ล่วงหน้าเหมือนเดิมเป๊ะ (fetchRest เดิม) กัน regression 100%
+    const metaOk = await fetchMetaFast();
+    if (!metaOk) await fetchRest();
+    seriesMetaReady = true;
 
     const upd = Object.values(SERIES)[0]?.updated || '';
     setStatus('ok', upd ? 'data: '+upd.slice(0,16).replace('T',' ')+' UTC' : 'loaded');
@@ -2193,13 +2326,14 @@ function renderDashboardCardHtml(card) {
 }
 
 let _dashPoll = null;
-function renderDashboard() {
+async function renderDashboard() {
   const container = document.getElementById('dashboard-body');
   if (!container) return;
 
-  // Dashboard ต้องการทุก series (Phase 2) — ถ้ายังไม่พร้อม โชว์ loading
-  // ของหน้านี้เองแยกจากหน้าอื่น แล้ว poll เช็คจนกว่าจะพร้อมค่อย render จริง
-  if (!seriesFullyLoaded) {
+  // Dashboard ต้องรู้จัก series ทั้งหมดก่อน (meta) ถึงจะ seed การ์ดเริ่มต้น/
+  // แสดงชื่อ indicator ได้ — ถ้า meta ยังไม่พร้อม โชว์ loading ของหน้านี้เอง
+  // แยกจากหน้าอื่น แล้ว poll เช็คจนกว่าจะพร้อมค่อย render จริง
+  if (!seriesMetaReady) {
     container.innerHTML = `
       <div style="display:flex;flex-direction:column;align-items:center;gap:10px;padding:70px 20px">
         <div style="font-size:0.82em;color:var(--text2)">Now loading… <span id="dash-pct">0%</span></div>
@@ -2208,7 +2342,7 @@ function renderDashboard() {
     startTrickle('dash', 'dash-bar-fill', 'dash-pct', 10, 92);
     clearInterval(_dashPoll);
     _dashPoll = setInterval(() => {
-      if (seriesFullyLoaded) { clearInterval(_dashPoll); stopTrickle('dash'); renderDashboard(); }
+      if (seriesMetaReady) { clearInterval(_dashPoll); stopTrickle('dash'); renderDashboard(); }
     }, 300);
     return;
   }
@@ -2216,6 +2350,11 @@ function renderDashboard() {
   ensureDashboardCardsSeeded();
 
   const cards = config.dashboardCards;
+  // lazy-load step 2: ดึง .data เฉพาะ series ที่การ์ดพวกนี้ใช้จริงเท่านั้น
+  // (ไม่ใช่ทุก series ใน SERIES) — ระหว่างรอ คงหน้าเดิมไว้เฉยๆ ไม่ต้องมี
+  // loading state พิเศษ เพราะปกติเสร็จเร็ว (การ์ดมีไม่กี่ indicator)
+  await ensureSeriesDataMany(cards.flatMap(c => c.seriesIds || []));
+
   container.innerHTML = cards.length
     ? `<div class="chart-grid" style="grid-template-columns:repeat(auto-fill,minmax(300px,1fr))">
         ${cards.map(renderDashboardCardHtml).join('')}
@@ -2243,7 +2382,7 @@ function renderNav() {
   const nav=document.getElementById('nav');
   nav.innerHTML='';
 
-  // Dashboard page — ต้องรอ seriesFullyLoaded (Phase 2) เพราะรวมทุก series
+  // Dashboard page — renderDashboard() จัดการรอ meta + lazy-fetch .data เอง
   const dashBtn = document.createElement('button');
   dashBtn.className = 'nb' + (activePageId === '__dashboard__' ? ' active' : '');
   dashBtn.textContent = 'Dashboard';
@@ -2317,9 +2456,9 @@ function renderNav() {
     document.querySelectorAll('.nb').forEach(b=>b.classList.remove('active'));
     document.getElementById('page-inflation').classList.add('active');
     inflBtn.classList.add('active');
-    if (!seriesFullyLoaded) {
+    if (!seriesMetaReady) {
       const wait = setInterval(() => {
-        if (seriesFullyLoaded) { clearInterval(wait); renderInflationPage(); }
+        if (seriesMetaReady) { clearInterval(wait); renderInflationPage(); }
       }, 300);
     } else {
       renderInflationPage();
@@ -2567,7 +2706,7 @@ function buildTimeAxisScale(period, labels, tickColor) {
   };
 }
 
-function drawChart(page,chart) {
+async function drawChart(page,chart) {
   const canvas=document.getElementById('cv-'+chart.id);
   const ld=document.getElementById('ld-'+chart.id);
   const er=document.getElementById('er-'+chart.id);
@@ -2576,13 +2715,18 @@ function drawChart(page,chart) {
   if (er) er.textContent='';
   if (lg) lg.innerHTML='';
 
+  // lazy-load step 2: ดึง .data เฉพาะ series ที่ chart นี้ใช้จริงก่อน build —
+  // ฟังก์ชันย่อยด้านล่าง (cutByPeriod/applyFn) ยังเป็น sync เหมือนเดิมทุก
+  // ตัว เพราะพอถึงตอนรัน data มาครบแล้ว (หรือ fail แล้ว — เช็คแยกด้านล่าง)
+  await ensureSeriesDataMany(chart.series.map(s=>s.id));
+
   let commonLabels=null;
   const datasets=[];
   let hasRight=false;
 
   chart.series.forEach(s=>{
     const src=SERIES[s.id];
-    if (!src) return;
+    if (!src || !src.data) return;
     const fn = s.fn||'raw';
     let pts;
     if (fn==='norm' || fn==='cumret') {
@@ -2621,16 +2765,27 @@ function drawChart(page,chart) {
     }
   });
 
-  // ถ้า Phase 2 (fetchRest — series นอกเหนือจาก EPPO/OFFO) ยังโหลดไม่เสร็จ อย่าเพิ่ง
-  // ซ่อน skeleton ไปโชว์ "no data" — คงสถานะ loading ไว้ก่อน แล้วรอ loadData() เรียก
-  // renderActivePage() ซ้ำตอนข้อมูลมาจริง (กันข้อความ "no data" หลอกทั้งที่แค่ยังโหลดไม่ครบ —
-  // เดิมเช็คแค่ Object.keys(SERIES).length===0 ซึ่งผิด เพราะ Phase 1 ใส่ EPPO/OFFO ไว้ก่อนแล้ว
-  // เลย SERIES ไม่ว่างตั้งแต่ก่อน Phase 2 จะเสร็จ ยิ่ง series เยอะ Phase 2 ยิ่งช้า ยิ่งเจอบ่อย)
-  if (!datasets.length && !seriesFullyLoaded) return;
-
   if (ld) ld.style.display='none';
   canvas.style.display='block';
-  if (!datasets.length||!commonLabels) { if(er) er.textContent='no data'; return; }
+  if (!datasets.length||!commonLabels) {
+    // แยกกรณี "ไม่มีข้อมูลจริงๆ" กับ "ดึง .data ไม่สำเร็จ" (network/Firestore
+    // error ระหว่าง ensureSeriesDataMany ด้านบน) — กรณีหลังโชว์ลิงก์ลองใหม่
+    // เฉพาะกราฟนี้ ไม่กระทบกราฟอื่นที่โหลดสำเร็จ (ตาม design ตัดสินใจไว้)
+    if (er) {
+      const failedIds = chart.series.map(s=>s.id).filter(id => SERIES[id] && SERIES[id].data == null);
+      er.textContent = '';
+      if (failedIds.length) {
+        const retry = document.createElement('a');
+        retry.href = '#';
+        retry.textContent = 'โหลดข้อมูลไม่สำเร็จ — ลองใหม่';
+        retry.onclick = (e) => { e.preventDefault(); drawChart(page, chart); };
+        er.appendChild(retry);
+      } else {
+        er.textContent = 'no data';
+      }
+    }
+    return;
+  }
   if (charts[chart.id]) charts[chart.id].destroy();
 
   const gridColor='rgba(128,128,128,0.1)';
@@ -2774,7 +2929,7 @@ function getInflationGroups() {
   return [...INFLATION_GROUPS, inflationOtherGroup()];
 }
 
-function renderInflationCards() {
+async function renderInflationCards() {
   const body = document.getElementById('inflation-body');
   if (!body) return;
   const groups = getInflationGroups();
@@ -2792,6 +2947,15 @@ function renderInflationCards() {
       <div id="infl-table-${g.key}" style="padding:0 11px 12px;overflow-x:auto"></div>
     </div>
   `).join('');
+
+  // lazy-load step 2: ทุก group card ใช้ category เดียวกัน (inflationState.category)
+  // — ดึง .data ของทุกประเทศทุก group พร้อมกันทีเดียวก่อน draw (แทนที่จะ
+  // รอทีละ group) — capped concurrency ผ่าน ensureSeriesDataMany() อยู่แล้ว
+  const category = inflationState.category;
+  const neededIds = groups.flatMap(g => g.countries
+    .map(([code]) => inflationSeriesId(code, category))
+    .filter(Boolean));
+  await ensureSeriesDataMany(neededIds);
 
   groups.forEach(g => drawInflationCard(g.key));
 }
@@ -2849,7 +3013,7 @@ function drawInflationCard(key) {
   const chartKey = 'infl-'+key;
   if (!rawSeries.length) {
     if (charts[chartKey]) { charts[chartKey].destroy(); delete charts[chartKey]; }
-    if (tblEl && seriesFullyLoaded) tblEl.innerHTML = '<span style="color:var(--text3)">no data</span>';
+    if (tblEl) tblEl.innerHTML = '<span style="color:var(--text3)">no data</span>';
     return;
   }
 
