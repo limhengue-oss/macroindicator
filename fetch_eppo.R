@@ -120,6 +120,24 @@ do_get <- function(url, retries = 2) {
   structure(list(status_code = 599L, url = url), class = "httr2_response")
 }
 
+# เหมือน do_get() แต่รับ request object ที่ build ไว้แล้ว (สำหรับ PATCH ที่มี query/body
+# ซับซ้อนกว่า GET ตรงๆ) — จุดนี้เดิมไม่มีการดัก network-level error เลย ทำให้เจอเคสจริง
+# ที่ PATCH ของ FO_600/FO_1500/LPG (ประมวลผลท้ายสุดใน push_df ต่อจาก 6 สินค้าแรก) ตายกลาง
+# ทาง แล้วทั้ง fetch_eppo.R หยุดทำงานทันที เหลือ FO_600/FO_1500/LPG ไม่ได้อัปเดตเงียบๆ
+# (เจอ 2026-08-25: API มีข้อมูล FO 600 ครบ แต่ Firestore ไม่มี ทั้งที่ DIESEL/ULG/GASOHOL
+# ที่ประมวลผลก่อนหน้าอัปเดตสำเร็จ)
+do_perform <- function(req, retries = 2) {
+  for (attempt in seq_len(retries + 1)) {
+    resp <- tryCatch(req_perform(req), error = function(e) {
+      message("  ✗ network error PATCH: ", conditionMessage(e))
+      NULL
+    })
+    if (!is.null(resp)) return(resp)
+    if (attempt <= retries) Sys.sleep(3)
+  }
+  structure(list(status_code = 599L), class = "httr2_response")
+}
+
 # ── Firestore auth ────────────────────────────────────────────────
 get_token <- function(sa) {
   now <- as.numeric(Sys.time())
@@ -193,7 +211,7 @@ upsert_series <- function(token, doc_id, name, new_df, track_change = FALSE) {
     req_method("PATCH") |>
     req_auth_bearer_token(token) |>
     req_body_json(body, auto_unbox=TRUE) |>
-    req_error(is_error=\(r) FALSE) |> req_perform()
+    req_error(is_error=\(r) FALSE) |> do_perform()
 
   if (resp_status(resp) >= 300) {
     warning(sprintf("  ✗ %s HTTP %d", doc_id, resp_status(resp)))
@@ -657,7 +675,7 @@ update_meta_last_date <- function(token, meta_url, meta, latest_date) {
     req_method("PATCH") |>
     req_auth_bearer_token(token) |>
     req_body_json(body, auto_unbox=TRUE) |>
-    req_error(is_error=\(r) FALSE) |> req_perform()
+    req_error(is_error=\(r) FALSE) |> do_perform()
   if (resp_status(r) < 300) message(sprintf("  ✓ last_date → %s", latest_date))
   else message(sprintf("  ✗ HTTP %d", resp_status(r)))
 }
@@ -670,7 +688,7 @@ patch_meta_field <- function(token, url, field_name, value) {
     req_method("PATCH") |>
     req_auth_bearer_token(token) |>
     req_body_json(body, auto_unbox=TRUE) |>
-    req_error(is_error=\(r) FALSE) |> req_perform()
+    req_error(is_error=\(r) FALSE) |> do_perform()
   resp_status(r)
 }
 
@@ -854,7 +872,7 @@ if (length(fund_pending) > 0) {
     req_method("PATCH") |>
     req_auth_bearer_token(token) |>
     req_body_json(fund_meta_body, auto_unbox=TRUE) |>
-    req_error(is_error=\(r) FALSE) |> req_perform()
+    req_error(is_error=\(r) FALSE) |> do_perform()
   if (resp_status(fund_meta_patch) < 300) message(sprintf("  ✓ oilfund last_date → %s (known_hrefs: %d)", fund_latest, length(scrape_result$all_hrefs)))
   else message(sprintf("  ✗ meta patch HTTP %d", resp_status(fund_meta_patch)))
 }
