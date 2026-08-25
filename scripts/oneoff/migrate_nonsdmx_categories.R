@@ -49,6 +49,7 @@ if (nrow(map_df) == 0) {
 
 token <- get_access_token(sa)
 token_time <- Sys.time()
+dir.create(dirname(PROGRESS_PATH), showWarnings = FALSE, recursive = TRUE)
 progress_con <- file(PROGRESS_PATH, open = "a")
 
 ok_count <- 0
