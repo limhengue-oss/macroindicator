@@ -90,16 +90,16 @@ push_series <- function(token, doc_id, name, df, is_incremental = FALSE, meta = 
   )
 
   all_points <- new_points
+  existing_meta_fields <- NULL
   if (is_incremental) {
-    existing_points <- tryCatch({
+    existing_fields <- tryCatch({
       r <- request(url) |> req_auth_bearer_token(token) |>
         req_error(is_error = \(r) FALSE) |> req_perform()
-      if (resp_status(r) == 200) {
-        arr <- resp_body_json(r)$fields$data$arrayValue$values
-        if (!is.null(arr)) arr else list()
-      } else list()
-    }, error = function(e) list())
+      if (resp_status(r) == 200) resp_body_json(r)$fields else NULL
+    }, error = function(e) NULL)
+    existing_points <- if (!is.null(existing_fields$data$arrayValue$values)) existing_fields$data$arrayValue$values else list()
     all_points <- dedup_sort_points(c(existing_points, new_points))
+    existing_meta_fields <- existing_fields$meta$mapValue$fields
   }
 
   fields <- list(
@@ -116,7 +116,22 @@ push_series <- function(token, doc_id, name, df, is_incremental = FALSE, meta = 
   # (recursive) สำหรับ schema ใหม่ meta$country/meta$category/meta$dims ที่
   # เป็น map ซ้อน map (เช่น dims: {INDICATOR: {code,label,role}, ...})
   if (!is.null(meta)) {
-    fields$meta <- list(mapValue = list(fields = lapply(meta, firestore_encode_value)))
+    meta_fields <- lapply(meta, firestore_encode_value)
+    # updateMask ที่ path "meta" เขียนทับทั้ง map ไม่ใช่ merge ลึก (Firestore
+    # field mask ไม่ recurse เข้า map field) — caller ส่วนใหญ่ (fetch_bot.R/
+    # fetch_thaibma.R/fetch_goldth.R/ฯลฯ) ไม่รู้จัก/ไม่ได้ตั้งใจส่ง
+    # country/category/dims (schema ใหม่ 2026-08-22 เติมทีหลังผ่าน
+    # migrate_nonsdmx_categories.R แยกต่างหาก) — ถ้าไม่กันตรงนี้ push
+    # ปกติทุกวันของ script พวกนี้จะเขียนทับ 3 field นั้นหายไปเงียบๆ ทุกครั้ง
+    # (bug เจอจริง 2026-08-25: THAIBMA_YIELD_1Y หลุดกลับไปใช้ classifySeries()
+    # fallback เก่าเพราะ meta.category หายหลัง fetch_thaibma.yml รันรายวัน)
+    # — preserve ของเดิมไว้เฉพาะ key ที่ caller ไม่ได้ส่งมาเอง
+    for (k in c("country", "category", "dims")) {
+      if (is.null(meta_fields[[k]]) && !is.null(existing_meta_fields[[k]])) {
+        meta_fields[[k]] <- existing_meta_fields[[k]]
+      }
+    }
+    fields$meta <- list(mapValue = list(fields = meta_fields))
   }
 
   body <- list(fields = fields)
