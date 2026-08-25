@@ -341,15 +341,80 @@ imf_dim_slug <- function(text) {
 # + label (ข้อความอ่านง่ายจาก IMF ตรงๆ ไม่ต้องมี lookup table แปลซ้ำฝั่งเว็บ)
 # + role (ฝัง role ไว้ในตัว doc เลย เว็บจะได้ไม่ต้องมี config อีกไฟล์แยก —
 # ตัดสินใจ 2026-08-22 ปิด sync-2-ที่ ที่เคยเป็นปัญหากับ IMF_DATASET_INFO เดิม)
-imf_build_dims <- function(dim_values, roles) {
+imf_build_dims <- function(dim_values, roles, dsd_info = NULL) {
   dims <- list()
   for (nm in names(dim_values)) {
     role <- unname(roles[nm])
     if (is.na(role) || role %in% c("country", "fixed")) next
     val <- dim_values[[nm]]
-    dims[[nm]] <- list(code = imf_dim_slug(val), label = as.character(val), role = role)
+    label <- if (!is.null(dsd_info)) imf_label_lookup(dsd_info, nm, as.character(val)) else as.character(val)
+    dims[[nm]] <- list(code = imf_dim_slug(val), label = label, role = role)
   }
   dims
+}
+
+# ── ดึง codelist (code -> ชื่ออ่านง่าย) ของทุก dimension ใน DSD จาก IMF
+# Structure API มาครั้งเดียวต่อ dataset — live SDMX data fetch
+# (imf_fetch_wildcard) คืนค่า dimension เป็น "code" ดิบเสมอ (เช่น INDICATOR
+# ของ CTOT = "CEMPI_CTOTNX_TT") ไม่ใช่ label อ่านง่าย ต่างจาก bulk CSV ที่ใช้
+# backfill ซึ่งมี text column แยกให้อยู่แล้ว — บาง dataset code ดิบบังเอิญ
+# เป็นคำอังกฤษเต็มอยู่แล้ว (เช่น QNEA's PRICE_TYPE = "Nominal") เลยดูปกติ
+# ทั้งที่ไม่ได้ผ่าน lookup นี้เลย แต่ dataset อื่น (CTOT, QGDP_WCA, และบาง
+# indicator ใน EER/ER/ITG/PPI) code ดิบอ่านไม่รู้เรื่อง (เจอจริงจาก user
+# report 2026-08-25: "CEMPI_CTOTNX_TT" โผล่ตรงๆ ใน series picker) — DSD
+# (?references=all) มีทั้ง Dimension->Codelist mapping และตัว Codelist
+# (code->Name) มาในคำขอเดียว ไม่ต้องเดา codelist id เอง (ลอง guess
+# CL_{dataset}_{dim} มาก่อนแล้วพบว่าไม่ตรงรูปแบบเสมอไป เช่น QNEA's
+# INDICATOR ใช้ CL_NEA_INDICATOR ไม่ใช่ CL_QNEA_INDICATOR)
+imf_fetch_dsd_codelists <- function(agency, dsd_id, version, timeout_sec = 120) {
+  empty <- list(dim_to_codelist = list(), codelists = list())
+  url <- sprintf("https://api.imf.org/external/sdmx/2.1/datastructure/%s/%s/%s?references=all",
+                  agency, dsd_id, version)
+  resp <- tryCatch(
+    request(url) |> req_headers(`User-Agent` = "Mozilla/5.0") |>
+      req_timeout(timeout_sec) |> req_error(is_error = \(r) FALSE) |> req_perform(),
+    error = function(e) NULL
+  )
+  if (is.null(resp) || resp_status(resp) >= 300) {
+    warning(sprintf("imf_fetch_dsd_codelists: %s/%s failed to fetch DSD structure (status %s)",
+                     agency, dsd_id, if (is.null(resp)) "NA" else resp_status(resp)))
+    return(empty)
+  }
+  doc <- tryCatch(read_xml(resp_body_string(resp)), error = function(e) NULL)
+  if (is.null(doc)) return(empty)
+
+  dim_nodes <- xml_find_all(doc, "//*[local-name()='DimensionList']/*[local-name()='Dimension']")
+  dim_to_cl <- list()
+  for (dn in dim_nodes) {
+    did <- xml_attr(dn, "id")
+    ref <- xml_find_first(dn, ".//*[local-name()='Enumeration']/*[local-name()='Ref']")
+    cl_id <- xml_attr(ref, "id")
+    if (!is.na(cl_id)) dim_to_cl[[did]] <- cl_id
+  }
+
+  cl_nodes <- xml_find_all(doc, "//*[local-name()='Codelist']")
+  codelists <- list()
+  for (cn in cl_nodes) {
+    cl_id <- xml_attr(cn, "id")
+    code_nodes <- xml_find_all(cn, "./*[local-name()='Code']")
+    if (length(code_nodes) == 0) next
+    ids <- vapply(code_nodes, function(x) xml_attr(x, "id"), character(1))
+    names_ <- vapply(code_nodes, function(x) {
+      nm <- xml_find_first(x, ".//*[local-name()='Name'][@xml:lang='en']")
+      if (is.na(nm)) xml_attr(x, "id") else xml_text(nm)
+    }, character(1))
+    codelists[[cl_id]] <- setNames(as.list(names_), ids)
+  }
+  list(dim_to_codelist = dim_to_cl, codelists = codelists)
+}
+
+# ── code ดิบของ dimension หนึ่งตัว -> label อ่านง่าย (ถ้าหาไม่เจอใน
+# codelist ก็คืน code เดิมกลับไป ไม่ทำให้ pipeline พังหรือชื่อหายไปเฉยๆ)
+imf_label_lookup <- function(dsd_info, dim_id, code) {
+  cl_id <- dsd_info$dim_to_codelist[[dim_id]]
+  if (is.null(cl_id)) return(code)
+  lbl <- dsd_info$codelists[[cl_id]][[code]]
+  if (is.null(lbl) || is.na(lbl) || !nzchar(lbl)) code else lbl
 }
 
 # ── doc_id: derive-forward จาก dims ที่ผ่าน imf_build_dims() มาแล้ว

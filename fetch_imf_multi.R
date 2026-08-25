@@ -66,12 +66,18 @@ for (i in seq_len(nrow(config))) {
   dataset_id    <- cfg$dataset_id
   agency        <- cfg$agency
   version       <- cfg$version
+  dsd_id        <- cfg$dsd_id
   category_label <- cfg$category_label
   dims          <- strsplit(cfg$dimension_order, ",")[[1]]
   n_dims        <- length(dims)
   dim_roles     <- imf_parse_dimension_roles(cfg$dimension_order, cfg$dimension_roles)
 
   message(sprintf("\n══ %s ══", dataset_id))
+  # ดึง code->label ของทุก dimension จาก IMF Structure API ครั้งเดียวต่อ
+  # dataset — ใช้แปล component/variant code ดิบ (เช่น CTOT's
+  # "CEMPI_CTOTNX_TT") เป็นชื่ออ่านง่ายตอนสร้าง meta/full_name ข้างล่าง
+  # (เจอปัญหาจริง 2026-08-25: series picker โชว์รหัสดิบให้ user เห็นตรงๆ)
+  dsd_info <- imf_fetch_dsd_codelists(agency, dsd_id, version)
   df <- imf_fetch_wildcard(agency, dataset_id, version, n_dims, START_PERIOD)
   message(sprintf("  raw fetch: %d rows", nrow(df)))
 
@@ -210,15 +216,23 @@ for (i in seq_len(nrow(config))) {
     currency_val <- imf_detect_currency(unlist(row[text_cols]))
     unit_val <- if ("UNIT" %in% names(row)) row$UNIT[[1]] else ""
 
+    row_dims <- imf_build_dims(as.list(row[intersect(non_country_dims, names(row))]), dim_roles, dsd_info)
+
     if (dataset_id == "CPI") {
       cpi_idx_short <- imf_cpi_index_type_short(row$INDEX_TYPE[[1]])
       full_name <- sprintf("%s — %s (%s)", row$COICOP_1999[[1]], row$TYPE_OF_TRANSFORMATION[[1]], cpi_idx_short)
     } else {
-      fullname_parts <- na.omit(unlist(row[intersect(c("INDICATOR", "SERIES_NAME"), names(row))]))
-      full_name <- if (length(fullname_parts) > 0) paste(unique(fullname_parts), collapse = " — ") else dataset_id
+      # ใช้ label ของ dim ที่ role="component" (มี lookup ผ่าน DSD codelist
+      # แล้วจาก imf_build_dims ข้างบน) แทนที่จะ hardcode หา column
+      # "INDICATOR"/"SERIES_NAME" ตรงๆ — เดิม dataset ที่ component dim ชื่อ
+      # อื่น (COICOP_1999 ของ CPI_WCA, PRODUCTION_INDEX ของ PI/PI_WCA) หลุด
+      # ไม่มี column ให้ match เลย ชื่อเลย fallback เป็น dataset_id ล้วนๆ
+      # (bug เจอจริง: "CPI_WCA (G001)", "PI_WCA (G001)")
+      component_labels <- vapply(
+        Filter(\(d) d$role == "component", row_dims), \(d) d$label, character(1)
+      )
+      full_name <- if (length(component_labels) > 0) paste(unique(component_labels), collapse = " — ") else dataset_id
     }
-
-    row_dims <- imf_build_dims(as.list(row[intersect(non_country_dims, names(row))]), dim_roles)
 
     meta <- list(
       fullName = sprintf("%s (%s)", full_name, row$COUNTRY),

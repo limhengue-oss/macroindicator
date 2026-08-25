@@ -3184,6 +3184,21 @@ function buildInflationTable(key, tblEl, rawSeries) {
 // ทางตกมาถึง fallback นี้อีก — ของเดิม ~280 บรรทัด ดูใน git history ถ้าต้อง
 // การย้อนดู]
 
+// ต่อ variant label (เช่น Nominal/Real/Deflator, SA/NSA) ต่อท้ายชื่อ series —
+// fullName ฝั่ง R (fetch_imf_multi.R) ใช้แค่ INDICATOR ไม่รวม dims ที่ role
+// เป็น variant เลยได้ชื่อซ้ำกันหมดตอนมีหลาย variant ของ indicator เดียวกัน
+// (เจอจริงกับ IMF QNEA: GDP nominal/real/deflator ซ้ำกัน 4 รายการใน catalog
+// menu, 2026-08-25) meta.dims มี label ของแต่ละ variant อยู่แล้วจากตอน push
+// เอามาต่อท้ายตรงนี้แทน ไม่ต้องแก้/re-push ข้อมูลฝั่ง Firestore
+function seriesDisplayName(id) {
+  const s = SERIES[id];
+  if (!s) return id;
+  const dims = s.meta?.dims;
+  if (!dims) return s.name;
+  const variantLabels = Object.values(dims).filter(d => d.role === 'variant').map(d => d.label);
+  return variantLabels.length ? `${s.name} — ${variantLabels.join(', ')}` : s.name;
+}
+
 function classifySeries(id) {
   // schema ใหม่ (2026-08-22/23): ถ้า doc มี meta.country/category (R เขียน
   // ตอน push โดยตรงแล้ว) ใช้ค่านี้ตรงๆ ไม่ต้อง parse doc_id/regex อีกเลย —
@@ -3422,7 +3437,7 @@ function allSelectableIds() {
 function catalogEntries() {
   const selectable = allSelectableIds();
   return Object.keys(SERIES).filter(id => selectable.has(id))
-    .map(id => ({ id, name: SERIES[id]?.name || id, ...classifySeries(id) }));
+    .map(id => ({ id, name: seriesDisplayName(id), ...classifySeries(id) }));
 }
 function openCatalogModal(preselected) {
   catalogState = { country: null, category: null, selected: new Set(preselected || []) };
@@ -3730,7 +3745,7 @@ function makeSeriesRow(s,idx) {
       if (!SERIES[id]) return;
       grouped.add(id);
       const opt=document.createElement('option');
-      opt.value=id; opt.textContent=SERIES[id].name;
+      opt.value=id; opt.textContent=seriesDisplayName(id);
       if (id===s.id) opt.selected=true;
       og.appendChild(opt);
     });
