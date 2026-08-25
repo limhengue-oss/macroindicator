@@ -7,11 +7,15 @@ on:
         description: 'Dry run (ดึงข้อมูลมาดูเฉย ๆ ไม่ push Firestore)'
         type: boolean
         default: true
+      datasets:
+        description: 'จำกัดเฉพาะ dataset (comma-separated เช่น "MFS_CBS,QNEA") — เว้นว่าง = รันครบทุกตัว'
+        type: string
+        default: ''
 
 jobs:
   fetch-imf:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 340
     steps:
       - uses: actions/checkout@v4
 
@@ -23,6 +27,7 @@ jobs:
       - name: Install packages and run
         env:
           GCP_SA_KEY:  ${{ inputs.dry_run && '' || secrets.GCP_SA_KEY }}
+          IMF_FETCH_DATASETS: ${{ inputs.datasets }}
         run: |
           Rscript -e '
           lib <- "/home/runner/R-pkgs"

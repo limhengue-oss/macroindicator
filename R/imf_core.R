@@ -365,11 +365,17 @@ imf_build_dims <- function(dim_values, roles, dsd_info = NULL) {
 # (?references=all) มีทั้ง Dimension->Codelist mapping และตัว Codelist
 # (code->Name) มาในคำขอเดียว ไม่ต้องเดา codelist id เอง (ลอง guess
 # CL_{dataset}_{dim} มาก่อนแล้วพบว่าไม่ตรงรูปแบบเสมอไป เช่น QNEA's
-# INDICATOR ใช้ CL_NEA_INDICATOR ไม่ใช่ CL_QNEA_INDICATOR)
-imf_fetch_dsd_codelists <- function(agency, dsd_id, version, timeout_sec = 120) {
+# INDICATOR ใช้ CL_NEA_INDICATOR ไม่ใช่ CL_QNEA_INDICATOR) — หมายเหตุ:
+# ตั้งใจไม่ระบุ version ต่อท้าย URL (ต่างจาก imf_fetch_wildcard ที่ระบุ
+# version ของ*data*message) เพราะเจอจริงว่า version ของ dataflow ใน
+# imf_dataset_config.csv ใช้กับ endpoint "datastructure" ตรงๆ ไม่ได้เสมอไป
+# (CTOT: version data message 5.0.1 แต่ endpoint คืน 204 No Content — ไม่ใส่
+# version เลยกลับได้ผลลัพธ์จริงมา, DSD เวอร์ชันจริงในนั้นกลายเป็น 6.0.0)
+# ไม่ใส่ version จึงได้ DSD ล่าสุดเสมอ ปลอดภัยกว่า
+imf_fetch_dsd_codelists <- function(agency, dsd_id, timeout_sec = 120) {
   empty <- list(dim_to_codelist = list(), codelists = list())
-  url <- sprintf("https://api.imf.org/external/sdmx/2.1/datastructure/%s/%s/%s?references=all",
-                  agency, dsd_id, version)
+  url <- sprintf("https://api.imf.org/external/sdmx/2.1/datastructure/%s/%s?references=all",
+                  agency, dsd_id)
   resp <- tryCatch(
     request(url) |> req_headers(`User-Agent` = "Mozilla/5.0") |>
       req_timeout(timeout_sec) |> req_error(is_error = \(r) FALSE) |> req_perform(),
@@ -383,12 +389,27 @@ imf_fetch_dsd_codelists <- function(agency, dsd_id, version, timeout_sec = 120) 
   doc <- tryCatch(read_xml(resp_body_string(resp)), error = function(e) NULL)
   if (is.null(doc)) return(empty)
 
+  # DSD's <Dimension> แทบทุก dataset (CTOT/PPI/ฯลฯ) ไม่มี LocalRepresentation/
+  # Enumeration ของตัวเอง — มีแค่ ConceptIdentity ชี้ไป <Concept> ที่ codelist
+  # จริงอยู่ใน Concept's CoreRepresentation/Enumeration แทน (bug ที่แก้จริง
+  # 2026-08-25: เดิม check แค่ Dimension ตรงๆ เจอ CTOT ว่างเปล่าทุกครั้ง เลย
+  # fallback ไป raw code เหมือนไม่ได้แก้อะไรเลย) — เช็ค Dimension เองก่อน
+  # (บาง DSD overrideตรงนั้นจริง) แล้วค่อย fallback ไปที่ Concept
   dim_nodes <- xml_find_all(doc, "//*[local-name()='DimensionList']/*[local-name()='Dimension']")
   dim_to_cl <- list()
   for (dn in dim_nodes) {
     did <- xml_attr(dn, "id")
     ref <- xml_find_first(dn, ".//*[local-name()='Enumeration']/*[local-name()='Ref']")
     cl_id <- xml_attr(ref, "id")
+    if (is.na(cl_id)) {
+      concept_ref <- xml_find_first(dn, ".//*[local-name()='ConceptIdentity']/*[local-name()='Ref']")
+      concept_id <- xml_attr(concept_ref, "id")
+      if (!is.na(concept_id)) {
+        concept_node <- xml_find_first(doc, sprintf(".//*[local-name()='Concept'][@id='%s']", concept_id))
+        cl_ref <- xml_find_first(concept_node, ".//*[local-name()='CoreRepresentation']/*[local-name()='Enumeration']/*[local-name()='Ref']")
+        cl_id <- xml_attr(cl_ref, "id")
+      }
+    }
     if (!is.na(cl_id)) dim_to_cl[[did]] <- cl_id
   }
 

@@ -41,6 +41,18 @@ source("R/imf_core.R")
 config <- read_csv("data/imf_dataset_config.csv", show_col_types = FALSE)
 START_PERIOD <- format(Sys.Date() - 730, "%Y-%m")  # rolling ~2 year window
 
+# รองรับรันแค่บาง dataset — ใช้ตอน re-run รอบที่ dataset บางตัว push ไปแล้ว
+# (job ก่อนโดน GitHub Actions timeout ตัดกลางคัน ไม่อยากรัน dataset ที่
+# เสร็จแล้วซ้ำเพราะแต่ละตัวใช้เวลาเป็นสิบนาที — ตัดสินใจ 2026-08-25) แพทเทิร์น
+# เดียวกับ IMF_BACKFILL_DATASETS ใน backfill_imf_multi.R เว้นว่างไว้ = รันครบ
+subset_env <- Sys.getenv("IMF_FETCH_DATASETS")
+if (nzchar(subset_env)) {
+  requested <- trimws(strsplit(subset_env, ",")[[1]])
+  config <- config %>% filter(.data$dataset_id %in% requested)
+  message(sprintf("── IMF_FETCH_DATASETS set — จำกัดเหลือ %d dataset: %s",
+                   nrow(config), paste(config$dataset_id, collapse = ", ")))
+}
+
 token <- NULL
 token_time <- NULL
 if (!DRY_RUN) {
@@ -77,7 +89,7 @@ for (i in seq_len(nrow(config))) {
   # dataset — ใช้แปล component/variant code ดิบ (เช่น CTOT's
   # "CEMPI_CTOTNX_TT") เป็นชื่ออ่านง่ายตอนสร้าง meta/full_name ข้างล่าง
   # (เจอปัญหาจริง 2026-08-25: series picker โชว์รหัสดิบให้ user เห็นตรงๆ)
-  dsd_info <- imf_fetch_dsd_codelists(agency, dsd_id, version)
+  dsd_info <- imf_fetch_dsd_codelists(agency, dsd_id)
   df <- imf_fetch_wildcard(agency, dataset_id, version, n_dims, START_PERIOD)
   message(sprintf("  raw fetch: %d rows", nrow(df)))
 
