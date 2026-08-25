@@ -1,0 +1,35 @@
+name: Repair non-SDMX meta (country/category/dims)
+
+on:
+  workflow_dispatch:   # รันมือ — ใช้ซ่อม meta.country/category/dims ที่หายไป
+                         # เพราะ push_series() เขียนทับ (แก้ root cause แล้วใน
+                         # R/firestore.R 2026-08-25, แต่ doc ที่โดนทับไปแล้ว
+                         # ก่อนหน้านั้นต้อง re-run ตัวนี้อีกครั้งเพื่อซ่อม)
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: 'release'
+          use-public-rspm: true
+
+      - name: Install packages and run
+        env:
+          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+        run: |
+          Rscript -e '
+          lib <- "/home/runner/R-pkgs"
+          dir.create(lib, showWarnings = FALSE)
+          .libPaths(c(lib, .libPaths()))
+          options(repos = c(CRAN = "https://packagemanager.posit.co/cran/__linux__/noble/latest"))
+          pkgs <- c("httr2","jsonlite","jose","dplyr","readr")
+          miss <- pkgs[!pkgs %in% installed.packages(lib.loc = lib)[,"Package"]]
+          if (length(miss)) install.packages(miss, lib = lib, dependencies = TRUE)
+          .libPaths(c(lib, .libPaths()))
+          source("scripts/oneoff/migrate_nonsdmx_categories.R")
+          '
