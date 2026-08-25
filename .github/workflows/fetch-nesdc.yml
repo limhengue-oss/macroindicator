@@ -2,8 +2,16 @@ name: Fetch NESDC Quarterly GDP
 
 on:
   schedule:
-    - cron: '0 2 15 2,5,8,11 *'   # 09:00 ICT วันที่ 15 ของเดือนหลัง GDP quarter ปิด (ก.พ./พ.ค./ส.ค./พ.ย.) — NESDC อัพเดทไม่บ่อย ไม่ต้องเช็คทุกวัน
+    # ⚠️ ต้องอัพเดท cron นี้ทุกไตรมาสให้ตรงวัน/เวลาแถลงจริงของ NESDC — เช็คจาก
+    # ตาราง "Forthcoming Releases" หน้า nesdc.go.th (ไม่ใช่ fix วันที่คงที่
+    # ทุกเดือนเหมือนเดิม เพราะวันแถลงแต่ละไตรมาสไม่ตรงกัน) ตั้งเวลาเป็นเวลา
+    # แถลงจริง +15 นาที (buffer ให้ NESDC อัพโหลดไฟล์เสร็จ)
+    # รอบปัจจุบัน: Q3/2569 แถลง 16 พ.ย. 2569 09:30 ICT → รัน 09:45 ICT = 02:45 UTC
+    - cron: '45 2 16 11 *'
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   fetch-nesdc:
@@ -16,6 +24,11 @@ jobs:
           r-version: 'release'
           use-public-rspm: true
 
+      - name: Install system deps (pdftools)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libpoppler-cpp-dev
+
       - name: Install packages and run
         env:
           GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
@@ -25,9 +38,17 @@ jobs:
           dir.create(lib, showWarnings = FALSE)
           .libPaths(c(lib, .libPaths()))
           options(repos = c(CRAN = "https://packagemanager.posit.co/cran/__linux__/noble/latest"))
-          pkgs <- c("httr2","jsonlite","jose","dplyr","purrr","tibble","stringr","readxl")
+          pkgs <- c("httr2","jsonlite","jose","dplyr","purrr","tibble","stringr","readxl","rvest","pdftools")
           miss <- pkgs[!pkgs %in% installed.packages(lib.loc = lib)[,"Package"]]
           if (length(miss)) install.packages(miss, lib = lib, dependencies = TRUE)
           .libPaths(c(lib, .libPaths()))
           source("fetch_nesdc.R")
           '
+
+      - name: Commit updated release cron (if changed)
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add .github/workflows/fetch-nesdc.yml
+          git diff --cached --quiet || git commit -m "auto: update NESDC GDP release cron for next quarter"
+          git diff --cached --quiet || git push

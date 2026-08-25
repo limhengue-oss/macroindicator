@@ -53,6 +53,8 @@ suppressPackageStartupMessages({
   library(jsonlite)
   library(httr2)
   library(jose)
+  library(rvest)
+  library(pdftools)
 })
 
 PROJECT_ID <- "macroindicator-6b265"
@@ -351,3 +353,94 @@ n_total <- nrow(GDP_CATALOG) + nrow(NET_EXPORT_CATALOG) +
   nrow(SUPPLY_CATALOG) * 2 + nrow(CONSUMPTION_CATALOG) * 2 +
   nrow(INVEST_1112_CATALOG) * 2 + nrow(INVEST_1314_CATALOG) * 2
 message(sprintf("\n✓ Done — %d/%d NESDC GDP series updated", ok, n_total))
+
+# ══════════════════════════════════════════════════════════════════
+#  PART 4 — อัพเดท cron ของ workflow ให้ตรงรอบแถลง GDP ครั้งถัดไปอัตโนมัติ
+#
+#  ทุกไฟล์ release ของ NESDC (PDF "แถลงข่าว") มีท้ายเอกสารระบุ "Forthcoming
+#  issues" บอกวัน/เวลาแถลงรอบถัดไปตรงๆ (ภาษาอังกฤษ เช่น "9:30 a.m. Monday,
+#  November 16th, 2026") — ไม่ต้องแกะตาราง "Forthcoming Releases" ทั้งปี
+#  แค่หาลิงก์ "Forthcoming Releases" จากหน้าแรก nesdc.go.th (ลิงก์นี้ก็ผูก
+#  กับรอบแถลงเหมือน RELEASE_PAGE_URL เปลี่ยนทุกไตรมาส หาใหม่ทุกครั้ง) →
+#  โหลด PDF → regex หาบรรทัดนั้น → คำนวณ cron (เวลาแถลงจริง +15 นาที บัฟเฟอร์
+#  ให้ NESDC อัพโหลดไฟล์เสร็จ, ICT → UTC) → เขียนทับบรรทัด cron ใน
+#  .github/workflows/fetch-nesdc.yml (workflow step ถัดไปเป็นคน commit+push)
+#  ล้มเหลวได้โดยไม่ทำให้ทั้งสคริปต์ fail เพราะข้อมูล GDP push สำเร็จไปแล้ว
+#  ข้างบน — งาน sync cron เป็นแค่ nice-to-have
+# ══════════════════════════════════════════════════════════════════
+
+tryCatch({
+  message("\n── Checking next GDP release date for cron auto-update...")
+
+  fetch_nesdc_page <- function(url, path = NULL) {
+    req <- request(url) |>
+      req_options(cookiejar = "", followlocation = TRUE) |>
+      req_headers(`User-Agent` = "Mozilla/5.0 (compatible; macroindicator-bot/1.0)")
+    if (is.null(path)) req_perform(req) else req_perform(req, path = path)
+  }
+
+  home_resp <- fetch_nesdc_page("https://www.nesdc.go.th/")
+  home_html <- read_html(resp_body_string(home_resp))
+
+  link_node <- home_html |>
+    html_elements("a") |>
+    keep(~ str_detect(html_text(.x), "Forthcoming Releases")) |>
+    pluck(1)
+  if (is.null(link_node)) stop("ไม่เจอลิงก์ 'Forthcoming Releases' บนหน้าแรก — โครงหน้าเว็บอาจเปลี่ยน")
+
+  pdf_url <- url_absolute(html_attr(link_node, "href"), "https://www.nesdc.go.th/")
+  message(sprintf("  Forthcoming Releases URL: %s", pdf_url))
+
+  pdf_path <- tempfile(fileext = ".pdf")
+  fetch_nesdc_page(pdf_url, path = pdf_path)
+  txt <- paste(pdf_text(pdf_path), collapse = "\n")
+
+  m <- str_match(txt, "Forthcoming issues.{0,300}?(\\d{1,2}):(\\d{2})\\s*([ap])\\.m\\.[^,]*,\\s*(\\w+)\\s+(\\d{1,2})\\w*,\\s*(\\d{4})")
+  if (any(is.na(m[1, ]))) stop("regex หา 'Forthcoming issues ... H:MM a.m. Month Dth, YYYY' ไม่เจอใน PDF")
+
+  hour <- as.integer(m[1, 2]); minute_ <- as.integer(m[1, 3]); ampm <- m[1, 4]
+  month_name <- m[1, 5]; day <- as.integer(m[1, 6]); year <- as.integer(m[1, 7])
+  if (ampm == "p" && hour != 12) hour <- hour + 12
+  if (ampm == "a" && hour == 12) hour <- 0
+  month_num <- match(month_name, month.name)
+  if (is.na(month_num)) stop(sprintf("ไม่รู้จักชื่อเดือน '%s'", month_name))
+
+  local_dt <- as.POSIXct(sprintf("%d-%02d-%02d %02d:%02d:00", year, month_num, day, hour, minute_),
+                          tz = "Asia/Bangkok")
+  run_dt <- local_dt + 15 * 60  # buffer 15 นาทีหลังเวลาแถลงจริง
+
+  cron_min   <- format(run_dt, "%M", tz = "UTC")
+  cron_hour  <- format(run_dt, "%H", tz = "UTC")
+  cron_day   <- format(run_dt, "%d", tz = "UTC")
+  cron_month <- format(run_dt, "%m", tz = "UTC")
+  new_cron_line <- sprintf("    - cron: '%s %s %s %s *'", cron_min, cron_hour, cron_day, cron_month)
+
+  qm <- str_match(txt, "The (\\d)\\w*\\s*quarter\\s*(\\d{4})")
+  quarter_label <- if (!any(is.na(qm[1, ]))) sprintf("Q%s/%s", qm[1, 2], qm[1, 3]) else NA
+  new_comment_line <- sprintf(
+    "    # รอบถัดไป (auto-updated %s): %s แถลง %d %s %d เวลา %02d:%02d ICT → รัน +15 นาที = %02d:%02d %s UTC",
+    format(Sys.Date(), "%Y-%m-%d"),
+    ifelse(is.na(quarter_label), "GDP", quarter_label),
+    day, month_name, year, hour, minute_,
+    as.integer(format(run_dt, "%H", tz = "Asia/Bangkok")),
+    as.integer(format(run_dt, "%M", tz = "Asia/Bangkok")),
+    format(run_dt, "%Y-%m-%d")
+  )
+
+  yml_path <- ".github/workflows/fetch-nesdc.yml"
+  lines <- readLines(yml_path)
+  cron_idx <- which(str_detect(lines, "^\\s*- cron:"))
+  if (length(cron_idx) != 1) stop(sprintf("เจอบรรทัด '- cron:' %d บรรทัดใน %s (ต้องมีพอดี 1)", length(cron_idx), yml_path))
+
+  lines[cron_idx] <- new_cron_line
+  # ลบบรรทัด comment เก่าที่ขึ้นต้นด้วย "# รอบปัจจุบัน:" หรือ "# รอบถัดไป (auto-updated" ถ้ามี แล้วแทรกอันใหม่ก่อนบรรทัด cron
+  old_comment_idx <- which(str_detect(lines, "^\\s*# รอบ(ปัจจุบัน|ถัดไป \\(auto-updated)"))
+  lines <- lines[!(seq_along(lines) %in% old_comment_idx)]
+  cron_idx <- which(str_detect(lines, "^\\s*- cron:"))
+  lines <- append(lines, new_comment_line, after = cron_idx - 1)
+
+  writeLines(lines, yml_path)
+  message(sprintf("  ✓ อัพเดท cron เป็นรอบถัดไปแล้ว: %s", new_cron_line))
+}, error = function(e) {
+  message(sprintf("  ⊘ ข้ามการอัพเดท cron อัตโนมัติ: %s", conditionMessage(e)))
+})
