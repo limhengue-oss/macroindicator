@@ -1,0 +1,5 @@
+# wrapper รัน local แทน .github/workflows/fetch-tpso.yml (cron ปิดชั่วคราว — ดู TEMP-DISABLED-2026-08)
+setwd("C:/Users/limhe/OneDrive/Documents/GitHub/macroindicator")
+source("load_secret.R")
+load_secret("GCP_SA_KEY")
+source("fetch_tpso.R")

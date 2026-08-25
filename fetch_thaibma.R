@@ -98,6 +98,7 @@ fetch_thaibma_day <- function(date) {
 # ดึงทุกวันทำการ (จ-ศ) ใน [from, to] แล้ว dedup ตาม Asof จริงที่ได้กลับมา
 # (กันกรณีวันหยุดไทยที่ไม่รู้ล่วงหน้า — API roll back ให้เองแต่ค่าจะซ้ำกัน)
 fetch_thaibma_range <- function(from, to) {
+  if (from > to) return(tibble(asof = as.Date(character()), x = double(), y = double()))
   weekdays_seq <- seq(from, to, by = "day")
   weekdays_seq <- weekdays_seq[!wday(weekdays_seq) %in% c(1, 7)]  # ตัดเสาร์-อาทิตย์
   if (length(weekdays_seq) == 0) return(tibble(asof = as.Date(character()), x = double(), y = double()))

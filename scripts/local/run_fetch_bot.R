@@ -1,0 +1,6 @@
+# wrapper รัน local แทน .github/workflows/fetch-bot.yml (cron ปิดชั่วคราว — ดู TEMP-DISABLED-2026-08)
+setwd("C:/Users/limhe/OneDrive/Documents/GitHub/macroindicator")
+source("load_secret.R")
+load_secret("GCP_SA_KEY")
+load_secret("BOT_API_KEY")
+source("fetch_bot.R")

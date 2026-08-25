@@ -1,0 +1,7 @@
+# wrapper รัน local แทน .github/workflows/update-data.yml (cron ปิดชั่วคราว — ดู TEMP-DISABLED-2026-08)
+setwd("C:/Users/limhe/OneDrive/Documents/GitHub/macroindicator")
+source("load_secret.R")
+load_secret("GCP_SA_KEY")
+load_secret("FRED_API_KEY")
+source("fetch_and_push.R")
+source("fetch_eppo.R")
