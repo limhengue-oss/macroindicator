@@ -214,7 +214,10 @@ input[type=range] { width:80px; accent-color:var(--blue); }
 .cat-item .arrow { opacity:0.5; flex-shrink:0; }
 .cat-item.leaf { cursor:pointer; }
 .cat-item.leaf input[type=checkbox] { margin:0; flex-shrink:0; }
-.cat-item.leaf span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+/* min-width:0 บังคับ — flex item default min-width คือ auto (เท่าความ
+   กว้าง content) ทำให้ overflow/ellipsis ไม่ทำงานเลย ชื่อยาวเลยตกขอบ
+   .cat-col ออกไปแทนที่จะโดนตัด (bug ที่ user เจอจริง 2026-08-25) */
+.cat-item.leaf span { flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .cat-empty-hint { padding:16px 10px; font-size:0.78em; color:var(--text3); }
 .cat-group-header { padding:10px 10px 4px; font-size:0.68em; font-weight:700; letter-spacing:0.05em; text-transform:uppercase; color:var(--text3); }
 
@@ -3638,7 +3641,7 @@ window.selectCatalogCategory = function(superCategory, subDataset) {
     ? entries.map(e => `
       <label class="cat-item leaf">
         <input type="checkbox" value="${e.id}" ${catalogState.selected.has(e.id) ? 'checked' : ''} onchange="toggleCatalogSeries('${e.id}',this.checked)">
-        <span>${e.name}</span>
+        <span title="${e.name.replace(/"/g, '&quot;')}">${e.name}</span>
       </label>`).join('')
     : '<div class="cat-empty-hint">ไม่มี series ในหมวดนี้</div>';
 };
@@ -3662,32 +3665,127 @@ window.confirmCatalogSelection = function() {
 
 // ════════════════════════════════════════════════════
 //  TH ECONOMIC DASHBOARD FLOW — series ไทยล้วน (ไม่รวม IMF/BIS) 2 คอลัมน์
-//  (Category [7 supercategory] → Series) ไม่มี Country เพราะเป็นไทยล้วน
-//  (ตัดสินใจ 2026-08-23 ร่วมกับ user)
+//  (Category → Series) ไม่มี Country เพราะเป็นไทยล้วน (ตัดสินใจ 2026-08-23
+//  ร่วมกับ user) — column แรกแตกละเอียดกว่า 7 supercategory ดิบ (ดู
+//  thDashCategoryFor/TH_DASH_STRUCTURE ข้างล่าง, 2026-08-25)
 // ════════════════════════════════════════════════════
 function thDashEntries() {
   return catalogEntries().filter(e =>
-    e.country === 'Thailand' && !e.id.startsWith('BIS_') && !CATALOG_SUPERCATEGORY_MAP[e.categoryCode]);
+    e.country === 'Thailand' && !e.id.startsWith('BIS_') && !CATALOG_SUPERCATEGORY_MAP[e.categoryCode] &&
+    // ซ่อน BOT_SET_BOT (SET index จาก BOT, รายเดือน) กับ BOT_USDTHB ออกจาก
+    // TH Dashboard — มี SET/SET_* (รายวันจาก SET ตรงๆ) กับ USDTHB (legacy
+    // ticker เดิม) ซ้ำซ้อนกันอยู่แล้ว ตัดสินใจร่วมกับ user 2026-08-25 ให้
+    // เหลือแหล่งเดียวต่อ series (BOT_YIELD_* ไม่ต้องกรองเพิ่มเพราะถูกลบออก
+    // จากระบบไปแล้วตั้งแต่ 2026-08-23 ไม่มี series แบบนี้เหลืออยู่)
+    !['BOT_SET_BOT', 'BOT_USDTHB'].includes(e.id));
+}
+// แตกหมวดรวมเดิม (7 supercategory ที่ migrate มาจาก
+// data/nonsdmx_category_map.csv) ให้ละเอียดขึ้นเฉพาะใน TH Dashboard picker
+// จุดเดียว — ไม่แตะ meta.category จริงใน Firestore เพราะ cross-country
+// catalog (openCatalogModal) ยังอยากใช้หมวดรวมเดิมอยู่ (ตัดสินใจร่วมกับ
+// user 2026-08-25, ที่มา: scratch_th_dashboard/PROPOSAL_categories.md)
+// - Financial Market, Equity & Bonds → Equity (SET) / Interest Rate & Bonds
+//   (THAIBMA) — คนละ asset class ไม่ควรปนกัน
+// - Economic Activity (94 series) → แตกตาม NESDC doc_id prefix (เข้ารหัส
+//   component ไว้ในตัว doc_id เองอยู่แล้ว ไม่ต้องพึ่ง meta.dims เพราะ series
+//   กลุ่มนี้ dims ว่างเปล่าตาม design เดิม) + BOT sentiment index
+// - Price Sector (116 series) → EPPO ราคาน้ำมันปลีก (100, แตกย่อยอีกชั้น
+//   ตามชนิดน้ำมัน 9 ชนิด เพราะแบนราบเดียวยาวเกินเลือก) / TPSO CPI-PPI (14) /
+//   GOLDTH ราคาทอง (2)
+const TH_DASH_EPPO_PRODUCT_LABELS = {
+  DIESEL: 'DIESEL', FO_1500: 'FO 1500', FO_600: 'FO 600',
+  GASOHOL_91: 'GASOHOL 91', GASOHOL_95: 'GASOHOL 95',
+  GASOHOL95_E20: 'GASOHOL95 E20', GASOHOL95_E85: 'GASOHOL95 E85',
+  LPG: 'LPG', ULG_95: 'ULG 95',
+};
+// ชื่อ component ราคาน้ำมัน EPPO ยังเป็นโค้ดดิบ (ปัญหาแบบเดียวกับ CTOT ที่
+// แก้ไปก่อนหน้านี้ — อ่านไม่รู้เรื่อง) แปลเป็นไทยตามโครงสร้างราคาน้ำมัน
+// ปลีกมาตรฐานของไทย
+const TH_DASH_EPPO_COMPONENT_LABELS = {
+  CONSV_FUND: 'กองทุนอนุรักษ์พลังงาน', DISCOUNT: 'ส่วนลด',
+  EXCISE_TAX: 'ภาษีสรรพสามิต', EX_RATE: 'อัตราแลกเปลี่ยนอ้างอิง',
+  EX_REFIN: 'ราคา ณ โรงกลั่น', MARKETING_MARGIN: 'ค่าการตลาด',
+  M_TAX: 'ภาษีเทศบาล', OIL_FUND: 'กองทุนน้ำมันเชื้อเพลิง',
+  RETAIL: 'ราคาขายปลีก', VAT_MM: 'VAT (ค่าการตลาด)',
+  VAT_WS: 'VAT (ขายส่ง)', WHOLESALE: 'ราคาขายส่ง',
+};
+function thDashEppoParse(id) {
+  const rest = id.replace(/^EPPO_/, '');
+  const comp = Object.keys(TH_DASH_EPPO_COMPONENT_LABELS).find(c => rest === c || rest.endsWith('_' + c));
+  return comp ? { product: rest.slice(0, rest.length - comp.length - 1), component: comp } : { product: rest, component: null };
+}
+// โครงสร้าง column แรกของ modal — fixed list (ไม่ derive จากข้อมูลสด)
+// เพราะกลุ่มพวกนี้คงที่อยู่แล้วตาม data source ที่มีจริง ง่ายกว่าเขียน
+// generic grouping logic สำหรับแค่ 4 กลุ่มนี้
+const TH_DASH_STRUCTURE = [
+  { header: null, items: ['Equity', 'Interest Rate & Bonds', 'Credit & Financial Stability', 'Monetary & Exchange rate', 'External Trade & BOP', 'Government Finance'] },
+  { header: 'Economic Activity', items: [
+    'Sentiment & Leading Indicators (BOT)',
+    'Consumption Expenditure — Household (NESDC)',
+    'Investment — GFCF (NESDC)',
+    'External Trade in GDP Accounts (NESDC)',
+    'GDP by Industry — Value Added (NESDC)',
+  ] },
+  { header: 'Price Sector — Fuel Retail Price Breakdown (EPPO)', items: Object.values(TH_DASH_EPPO_PRODUCT_LABELS) },
+  { header: 'Price Sector', items: ['CPI/PPI by Group (TPSO)', 'Gold Price (GOLDTH)'] },
+];
+function thDashCategoryFor(e) {
+  if (e.categoryCode === 'FINANCIAL_MARKET_EQUITY_BONDS') {
+    if (e.id === 'SET' || e.id.startsWith('SET_')) return 'Equity';
+    if (e.id.startsWith('THAIBMA_YIELD_')) return 'Interest Rate & Bonds';
+  }
+  if (e.categoryCode === 'ECONOMIC_ACTIVITY') {
+    if (e.id.startsWith('BOT')) return 'Sentiment & Leading Indicators (BOT)';
+    if (e.id.startsWith('NESDC_CONS_')) return 'Consumption Expenditure — Household (NESDC)';
+    if (e.id.startsWith('NESDC_INVEST_')) return 'Investment — GFCF (NESDC)';
+    if (e.id.startsWith('NESDC_EXPORTS_') || e.id.startsWith('NESDC_IMPORTS_') || e.id.startsWith('NESDC_NETEXPORT_')) return 'External Trade in GDP Accounts (NESDC)';
+    if (e.id.startsWith('NESDC_SUPPLY_')) return 'GDP by Industry — Value Added (NESDC)';
+  }
+  if (e.categoryCode === 'PRICE_SECTOR') {
+    if (e.id.startsWith('EPPO_')) return TH_DASH_EPPO_PRODUCT_LABELS[thDashEppoParse(e.id).product] || e.category;
+    if (e.id.startsWith('TPSO_')) return 'CPI/PPI by Group (TPSO)';
+    if (e.id.startsWith('GOLDTH_')) return 'Gold Price (GOLDTH)';
+  }
+  return e.category;
+}
+// ชื่อแสดงผล leaf เฉพาะใน TH Dashboard — ตัดคำซ้ำกับ header ที่ขึ้นอยู่แล้ว
+// (TPSO/CPIG/หมวด), แปล component code EPPO เป็นไทย, กันชื่อชนกัน
+// ("Construction" ปรากฏทั้งฝั่งลงทุนกับฝั่งมูลค่าเพิ่มอุตสาหกรรม — เช็คจริง
+// จาก doc_id แล้วไม่ใช่ series เดียวกัน)
+function thDashSeriesLabel(e) {
+  if (e.id.startsWith('EPPO_')) {
+    const { component } = thDashEppoParse(e.id);
+    return TH_DASH_EPPO_COMPONENT_LABELS[component] || e.name;
+  }
+  if (e.id.startsWith('TPSO_CPIG_')) return e.name.replace(/^TPSO CPIG (หมวด)?/, 'CPI ');
+  if (e.id.startsWith('TPSO_PPI_')) return e.name.replace(/^TPSO PPI /, 'PPI ');
+  if (e.id.startsWith('NESDC_SUPPLY_CONSTRUCTION_')) return e.name.replace(/^Construction,/, 'Construction (Value Added),');
+  return e.name;
 }
 let thDashState = { category: null, selected: new Set() };
 window.startThDashboardFlow = function() {
   closeChartTypeModal();
   thDashState = { category: null, selected: new Set() };
-  const categories = [...new Set(thDashEntries().map(e => e.category))].sort();
-  document.getElementById('th-dash-col-category').innerHTML = categories.map(c => `
-    <div class="cat-item" onclick="selectThDashCategory('${c.replace(/'/g, "\\'")}')">${c} <span class="arrow">›</span></div>`).join('');
+  const present = new Set(thDashEntries().map(thDashCategoryFor));
+  document.getElementById('th-dash-col-category').innerHTML = TH_DASH_STRUCTURE.map(({ header, items }) => {
+    const shown = items.filter(c => present.has(c));
+    if (!shown.length) return '';
+    const headerHtml = header ? `<div class="cat-group-header">${header}</div>` : '';
+    return headerHtml + shown.map(c => `
+      <div class="cat-item" onclick="selectThDashCategory('${c.replace(/'/g, "\\'")}')">${c} <span class="arrow">›</span></div>`).join('');
+  }).join('');
   document.getElementById('th-dash-col-series').innerHTML = '';
   document.getElementById('th-dash-selected-count').textContent = 'ยังไม่เลือก series';
   document.getElementById('th-dash-modal').classList.add('show');
 };
 window.selectThDashCategory = function(category) {
   thDashState.category = category;
-  const entries = thDashEntries().filter(e => e.category === category);
+  const entries = thDashEntries().filter(e => thDashCategoryFor(e) === category);
   document.getElementById('th-dash-col-series').innerHTML = entries.length
     ? entries.map(e => `
       <label class="cat-item leaf">
         <input type="checkbox" value="${e.id}" ${thDashState.selected.has(e.id) ? 'checked' : ''} onchange="toggleThDashSeries('${e.id}',this.checked)">
-        <span>${e.name}</span>
+        <span title="${thDashSeriesLabel(e).replace(/"/g, '&quot;')}">${thDashSeriesLabel(e)}</span>
       </label>`).join('')
     : '<div class="cat-empty-hint">ไม่มี series ในหมวดนี้</div>';
 };
