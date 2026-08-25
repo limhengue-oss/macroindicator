@@ -1,10 +1,9 @@
 name: Update Macro Data
 
 on:
-  # TEMP-DISABLED-2026-08: ปิด schedule ชั่วคราวเพราะ GitHub Actions ติด quota — รัน local แทน, กลับมาเปิดตอนต้นเดือนหน้า
-  # schedule:
-  #   - cron: '0 23 * * *'   # 06:00 ICT — ลดจากทุก 6 ชม. เหลือวันละครั้ง กัน GitHub Actions
-  #                           # minutes เกินโควตาฟรี 2000 นาที/เดือนถ้าจะย้ายไป private repo
+  schedule:
+    - cron: '0 23 * * *'   # 06:00 ICT — ลดจากทุก 6 ชม. เหลือวันละครั้ง กัน GitHub Actions
+                            # minutes เกินโควตาฟรี 2000 นาที/เดือนถ้าจะย้ายไป private repo
   workflow_dispatch:
 
 jobs:

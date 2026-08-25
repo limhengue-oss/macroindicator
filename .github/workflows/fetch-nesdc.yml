@@ -1,9 +1,8 @@
 name: Fetch NESDC Quarterly GDP
 
 on:
-  # TEMP-DISABLED-2026-08: ปิด schedule ชั่วคราวเพราะ GitHub Actions ติด quota — รัน local แทน, กลับมาเปิดตอนต้นเดือนหน้า
-  # schedule:
-  #   - cron: '0 2 15 2,5,8,11 *'   # 09:00 ICT วันที่ 15 ของเดือนหลัง GDP quarter ปิด (ก.พ./พ.ค./ส.ค./พ.ย.) — NESDC อัพเดทไม่บ่อย ไม่ต้องเช็คทุกวัน
+  schedule:
+    - cron: '0 2 15 2,5,8,11 *'   # 09:00 ICT วันที่ 15 ของเดือนหลัง GDP quarter ปิด (ก.พ./พ.ค./ส.ค./พ.ย.) — NESDC อัพเดทไม่บ่อย ไม่ต้องเช็คทุกวัน
   workflow_dispatch:
 
 jobs:

@@ -1,9 +1,8 @@
 name: Fetch TPSO CPI/PPI
 
 on:
-  # TEMP-DISABLED-2026-08: ปิด schedule ชั่วคราวเพราะ GitHub Actions ติด quota — รัน local แทน, กลับมาเปิดตอนต้นเดือนหน้า
-  # schedule:
-  #   - cron: '0 2 * * 6'   # 09:00 ICT ทุกวันเสาร์ — ข้อมูลเป็นรายเดือน ไม่จำเป็นต้อง fetch ถี่
+  schedule:
+    - cron: '0 2 * * 6'   # 09:00 ICT ทุกวันเสาร์ — ข้อมูลเป็นรายเดือน ไม่จำเป็นต้อง fetch ถี่
   workflow_dispatch:
 
 jobs:

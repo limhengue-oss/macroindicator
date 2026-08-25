@@ -1,9 +1,8 @@
 name: Fetch ThaiBMA Bond Yield
 
 on:
-  # TEMP-DISABLED-2026-08: ปิด schedule ชั่วคราวเพราะ GitHub Actions ติด quota — รัน local แทน, กลับมาเปิดตอนต้นเดือนหน้า
-  # schedule:
-  #   - cron: '0 11 * * *'   # 18:00 ICT — หลังตลาดปิดและ ThaiBMA อัพเดท curve ของวันแล้ว
+  schedule:
+    - cron: '0 11 * * *'   # 18:00 ICT — หลังตลาดปิดและ ThaiBMA อัพเดท curve ของวันแล้ว
   workflow_dispatch:
 
 jobs:

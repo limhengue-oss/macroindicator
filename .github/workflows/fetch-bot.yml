@@ -1,9 +1,8 @@
 name: Fetch BOT Macro Data
 
 on:
-  # TEMP-DISABLED-2026-08: ปิด schedule ชั่วคราวเพราะ GitHub Actions ติด quota — รัน local แทน, กลับมาเปิดตอนต้นเดือนหน้า
-  # schedule:
-  #   - cron: '0 1 * * *'   # 08:00 ICT — ข้อมูล BOT ส่วนใหญ่เป็นรายเดือน/ไตรมาส ไม่ต้องดึงถี่
+  schedule:
+    - cron: '0 1 * * *'   # 08:00 ICT — ข้อมูล BOT ส่วนใหญ่เป็นรายเดือน/ไตรมาส ไม่ต้องดึงถี่
   workflow_dispatch:
 
 jobs:

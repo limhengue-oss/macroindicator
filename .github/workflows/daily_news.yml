@@ -1,10 +1,9 @@
 name: Daily News Pipeline
 
 on:
-  # TEMP-DISABLED-2026-08: ปิด schedule ชั่วคราวเพราะ GitHub Actions ติด quota — รัน local แทน, กลับมาเปิดตอนต้นเดือนหน้า
-  # schedule:
-  #   - cron: '0 0 * * *'   # 07:00 ICT (morning)
-  #   - cron: '0 6 * * *'   # 13:00 ICT (afternoon)
+  schedule:
+    - cron: '0 0 * * *'   # 07:00 ICT (morning)
+    - cron: '0 6 * * *'   # 13:00 ICT (afternoon)
   workflow_dispatch:
 
 jobs:

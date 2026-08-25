@@ -1,9 +1,8 @@
 name: Fetch BIS Statistics
 
 on:
-  # TEMP-DISABLED-2026-08: ปิด schedule ชั่วคราวเพราะ GitHub Actions ติด quota — รัน local แทน, กลับมาเปิดตอนต้นเดือนหน้า
-  # schedule:
-  #   - cron: '0 3 * * 2'   # 10:00 ICT ทุกวันอังคาร — ข้อมูลเป็นรายไตรมาส/รายวัน ไม่จำเป็นต้อง fetch ถี่
+  schedule:
+    - cron: '0 3 * * 2'   # 10:00 ICT ทุกวันอังคาร — ข้อมูลเป็นรายไตรมาส/รายวัน ไม่จำเป็นต้อง fetch ถี่
   workflow_dispatch:
 
 jobs:
