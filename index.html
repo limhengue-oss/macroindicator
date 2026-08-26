@@ -218,6 +218,13 @@ input[type=range] { width:80px; accent-color:var(--blue); }
    กว้าง content) ทำให้ overflow/ellipsis ไม่ทำงานเลย ชื่อยาวเลยตกขอบ
    .cat-col ออกไปแทนที่จะโดนตัด (bug ที่ user เจอจริง 2026-08-25) */
 .cat-item.leaf span { flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+/* TH Dashboard tree (2026-08-26) — arrow นำหน้า label เสมอ ต่างจาก
+   .cat-item เดิม (drill-down 3-column) ที่ arrow อยู่ท้ายบรรทัด */
+.tree-node { justify-content:flex-start !important; }
+.tree-node .arrow { opacity:0.6; width:14px; text-align:center; }
+.tree-node.leaf-group span, .tree-node span.tree-label { flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+#th-dash-search { width:100%; background:var(--bg3); border:1px solid var(--border2); color:var(--text);
+  padding:6px 9px; border-radius:3px; font-family:inherit; font-size:0.82em; margin-bottom:8px; }
 .cat-empty-hint { padding:16px 10px; font-size:0.78em; color:var(--text3); }
 .cat-group-header { padding:10px 10px 4px; font-size:0.68em; font-weight:700; letter-spacing:0.05em; text-transform:uppercase; color:var(--text3); }
 
@@ -484,14 +491,17 @@ input[type=range] { width:80px; accent-color:var(--blue); }
   </div>
 </div>
 
-<!-- TH Economic Dashboard Flow: series ไทยล้วน (ไม่รวม IMF/BIS) — 2 คอลัมน์
-     (Category → Series) ไม่ต้องมี Country เพราะเป็นไทยทั้งหมดอยู่แล้ว -->
+<!-- TH Economic Dashboard Flow: series ไทยล้วน (ไม่รวม IMF/BIS) — tree
+     เดียว expand/collapse หลายชั้น (เปลี่ยนจาก 2-column แบบ Country→Series
+     เดิม เพราะชื่อยาวตกขอบ + เทียบ series ข้ามหมวดไม่ได้ ตัดสินใจร่วมกับ
+     user 2026-08-26, ดู scratch_th_dashboard/PROPOSAL_tree_ui.md) -->
 <div class="modal-bg" id="th-dash-modal">
   <div class="modal" style="max-width:640px">
     <h3>TH Economic Dashboard</h3>
-    <div class="cat-columns">
-      <div class="cat-col" id="th-dash-col-category"></div>
-      <div class="cat-col" id="th-dash-col-series"></div>
+    <input type="text" id="th-dash-search" placeholder="ค้นหา series..."
+           oninput="thDashOnSearch(this.value)">
+    <div class="cat-columns" style="height:380px">
+      <div class="cat-col" id="th-dash-tree" style="flex:1"></div>
     </div>
     <div class="hint" id="th-dash-selected-count" style="margin-top:8px">ยังไม่เลือก series</div>
     <div class="modal-actions">
@@ -3664,10 +3674,11 @@ window.confirmCatalogSelection = function() {
 };
 
 // ════════════════════════════════════════════════════
-//  TH ECONOMIC DASHBOARD FLOW — series ไทยล้วน (ไม่รวม IMF/BIS) 2 คอลัมน์
-//  (Category → Series) ไม่มี Country เพราะเป็นไทยล้วน (ตัดสินใจ 2026-08-23
-//  ร่วมกับ user) — column แรกแตกละเอียดกว่า 7 supercategory ดิบ (ดู
-//  thDashCategoryFor/TH_DASH_STRUCTURE ข้างล่าง, 2026-08-25)
+//  TH ECONOMIC DASHBOARD FLOW — series ไทยล้วน (ไม่รวม IMF/BIS) แสดงเป็น
+//  tree เดียว expand/collapse ได้หลายหมวดพร้อมกัน + ช่องค้นหา (เปลี่ยนจาก
+//  2-column Category→Series เดิม 2026-08-26 เพราะชื่อยาวตกขอบ + เทียบ
+//  series ข้ามหมวดไม่ได้ต้องกดสลับหมวดตลอด — ตัดสินใจร่วมกับ user, ที่มา:
+//  scratch_th_dashboard/PROPOSAL_tree_ui.md)
 // ════════════════════════════════════════════════════
 function thDashEntries() {
   return catalogEntries().filter(e =>
@@ -3679,19 +3690,6 @@ function thDashEntries() {
     // จากระบบไปแล้วตั้งแต่ 2026-08-23 ไม่มี series แบบนี้เหลืออยู่)
     !['BOT_SET_BOT', 'BOT_USDTHB'].includes(e.id));
 }
-// แตกหมวดรวมเดิม (7 supercategory ที่ migrate มาจาก
-// data/nonsdmx_category_map.csv) ให้ละเอียดขึ้นเฉพาะใน TH Dashboard picker
-// จุดเดียว — ไม่แตะ meta.category จริงใน Firestore เพราะ cross-country
-// catalog (openCatalogModal) ยังอยากใช้หมวดรวมเดิมอยู่ (ตัดสินใจร่วมกับ
-// user 2026-08-25, ที่มา: scratch_th_dashboard/PROPOSAL_categories.md)
-// - Financial Market, Equity & Bonds → Equity (SET) / Interest Rate & Bonds
-//   (THAIBMA) — คนละ asset class ไม่ควรปนกัน
-// - Economic Activity (94 series) → แตกตาม NESDC doc_id prefix (เข้ารหัส
-//   component ไว้ในตัว doc_id เองอยู่แล้ว ไม่ต้องพึ่ง meta.dims เพราะ series
-//   กลุ่มนี้ dims ว่างเปล่าตาม design เดิม) + BOT sentiment index
-// - Price Sector (116 series) → EPPO ราคาน้ำมันปลีก (100, แตกย่อยอีกชั้น
-//   ตามชนิดน้ำมัน 9 ชนิด เพราะแบนราบเดียวยาวเกินเลือก) / TPSO CPI-PPI (14) /
-//   GOLDTH ราคาทอง (2)
 const TH_DASH_EPPO_PRODUCT_LABELS = {
   DIESEL: 'DIESEL', FO_1500: 'FO 1500', FO_600: 'FO 600',
   GASOHOL_91: 'GASOHOL 91', GASOHOL_95: 'GASOHOL 95',
@@ -3714,84 +3712,220 @@ function thDashEppoParse(id) {
   const comp = Object.keys(TH_DASH_EPPO_COMPONENT_LABELS).find(c => rest === c || rest.endsWith('_' + c));
   return comp ? { product: rest.slice(0, rest.length - comp.length - 1), component: comp } : { product: rest, component: null };
 }
-// โครงสร้าง column แรกของ modal — fixed list (ไม่ derive จากข้อมูลสด)
-// เพราะกลุ่มพวกนี้คงที่อยู่แล้วตาม data source ที่มีจริง ง่ายกว่าเขียน
-// generic grouping logic สำหรับแค่ 4 กลุ่มนี้
-const TH_DASH_STRUCTURE = [
-  { header: null, items: ['Equity', 'Interest Rate & Bonds', 'Credit & Financial Stability', 'Monetary & Exchange rate', 'External Trade & BOP', 'Government Finance'] },
-  { header: 'Economic Activity', items: [
-    'Sentiment & Leading Indicators (BOT)',
-    'Consumption Expenditure — Household (NESDC)',
-    'Investment — GFCF (NESDC)',
-    'External Trade in GDP Accounts (NESDC)',
-    'GDP by Industry — Value Added (NESDC)',
-  ] },
-  { header: 'Price Sector — Fuel Retail Price Breakdown (EPPO)', items: Object.values(TH_DASH_EPPO_PRODUCT_LABELS) },
-  { header: 'Price Sector', items: ['CPI/PPI by Group (TPSO)', 'Gold Price (GOLDTH)'] },
+// ── Economic Activity → NESDC restructure (ตัดสินใจร่วมกับ user
+// 2026-08-26) — แยก Expenditure side / Production side, ตัด Deflator ทิ้ง
+// ทั้งหมด (NESDC มีแค่ Nominal/CVM สองแบบ ไม่มี Deflator เป็น series
+// สำเร็จรูป จะทำต้องคำนวณ Nominal÷Real เอง เป็นฟีเจอร์ cross-series ใหม่
+// แยกไปทำทีหลังถ้าต้องการ), ตัด "total" ที่มี breakdown อยู่แล้วออก (GFCF
+// รวม, Export/Import Goods+Services รวม, Net Export) เอาแค่ Private/Public
+// หรือ Goods/Services แยกเป็นตัวหลักแทน — ใช้ doc_id regex เป๊ะๆ กันชนกับ
+// prefix ที่ซ้อนกัน (เช่น NESDC_GDP_ ที่ NESDC_GDP_PROD_ ก็ขึ้นต้นเหมือนกัน)
+const THDASH_NESDC_DROP = [
+  /^NESDC_NETEXPORT_/, /^NESDC_EXPORTS_GS_/, /^NESDC_IMPORTS_GS_/,
+  /^NESDC_INVEST_GFCF_(NOMINAL|CVM)$/,
 ];
-function thDashCategoryFor(e) {
+const THDASH_EXPENDITURE_MAIN_ORDER = [
+  /^NESDC_GDP_(NOMINAL|CVM)$/,
+  /^NESDC_CONS_PRIVATE_(NOMINAL|CVM)$/,
+  /^NESDC_CONS_GOVT_(NOMINAL|CVM)$/,
+  /^NESDC_INVEST_GFCF_PRIVATE_(NOMINAL|CVM)$/,
+  /^NESDC_INVEST_GFCF_PUBLIC_(NOMINAL|CVM)$/,
+  /^NESDC_EXPORTS_GOODS_(NOMINAL|CVM)$/,
+  /^NESDC_EXPORTS_SERVICES_(NOMINAL|CVM)$/,
+  /^NESDC_IMPORTS_GOODS_(NOMINAL|CVM)$/,
+  /^NESDC_IMPORTS_SERVICES_(NOMINAL|CVM)$/,
+  /^NESDC_INVEST_INVENTORIES_(NOMINAL|CVM)$/,
+];
+// ชื่อ concept ตรงตัวจาก R (name ตัด ", Current Prices (Quarterly)"/
+// ", Chain Volume Measures (Quarterly)" ท้ายออก) — ไม่ hardcode คำแปลเอง
+// ซ้ำอีกชุด (DRY, ตาม pattern ทั้งไฟล์: R กำหนด label, เว็บอ่านอย่างเดียว)
+function thDashNesdcConcept(e) {
+  return e.name.replace(/,\s*(Chain Volume Measures|Current Prices)\s*\(Quarterly\)\s*$/, '').trim();
+}
+function thDashNesdcVariant(e) {
+  return /Chain Volume Measures/.test(e.name) ? 'Real' : 'Nominal';
+}
+// leaf-group key (= สิ่งที่ user คลิก expand เห็น checkbox) ของแต่ละ entry
+// — undefined = ไม่แสดงใน tree เลย (ใช้กับ BIS/dropped-NESDC ที่กรองไปแล้ว
+// หรือยังไม่รู้จัก id)
+function thDashLeafKey(e) {
   if (e.categoryCode === 'FINANCIAL_MARKET_EQUITY_BONDS') {
     if (e.id === 'SET' || e.id.startsWith('SET_')) return 'Equity';
     if (e.id.startsWith('THAIBMA_YIELD_')) return 'Interest Rate & Bonds';
   }
   if (e.categoryCode === 'ECONOMIC_ACTIVITY') {
     if (e.id.startsWith('BOT')) return 'Sentiment & Leading Indicators (BOT)';
-    if (e.id.startsWith('NESDC_CONS_')) return 'Consumption Expenditure — Household (NESDC)';
-    if (e.id.startsWith('NESDC_INVEST_')) return 'Investment — GFCF (NESDC)';
-    if (e.id.startsWith('NESDC_EXPORTS_') || e.id.startsWith('NESDC_IMPORTS_') || e.id.startsWith('NESDC_NETEXPORT_')) return 'External Trade in GDP Accounts (NESDC)';
-    if (e.id.startsWith('NESDC_SUPPLY_')) return 'GDP by Industry — Value Added (NESDC)';
+    if (e.id.startsWith('NESDC_')) {
+      if (THDASH_NESDC_DROP.some(re => re.test(e.id))) return undefined;
+      return thDashNesdcConcept(e);
+    }
   }
   if (e.categoryCode === 'PRICE_SECTOR') {
-    if (e.id.startsWith('EPPO_')) return TH_DASH_EPPO_PRODUCT_LABELS[thDashEppoParse(e.id).product] || e.category;
+    if (e.id.startsWith('EPPO_')) return TH_DASH_EPPO_PRODUCT_LABELS[thDashEppoParse(e.id).product];
     if (e.id.startsWith('TPSO_')) return 'CPI/PPI by Group (TPSO)';
     if (e.id.startsWith('GOLDTH_')) return 'Gold Price (GOLDTH)';
   }
   return e.category;
 }
-// ชื่อแสดงผล leaf เฉพาะใน TH Dashboard — ตัดคำซ้ำกับ header ที่ขึ้นอยู่แล้ว
-// (TPSO/CPIG/หมวด), แปล component code EPPO เป็นไทย, กันชื่อชนกัน
-// ("Construction" ปรากฏทั้งฝั่งลงทุนกับฝั่งมูลค่าเพิ่มอุตสาหกรรม — เช็คจริง
-// จาก doc_id แล้วไม่ใช่ series เดียวกัน)
+// ชื่อแสดงผลของแถว checkbox (leaf จริง) — NESDC โชว์แค่ Real/Nominal
+// เฉยๆ (ชื่อ concept ขึ้นเป็นหัวข้อ node อยู่แล้ว ไม่ต้องพูดซ้ำ), EPPO แปล
+// component code เป็นไทย, TPSO ตัดคำซ้ำกับ node header ออก
 function thDashSeriesLabel(e) {
+  if (e.categoryCode === 'ECONOMIC_ACTIVITY' && e.id.startsWith('NESDC_')) return thDashNesdcVariant(e);
   if (e.id.startsWith('EPPO_')) {
     const { component } = thDashEppoParse(e.id);
     return TH_DASH_EPPO_COMPONENT_LABELS[component] || e.name;
   }
   if (e.id.startsWith('TPSO_CPIG_')) return e.name.replace(/^TPSO CPIG (หมวด)?/, 'CPI ');
   if (e.id.startsWith('TPSO_PPI_')) return e.name.replace(/^TPSO PPI /, 'PPI ');
-  if (e.id.startsWith('NESDC_SUPPLY_CONSTRUCTION_')) return e.name.replace(/^Construction,/, 'Construction (Value Added),');
   return e.name;
 }
-let thDashState = { category: null, selected: new Set() };
+// โครงสร้าง tree แบบ nested — fixed list (ไม่ derive จาก id ที่โหลดมา
+// โดยตรง) เพราะกลุ่ม/ลำดับพวกนี้คงที่ตามที่ user ออกแบบไว้แล้ว โหนดที่ไม่มี
+// children = leaf-group (คลิกแล้วโชว์ checkbox ของ entries ที่
+// thDashLeafKey() ตรงกับ label), โหนดที่มี children = แค่ตัวพับ/กาง
+const TH_DASH_TREE = [
+  { label: 'Equity' }, { label: 'Interest Rate & Bonds' },
+  { label: 'Credit & Financial Stability' }, { label: 'Monetary & Exchange rate' },
+  { label: 'External Trade & BOP' }, { label: 'Government Finance' },
+  { label: 'Economic Activity', children: [
+    { label: 'Sentiment & Leading Indicators (BOT)' },
+    { label: 'Expenditure side (NESDC)', children: [
+      { label: 'Gross Domestic Product — Demand side' },
+      { label: 'Private Final Consumption Expenditure' },
+      { label: 'General Government Final Consumption Expenditure' },
+      { label: 'Gross Fixed Capital Formation — Private (all types)' },
+      { label: 'Gross Fixed Capital Formation — Public (all types)' },
+      { label: 'Exports of Goods' }, { label: 'Exports of Services' },
+      { label: 'Imports of Goods' }, { label: 'Imports of Services' },
+      { label: 'Change in Inventories' },
+      { label: 'Sub-component (GDP Expenditure)', children: [
+        { label: 'Food and Non-alcoholic Beverages' },
+        { label: 'Alcoholic Beverages, Tobacco and Narcotic' },
+        { label: 'Clothing and Footwear' },
+        { label: 'Housing, Water, Electricity, Gas and Other Fuels' },
+        { label: 'Health' }, { label: 'Education' },
+        { label: 'Recreation and Culture' },
+        { label: 'Restaurants and Hotels' }, { label: 'Communication' },
+        { label: 'Furnishings, Household Equipment and Routine Maintenance of the House' },
+        { label: 'Transport' }, { label: 'Miscellaneous Goods and Services' },
+        { label: 'Construction (Gross Fixed Capital Formation)' },
+        { label: 'Construction — Private' },
+        { label: 'Construction — Private, Dwellings' },
+        { label: 'Construction — Private, Non-Dwellings' },
+        { label: 'Construction — Public' },
+        { label: 'Construction — Public, Dwellings' },
+        { label: 'Construction — Public, Non-Dwellings' },
+        { label: 'Equipment (Gross Fixed Capital Formation) — Private' },
+        { label: 'Equipment (Gross Fixed Capital Formation) — Public' },
+        { label: 'Machinery and Equipment (Gross Fixed Capital Formation)' },
+        { label: 'Machinery and Equipment — Other Machinery and Equipment' },
+        { label: 'Machinery and Equipment — Transport Equipment' },
+      ] },
+    ] },
+    { label: 'Production side (NESDC)', children: [
+      { label: 'Gross Domestic Product — Supply/Production side' },
+      { label: 'Agriculture, Forestry and Fishing' }, { label: 'Manufacturing' },
+      { label: 'Construction' }, { label: 'Industrial Sector' },
+      { label: 'Services Sector' },
+      { label: 'Wholesale and Retail Trade, Repair of Vehicles and Personal and Household Goods' },
+      { label: 'Financial and Insurance Activities' }, { label: 'Real Estate Activities' },
+      { label: 'Transport and Storage' }, { label: 'Information and Communication' },
+      { label: 'Accommodation and Food Service Activities' },
+    ] },
+  ] },
+  { label: 'Price Sector', children: [
+    { label: 'Fuel Retail Price Breakdown (EPPO)', children: Object.values(TH_DASH_EPPO_PRODUCT_LABELS).map(l => ({ label: l })) },
+    { label: 'CPI/PPI by Group (TPSO)' }, { label: 'Gold Price (GOLDTH)' },
+  ] },
+];
+
+let thDashSelected = new Set();
+let thDashExpanded = new Set();
+let thDashSearchTerm = '';
+let thDashExpandedBeforeSearch = null;
+
+// entries ของ leaf-group หนึ่งตัว (memoize ต่อการ render 1 ครั้งพอ ไม่ต้อง
+// cache ข้าม render เพราะ thDashEntries()/filter ไม่ได้หนักมาก ~300 entries)
+function thDashEntriesFor(label) {
+  return thDashEntries().filter(e => thDashLeafKey(e) === label);
+}
+// เช็คว่า node (หรือลูกหลานของมัน) มี entries จริงไหม + match คำค้นไหม —
+// คืน {hasData, matches} ใช้ทั้งกรองโหนดว่างเปล่าและกรองตอนค้นหา
+function thDashNodeInfo(node, term) {
+  if (!node.children) {
+    const entries = thDashEntriesFor(node.label);
+    if (!entries.length) return { hasData: false, matches: false };
+    const selfMatch = !term || node.label.toLowerCase().includes(term);
+    const leafMatch = !term || entries.some(e => thDashSeriesLabel(e).toLowerCase().includes(term));
+    return { hasData: true, matches: selfMatch || leafMatch, entries };
+  }
+  const childInfos = node.children.map(c => thDashNodeInfo(c, term));
+  const hasData = childInfos.some(i => i.hasData);
+  const selfMatch = !term || node.label.toLowerCase().includes(term);
+  const matches = hasData && (selfMatch || childInfos.some(i => i.matches));
+  return { hasData, matches, childInfos };
+}
+function thDashRenderNodes(nodes, depth, term) {
+  let html = '';
+  for (const node of nodes) {
+    const info = thDashNodeInfo(node, term);
+    if (!info.hasData || (term && !info.matches)) continue;
+    const key = node.label;
+    const expanded = term ? true : thDashExpanded.has(key);
+    const indent = depth * 16;
+    if (!node.children) {
+      html += `<div class="cat-item tree-node" style="padding-left:${indent}px" onclick="toggleThDashNode('${thDashEsc(key)}')">
+        <span class="arrow">${expanded ? '▾' : '▸'}</span><span class="tree-label">${key}</span>
+      </div>`;
+      if (expanded) {
+        html += info.entries.map(e => `
+          <label class="cat-item leaf" style="padding-left:${indent + 16}px">
+            <input type="checkbox" value="${e.id}" ${thDashSelected.has(e.id) ? 'checked' : ''} onchange="toggleThDashSeries('${e.id}',this.checked)">
+            <span title="${thDashSeriesLabel(e).replace(/"/g, '&quot;')}">${thDashSeriesLabel(e)}</span>
+          </label>`).join('');
+      }
+    } else {
+      html += `<div class="cat-item tree-node" style="padding-left:${indent}px" onclick="toggleThDashNode('${thDashEsc(key)}')">
+        <span class="arrow">${expanded ? '▾' : '▸'}</span><span class="tree-label">${key}</span>
+      </div>`;
+      if (expanded) html += thDashRenderNodes(node.children, depth + 1, term);
+    }
+  }
+  return html;
+}
+function thDashEsc(s) { return s.replace(/'/g, "\\'"); }
+function thDashRender() {
+  document.getElementById('th-dash-tree').innerHTML = thDashRenderNodes(TH_DASH_TREE, 0, thDashSearchTerm);
+}
 window.startThDashboardFlow = function() {
   closeChartTypeModal();
-  thDashState = { category: null, selected: new Set() };
-  const present = new Set(thDashEntries().map(thDashCategoryFor));
-  document.getElementById('th-dash-col-category').innerHTML = TH_DASH_STRUCTURE.map(({ header, items }) => {
-    const shown = items.filter(c => present.has(c));
-    if (!shown.length) return '';
-    const headerHtml = header ? `<div class="cat-group-header">${header}</div>` : '';
-    return headerHtml + shown.map(c => `
-      <div class="cat-item" onclick="selectThDashCategory('${c.replace(/'/g, "\\'")}')">${c} <span class="arrow">›</span></div>`).join('');
-  }).join('');
-  document.getElementById('th-dash-col-series').innerHTML = '';
+  thDashSelected = new Set();
+  thDashExpanded = new Set();
+  thDashSearchTerm = '';
+  thDashExpandedBeforeSearch = null;
+  document.getElementById('th-dash-search').value = '';
+  thDashRender();
   document.getElementById('th-dash-selected-count').textContent = 'ยังไม่เลือก series';
   document.getElementById('th-dash-modal').classList.add('show');
 };
-window.selectThDashCategory = function(category) {
-  thDashState.category = category;
-  const entries = thDashEntries().filter(e => thDashCategoryFor(e) === category);
-  document.getElementById('th-dash-col-series').innerHTML = entries.length
-    ? entries.map(e => `
-      <label class="cat-item leaf">
-        <input type="checkbox" value="${e.id}" ${thDashState.selected.has(e.id) ? 'checked' : ''} onchange="toggleThDashSeries('${e.id}',this.checked)">
-        <span title="${thDashSeriesLabel(e).replace(/"/g, '&quot;')}">${thDashSeriesLabel(e)}</span>
-      </label>`).join('')
-    : '<div class="cat-empty-hint">ไม่มี series ในหมวดนี้</div>';
+window.toggleThDashNode = function(key) {
+  if (thDashExpanded.has(key)) thDashExpanded.delete(key); else thDashExpanded.add(key);
+  thDashRender();
+};
+// พิมพ์ค้นหา → auto-expand ทุก node ที่มี match (ชั่วคราว, ไม่แก้
+// thDashExpanded จริง) และซ่อน node ที่ไม่ match ทิ้งไปเลย — เคลียร์ช่อง
+// ค้นหากลับไปที่ expand state ก่อนพิมพ์ (เก็บ snapshot ไว้ตอนเริ่มพิมพ์)
+window.thDashOnSearch = function(value) {
+  const term = value.trim().toLowerCase();
+  if (term && !thDashSearchTerm) thDashExpandedBeforeSearch = new Set(thDashExpanded);
+  if (!term && thDashExpandedBeforeSearch) { thDashExpanded = thDashExpandedBeforeSearch; thDashExpandedBeforeSearch = null; }
+  thDashSearchTerm = term;
+  thDashRender();
 };
 window.toggleThDashSeries = function(id, checked) {
-  if (checked) thDashState.selected.add(id); else thDashState.selected.delete(id);
-  const n = thDashState.selected.size;
+  if (checked) thDashSelected.add(id); else thDashSelected.delete(id);
+  const n = thDashSelected.size;
   document.getElementById('th-dash-selected-count').textContent = n ? `เลือกไว้ ${n} series` : 'ยังไม่เลือก series';
 };
 window.thDashModalBack = function() {
@@ -3799,7 +3933,7 @@ window.thDashModalBack = function() {
   openChartTypeModal(chartPickerPageId);
 };
 window.confirmThDashSelection = function() {
-  const ids = [...thDashState.selected];
+  const ids = [...thDashSelected];
   if (!ids.length) { alert('เลือกอย่างน้อย 1 series'); return; }
   document.getElementById('th-dash-modal').classList.remove('show');
   const seriesList = ids.map((id, i) => ({ id, axis: 'L', fn: 'raw', color: COLORS[i % COLORS.length] }));
