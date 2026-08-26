@@ -2878,7 +2878,16 @@ function getInflationIndex() {
     const coicopCode = isCpiWca ? 'ALL_ITEMS' : dims.COICOP_1999 && dims.COICOP_1999.code;
     if (!tt || !tt.startsWith('Index') || !coicopCode || !meta.country) return;
     if (!idx[meta.country.code]) idx[meta.country.code] = {};
-    idx[meta.country.code][coicopCode] = id;
+    // บาง country มีมากกว่า 1 series ที่ isRecommended:true พร้อมกันสำหรับ
+    // country+COICOP เดียวกัน (เจอจริง 2026-08-26: IDN มีทั้ง doc รูปแบบเก่า
+    // "..._ALL_ITEMS_INDEX" ค้างที่ มิ.ย. กับ doc ใหม่ "CPI_T_IX" ที่มีถึง
+    // ก.ค. แล้ว) — ถ้าชนกัน เทียบ SERIES[id].updated (เขียนตอน push, มีอยู่
+    // ก่อน data โหลดจริงด้วยซ้ำ) เลือกตัวที่ push ล่าสุดแทนตัวหลังทับตัวก่อน
+    // เงียบๆ ตาม object iteration order เดิม
+    const existingId = idx[meta.country.code][coicopCode];
+    if (!existingId || (SERIES[id].updated || '') > (SERIES[existingId].updated || '')) {
+      idx[meta.country.code][coicopCode] = id;
+    }
   });
   _inflationIndex = idx;
   return idx;
@@ -3751,7 +3760,10 @@ function thDashNesdcVariant(e) {
 function thDashLeafKey(e) {
   if (e.categoryCode === 'FINANCIAL_MARKET_EQUITY_BONDS') {
     if (e.id === 'SET' || e.id.startsWith('SET_')) return 'Equity';
-    if (e.id.startsWith('THAIBMA_YIELD_')) return 'Interest Rate & Bonds';
+    // ยุบเข้าไปเป็น sub-node ของ "Monetary & Exchange rate" แทนที่จะแยก
+    // หมวดเอง (ตัดสินใจร่วมกับ user 2026-08-26) — ชื่อ "Government Bond
+    // Yield" ตัดคำ "ThaiBMA" ที่ user ไม่อยากให้โผล่ออก
+    if (e.id.startsWith('THAIBMA_YIELD_')) return 'Government Bond Yield';
   }
   if (e.categoryCode === 'ECONOMIC_ACTIVITY') {
     if (e.id.startsWith('BOT')) return 'Sentiment & Leading Indicators (BOT)';
@@ -3772,6 +3784,9 @@ function thDashLeafKey(e) {
 // component code เป็นไทย, TPSO ตัดคำซ้ำกับ node header ออก
 function thDashSeriesLabel(e) {
   if (e.categoryCode === 'ECONOMIC_ACTIVITY' && e.id.startsWith('NESDC_')) return thDashNesdcVariant(e);
+  // tenor ตรงตัวจาก doc_id (1M/3M/6M/1Y/2Y/5Y/10Y/20Y) — ไม่พูดซ้ำ
+  // "Government Bond Yield" เพราะขึ้นเป็นหัวข้อ node อยู่แล้ว
+  if (e.id.startsWith('THAIBMA_YIELD_')) return e.id.replace('THAIBMA_YIELD_', '');
   if (e.id.startsWith('EPPO_')) {
     const { component } = thDashEppoParse(e.id);
     return TH_DASH_EPPO_COMPONENT_LABELS[component] || e.name;
@@ -3785,8 +3800,13 @@ function thDashSeriesLabel(e) {
 // children = leaf-group (คลิกแล้วโชว์ checkbox ของ entries ที่
 // thDashLeafKey() ตรงกับ label), โหนดที่มี children = แค่ตัวพับ/กาง
 const TH_DASH_TREE = [
-  { label: 'Equity' }, { label: 'Interest Rate & Bonds' },
-  { label: 'Credit & Financial Stability' }, { label: 'Monetary & Exchange rate' },
+  { label: 'Equity' },
+  { label: 'Credit & Financial Stability' },
+  // "Interest Rate & Bonds" ยุบเข้ามาเป็น sub-node ที่นี่แทน (ตัดสินใจร่วม
+  // กับ user 2026-08-26) — Monetary & Exchange rate เองมี entries ตรงๆ
+  // (M2/ทุนสำรอง/Forward position/USDTHB) อยู่แล้ว รองรับ node ที่มีทั้ง
+  // entries ของตัวเองและ children ในตัว (ดู thDashRenderNodes)
+  { label: 'Monetary & Exchange rate', children: [{ label: 'Government Bond Yield' }] },
   { label: 'External Trade & BOP' }, { label: 'Government Finance' },
   { label: 'Economic Activity', children: [
     { label: 'Sentiment & Leading Indicators (BOT)' },
@@ -3850,21 +3870,20 @@ let thDashExpandedBeforeSearch = null;
 function thDashEntriesFor(label) {
   return thDashEntries().filter(e => thDashLeafKey(e) === label);
 }
-// เช็คว่า node (หรือลูกหลานของมัน) มี entries จริงไหม + match คำค้นไหม —
-// คืน {hasData, matches} ใช้ทั้งกรองโหนดว่างเปล่าและกรองตอนค้นหา
+// เช็คว่า node (entries ของตัวเอง + ลูกหลาน) มีข้อมูลจริงไหม + match คำค้น
+// ไหม — node หนึ่งตัวมีได้ทั้ง entries ตรงๆ (ถ้ามี id ที่ thDashLeafKey()
+// ตรงกับ label ตัวเอง) และ children พร้อมกัน (เช่น "Monetary & Exchange
+// rate" มีทั้ง M2/ทุนสำรอง/USDTHB ตรงๆ และ sub-node "Government Bond
+// Yield" — ตัดสินใจร่วมกับ user 2026-08-26) คืน {hasData, matches}
 function thDashNodeInfo(node, term) {
-  if (!node.children) {
-    const entries = thDashEntriesFor(node.label);
-    if (!entries.length) return { hasData: false, matches: false };
-    const selfMatch = !term || node.label.toLowerCase().includes(term);
-    const leafMatch = !term || entries.some(e => thDashSeriesLabel(e).toLowerCase().includes(term));
-    return { hasData: true, matches: selfMatch || leafMatch, entries };
-  }
-  const childInfos = node.children.map(c => thDashNodeInfo(c, term));
-  const hasData = childInfos.some(i => i.hasData);
+  const ownEntries = thDashEntriesFor(node.label);
+  const childInfos = node.children ? node.children.map(c => thDashNodeInfo(c, term)) : [];
+  const hasData = ownEntries.length > 0 || childInfos.some(i => i.hasData);
+  if (!hasData) return { hasData: false, matches: false };
   const selfMatch = !term || node.label.toLowerCase().includes(term);
-  const matches = hasData && (selfMatch || childInfos.some(i => i.matches));
-  return { hasData, matches, childInfos };
+  const ownLeafMatch = !term || ownEntries.some(e => thDashSeriesLabel(e).toLowerCase().includes(term));
+  const matches = selfMatch || ownLeafMatch || childInfos.some(i => i.matches);
+  return { hasData, matches, ownEntries, childInfos };
 }
 function thDashRenderNodes(nodes, depth, term) {
   let html = '';
@@ -3874,22 +3893,16 @@ function thDashRenderNodes(nodes, depth, term) {
     const key = node.label;
     const expanded = term ? true : thDashExpanded.has(key);
     const indent = depth * 16;
-    if (!node.children) {
-      html += `<div class="cat-item tree-node" style="padding-left:${indent}px" onclick="toggleThDashNode('${thDashEsc(key)}')">
-        <span class="arrow">${expanded ? '▾' : '▸'}</span><span class="tree-label">${key}</span>
-      </div>`;
-      if (expanded) {
-        html += info.entries.map(e => `
-          <label class="cat-item leaf" style="padding-left:${indent + 16}px">
-            <input type="checkbox" value="${e.id}" ${thDashSelected.has(e.id) ? 'checked' : ''} onchange="toggleThDashSeries('${e.id}',this.checked)">
-            <span title="${thDashSeriesLabel(e).replace(/"/g, '&quot;')}">${thDashSeriesLabel(e)}</span>
-          </label>`).join('');
-      }
-    } else {
-      html += `<div class="cat-item tree-node" style="padding-left:${indent}px" onclick="toggleThDashNode('${thDashEsc(key)}')">
-        <span class="arrow">${expanded ? '▾' : '▸'}</span><span class="tree-label">${key}</span>
-      </div>`;
-      if (expanded) html += thDashRenderNodes(node.children, depth + 1, term);
+    html += `<div class="cat-item tree-node" style="padding-left:${indent}px" onclick="toggleThDashNode('${thDashEsc(key)}')">
+      <span class="arrow">${expanded ? '▾' : '▸'}</span><span class="tree-label">${key}</span>
+    </div>`;
+    if (expanded) {
+      html += info.ownEntries.map(e => `
+        <label class="cat-item leaf" style="padding-left:${indent + 16}px">
+          <input type="checkbox" value="${e.id}" ${thDashSelected.has(e.id) ? 'checked' : ''} onchange="toggleThDashSeries('${e.id}',this.checked)">
+          <span title="${thDashSeriesLabel(e).replace(/"/g, '&quot;')}">${thDashSeriesLabel(e)}</span>
+        </label>`).join('');
+      if (node.children) html += thDashRenderNodes(node.children, depth + 1, term);
     }
   }
   return html;
