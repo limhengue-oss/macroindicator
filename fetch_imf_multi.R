@@ -98,6 +98,15 @@ for (i in seq_len(nrow(config))) {
     next
   }
 
+  # normalize OBS_VALUE ด้วย SCALE ก่อนทำอะไรต่อ — บาง dataset (ยืนยันแล้ว
+  # 2026-08-26: IL, ITG, MFS_FC, QGDP_WCA) ส่ง column "SCALE" มาด้วย (แปลว่า
+  # ค่าจริง = OBS_VALUE * 10^SCALE) แต่ไม่เคยถูกดึงมาคูณเลย ทำให้แถวที่มา
+  # จาก SCALE คนละค่ากัน (เช่น 0 vs 6 vs 9) ดูเหมือนเป็นตัวเลขคนละชุดทั้งที่
+  # เป็น concept เดียวกัน (เจอจริง: QGDP_WCA ต่างกัน 10^9 เท่า, IL/MFS_FC
+  # ต่างกัน 10^6 เท่า) — ต้อง normalize ให้เป็นหน่วยดิบเดียวกันก่อนไปทำ
+  # splice/finest-freq/doc_id ต่อ ไม่งั้นจะ dedupe/เทียบข้อมูลผิด
+  df <- imf_apply_scale(df)
+
   df <- imf_drop_pct_change_rows(df)
   message(sprintf("  after %%change filter: %d rows", nrow(df)))
 
@@ -190,6 +199,26 @@ for (i in seq_len(nrow(config))) {
     log_rows[[length(log_rows) + 1]] <- tibble(dataset_id = dataset_id, status = "missing_dims", n_series = 0, n_obs = 0)
     next
   }
+  df$date <- imf_period_to_date(df$TIME_PERIOD)
+  df <- df %>% filter(!is.na(date), is.finite(OBS_VALUE))
+
+  # dedupe code-variant ซ้ำ (label เดียวกัน คนละ code IMF) — verify แล้ว
+  # 2026-08-26 ว่า data point ตรงกันเป๊ะทุกจุด (หรือหลัง imf_apply_scale()
+  # แล้วตรงกัน) สำหรับ 9 dataset นี้: CPI/CTOT/EER/ER/PI/PPI/QGDP_WCA (verify
+  # ตรงตัวเป๊ะ) + IL/ITG (verify แล้วว่าต่างกันแค่ SCALE ซึ่งแก้ด้วย
+  # imf_apply_scale() ไปแล้วข้างบน — 1,376/1,391 คู่ตรงกันหลังแก้)
+  #
+  # MFS_FC ห้าม dedupe เด็ดขาด — verify แล้วพบว่า "label ซ้ำ" ของ dataset นี้
+  # ไม่ใช่ code variant ของ concept เดียวกันจริง (394/454 คู่ ratio ไม่ใช่
+  # power-of-10 เลย) แต่เป็นคนละ INDICATOR/institutional-sector กันจริงๆ
+  # (เช่น ODCORP vs S121(Central bank) vs S12R vs S12) ที่ codelist label
+  # ดันเขียนเหมือนกันเฉยๆ — dedupe ตาม label จะรวม series ที่เป็นคนละตัวจริง
+  # เข้าด้วยกันผิด ห้ามเพิ่มเข้า allowlist นี้จนกว่าจะมี key อื่นที่แม่นกว่า
+  DEDUPE_CODE_VARIANT_DATASETS <- c("CPI", "CTOT", "EER", "ER", "PI", "PPI", "QGDP_WCA", "IL", "ITG")
+  if (dataset_id %in% DEDUPE_CODE_VARIANT_DATASETS) {
+    df <- imf_dedupe_code_variants(df, dim_roles, dsd_info)
+  }
+
   # doc_id ใหม่ (schema 2026-08-22): derive-forward จาก dims ที่ role เป็น
   # component/variant เท่านั้น (ไม่ใช่ paste ทุก non_country_dims ดิบๆ แบบ
   # เดิม) — ต่อแถวเพราะ imf_build_dims ทำงานทีละ row ไม่ vectorize ได้ตรงๆ
@@ -198,8 +227,6 @@ for (i in seq_len(nrow(config))) {
     row_dims <- imf_build_dims(row[non_country_dims], dim_roles)
     imf_build_doc_id(dataset_id, row$COUNTRY, row_dims)
   })
-  df$date <- imf_period_to_date(df$TIME_PERIOD)
-  df <- df %>% filter(!is.na(date), is.finite(OBS_VALUE))
 
   # text_cols ต้องครอบคลุม non_country_dims ทั้งหมดด้วย (ไม่ใช่แค่ list
   # เดิม) ไม่งั้น series_keys จะขาด column ที่ต้องใช้สร้าง dims/meta ต่อ

@@ -1,0 +1,226 @@
+# ══════════════════════════════════════════════════════════════════
+#  splice_and_cleanup_imf_duplicates.R
+#  One-time cleanup: บาง IMF dataset มี series ซ้ำ (code variant คนละชุด
+#  ความหมายเดียวกัน — ดู CHANGES.md/บทสนทนา 2026-08-26) ตัวหนึ่งมาจาก
+#  backfill_imf_multi.R (ประวัติยาว ค้าง ไม่อัปเดตอีก) อีกตัวมาจาก
+#  fetch_imf_multi.R (สั้นแค่ ~2 ปี แต่อัปเดตต่อเนื่อง) — script นี้:
+#    1. หาคู่ซ้ำจริง (label เดียวกัน ค่าตรงกัน/ตรงกันหลัง normalize SCALE)
+#    2. splice: เติมจุดเก่าจากตัวแพ้เข้าตัวชนะ (ไม่ทับจุดที่ overlap)
+#    3. ลบตัวแพ้ทิ้ง (เฉพาะตอน DELETE_LOSERS=true เท่านั้น)
+#
+#  ขอบเขต: 9 dataset ที่ verify แล้วว่าปลอดภัย (ดู DEDUPE_CODE_VARIANT_DATASETS
+#  ใน fetch_imf_multi.R) — ห้ามรันกับ MFS_FC (label ซ้ำ ≠ series เดียวกันจริง)
+#
+#  Environment variables:
+#    GCP_SA_KEY     — service account JSON — ไม่ใส่ก็รันได้แต่เป็น DRY RUN
+#    DELETE_LOSERS  — "true" เท่านั้นถึงจะลบ doc จริง (default: ไม่ลบ แค่ splice)
+#
+#  รัน: Rscript scripts/oneoff/splice_and_cleanup_imf_duplicates.R
+# ══════════════════════════════════════════════════════════════════
+
+suppressPackageStartupMessages({
+  library(dplyr); library(purrr); library(stringr); library(tibble)
+  library(jsonlite); library(httr2); library(jose)
+})
+
+PROJECT_ID <- "macroindicator-6b265"
+COLLECTION <- "series"
+
+sa_json <- Sys.getenv("GCP_SA_KEY")
+DRY_RUN <- sa_json == ""
+DELETE_LOSERS <- Sys.getenv("DELETE_LOSERS", "false") == "true"
+if (DRY_RUN) message("── GCP_SA_KEY not set — DRY RUN (ไม่ push/ไม่ลบ ดู log อย่างเดียว)")
+if (!DRY_RUN && !DELETE_LOSERS) message("── DELETE_LOSERS != true — จะ splice จริง แต่ไม่ลบตัวแพ้ (รันซ้ำได้ปลอดภัย)")
+sa <- if (DRY_RUN) NULL else fromJSON(sa_json)
+
+source("R/firestore.R")
+source("R/imf_core.R")
+
+TARGET_DATASETS <- c("CPI", "CTOT", "EER", "ER", "PI", "PPI", "QGDP_WCA", "IL", "ITG")
+REST_BASE <- sprintf("https://firestore.googleapis.com/v1/projects/%s/databases/(default)/documents", PROJECT_ID)
+
+# ── ดึง series ทั้งหมดของ dataset หนึ่ง (name+updated+meta+data ครบ ผ่าน
+# runQuery ธรรมดา ไม่ projection เพราะต้องใช้ data มา splice ด้วย) —
+# ใช้ REST ตรงๆ ไม่ผ่าน token (public read เหมือนที่หน้าเว็บทำ) เพราะแค่
+# อ่าน ยังไม่เขียนอะไร
+fetch_series_for_dataset <- function(dataset_id) {
+  body <- list(structuredQuery = list(
+    from = list(list(collectionId = COLLECTION)),
+    where = list(fieldFilter = list(
+      field = list(fieldPath = "meta.category.code"),
+      op = "EQUAL",
+      value = list(stringValue = dataset_id)
+    )),
+    limit = 6000
+  ))
+  resp <- request(paste0(REST_BASE, ":runQuery")) |>
+    req_body_json(body, auto_unbox = TRUE) |>
+    req_perform()
+  rows <- resp_body_json(resp)
+  rows <- Filter(function(r) !is.null(r$document), rows)
+  message(sprintf("  %s: %d series", dataset_id, length(rows)))
+  rows
+}
+
+# ── แปลง Firestore document -> list(id, country, labels(named vec),
+# freq, updated, points=data.frame(date,value))
+parse_doc <- function(doc) {
+  f <- doc$fields
+  meta <- f$meta$mapValue$fields
+  dims <- meta$dims$mapValue$fields
+  labels <- imap(dims, function(d, k) {
+    role <- d$mapValue$fields$role$stringValue
+    if (!is.null(role) && role %in% c("component", "variant")) {
+      d$mapValue$fields$label$stringValue
+    } else NA_character_
+  })
+  labels <- labels[!vapply(labels, is.na, logical(1))]
+  # `%||%` เช็ค is.na(x) ซึ่ง error ถ้า x เป็น list ยาวเกิน 1 (data array มี
+  # หลายสิบ/ร้อยจุด) — ใช้ is.null() ตรงๆ แทนสำหรับ field นี้เท่านั้น
+  pts <- f$data$arrayValue$values
+  if (is.null(pts)) pts <- list()
+  points <- map_dfr(pts, function(p) {
+    ff <- p$mapValue$fields
+    val <- ff$v$doubleValue %||% as.numeric(ff$v$integerValue %||% NA)
+    tibble(date = ff$d$stringValue, value = val)
+  })
+  list(
+    id = str_extract(doc$name, "[^/]+$"),
+    country = meta$country$mapValue$fields$code$stringValue,
+    labels = unlist(labels),
+    freq = meta$freq$stringValue %||% "",
+    updated = f$updated$stringValue %||% "",
+    points = points
+  )
+}
+
+delete_doc <- function(token, doc_id) {
+  url <- sprintf("%s/%s/%s", REST_BASE, COLLECTION, doc_id)
+  resp <- request(url) |> req_auth_bearer_token(token) |>
+    req_method("DELETE") |> req_error(is_error = \(r) FALSE) |> req_perform()
+  status <- resp_status(resp)
+  if (status >= 300) {
+    warning(sprintf("  ✗ delete %s: HTTP %d", doc_id, status))
+    return(FALSE)
+  }
+  TRUE
+}
+
+token <- NULL
+if (!DRY_RUN) token <- get_access_token(sa)
+
+total_spliced <- 0
+total_deleted <- 0
+total_skipped_mismatch <- 0
+
+for (dataset_id in TARGET_DATASETS) {
+  message(sprintf("\n══ %s ══", dataset_id))
+  rows <- fetch_series_for_dataset(dataset_id)
+  if (length(rows) == 0) next
+  parsed <- map(rows, function(r) tryCatch(parse_doc(r$document), error = function(e) NULL))
+  parsed <- Filter(Negate(is.null), parsed)
+
+  # group key: country + label ของทุก component/variant dim (เรียง key ให้
+  # deterministic) — "ไม่รวม freq เข้า key" โดยตั้งใจ (เจอจริง 2026-08-26
+  # 2 ปัญหาซ้อนกัน: (1) backfill_imf_multi.R เขียน meta.freq เป็นคำเต็ม
+  # "Monthly" ส่วน fetch_imf_multi.R (live) เขียนย่อ "M" — normalize ได้
+  # (2) แต่ CTOT/QGDP_WCA backfill กลับเขียน meta.freq เป็น "" (ว่างเปล่า
+  # ไปเลย ไม่ใช่แค่เขียนคนละแบบ) — ไม่มีทาง normalize ให้ตรงกับ "M"/"Q" ได้
+  # เพราะไม่มีข้อมูลจริงให้ derive) — country+label ของ component/variant
+  # dim ทุกตัวเจาะจงพอแล้วอยู่แล้วที่จะระบุ series ได้ไม่กำกวม ไม่จำเป็นต้อง
+  # พึ่ง freq เป็นส่วนหนึ่งของ key เลย — กันความเสี่ยง merge ผิด freq ด้วย
+  # guard เช็คแยกข้างล่างแทน (ถ้าเจอ freq ไม่ตรงกันจริงในกลุ่มเดียวกัน จะ
+  # log เตือนแล้วข้าม ไม่ splice)
+  normalize_freq <- function(f) {
+    f <- toupper(trimws(f))
+    if (f %in% c("M", "MONTHLY")) return("M")
+    if (f %in% c("Q", "QUARTERLY")) return("Q")
+    if (f %in% c("A", "ANNUAL", "YEARLY")) return("A")
+    f
+  }
+  key_of <- function(p) {
+    lbls <- p$labels[order(names(p$labels))]
+    paste(p$country, paste(names(lbls), lbls, sep = ":", collapse = "|"), sep = "||")
+  }
+  groups <- split(parsed, map_chr(parsed, key_of))
+  dup_groups <- groups[lengths(groups) > 1]
+
+  # guard: ถ้ากลุ่มไหนมี freq (ที่ไม่ว่างเปล่า) มากกว่า 1 ค่าจริงๆ (เช่น
+  # M ปนกับ Q) แปลว่า country+label เจาะจงไม่พอ ไม่ใช่ series เดียวกันจริง
+  # — แยกออกจาก dup_groups ไปก่อน กันไม่ให้ splice ผิด
+  freq_conflict <- map_lgl(dup_groups, function(g) {
+    fr <- unique(vapply(map_chr(g, "freq"), normalize_freq, character(1)))
+    fr <- fr[fr != ""]
+    length(fr) > 1
+  })
+  if (any(freq_conflict)) {
+    message(sprintf("  ⊘ ข้าม %d กลุ่มที่ freq ไม่ตรงกันจริง (เช่น M ปน Q) — ไม่ใช่ series เดียวกัน", sum(freq_conflict)))
+  }
+  dup_groups <- dup_groups[!freq_conflict]
+  message(sprintf("  duplicate-label groups: %d", length(dup_groups)))
+
+  for (g in dup_groups) {
+    # winner: max(date ล่าสุด) ก่อน, ถ้าเท่ากันเลือก doc_id สั้นกว่า
+    stats <- map(g, function(p) list(
+      id = p$id, max_date = if (nrow(p$points)) max(p$points$date) else "",
+      len = nchar(p$id), points = p$points
+    ))
+    ord <- order(vapply(stats, \(s) s$max_date, character(1)), decreasing = TRUE)
+    stats <- stats[ord]
+    # ถ้า max_date เท่ากัน ให้ doc_id สั้นกว่ามาก่อนในกลุ่ม top ties
+    top_date <- stats[[1]]$max_date
+    tied <- Filter(\(s) s$max_date == top_date, stats)
+    if (length(tied) > 1) {
+      tied <- tied[order(vapply(tied, \(s) s$len, integer(1)))]
+      rest <- Filter(\(s) s$max_date != top_date, stats)
+      stats <- c(tied, rest)
+    }
+    winner <- stats[[1]]
+    losers <- stats[-1]
+
+    for (loser in losers) {
+      # sanity: ค่าที่ overlap ต้องตรงกัน (กันเคส mismatch ที่ยังไม่ verify
+      # หลุดมาเผลอ splice ผิด) — ยอม tolerance 0.1% กัน floating point/revision เล็กน้อย
+      common <- inner_join(winner$points, loser$points, by = "date", suffix = c(".w", ".l"))
+      if (nrow(common) > 0) {
+        rel_diff <- abs(common$value.w - common$value.l) / pmax(abs(common$value.w), abs(common$value.l), 1e-9)
+        if (any(rel_diff > 0.001)) {
+          message(sprintf("  ⊘ SKIP (ค่าไม่ตรงกัน ยังไม่ verify): %s <-> %s", winner$id, loser$id))
+          total_skipped_mismatch <- total_skipped_mismatch + 1
+          next
+        }
+      }
+
+      fill <- imf_splice_fill_gaps(winner$points, loser$points)
+      if (nrow(fill) > 0) {
+        message(sprintf("  splice: %s <- %s (+%d จุดเก่า, %s ถึง %s)",
+                         winner$id, loser$id, nrow(fill), min(fill$date), max(fill$date)))
+        if (!DRY_RUN) {
+          ok <- push_series(token, winner$id, name = winner$id, df = fill,
+                             is_incremental = TRUE, meta = NULL, quiet = TRUE)
+          if (ok) total_spliced <- total_spliced + 1
+        } else {
+          total_spliced <- total_spliced + 1
+        }
+      } else {
+        message(sprintf("  (ไม่มีจุดต้องเติม): %s <- %s", winner$id, loser$id))
+      }
+
+      if (DELETE_LOSERS) {
+        if (!DRY_RUN) {
+          if (delete_doc(token, loser$id)) {
+            message(sprintf("  ✗ ลบแล้ว: %s", loser$id))
+            total_deleted <- total_deleted + 1
+          }
+        } else {
+          message(sprintf("  (จะลบ ถ้าไม่ใช่ dry run): %s", loser$id))
+          total_deleted <- total_deleted + 1
+        }
+      }
+    }
+  }
+}
+
+message("\n══ SUMMARY ══")
+message(sprintf("spliced: %d, deleted: %d, skipped (mismatch guard): %d",
+                 total_spliced, total_deleted, total_skipped_mismatch))

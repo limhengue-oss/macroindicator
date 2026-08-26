@@ -40,6 +40,26 @@ imf_drop_pct_change_rows <- function(df) {
   df[!is_pct_row, ]
 }
 
+# ── บาง IMF dataset ส่ง dimension "SCALE" มาด้วย — verify ด้วยมือ
+# 2026-08-26 เทียบกับค่าจาก backfill_imf_multi.R (bulk CSV, ไม่มี SCALE
+# ปนอยู่แล้ว ถือเป็นค่าจริง) แล้วพบว่า **ค่าจริง = OBS_VALUE / 10^SCALE**
+# (หาร ไม่ใช่คูณ — ลองคูณก่อนแล้วพบว่าค่ายิ่งเพี้ยนกว่าเดิม เช่น QGDP_WCA
+# G001 GDP PPP: raw OBS_VALUE=5.47e22, SCALE=9, backfill (ค่าจริง)=5.47e13
+# → 5.47e22 / 10^9 = 5.47e13 ตรงเป๊ะ, IL AGO: raw=950802969.56, SCALE=6,
+# backfill=950.8 → 950802969.56 / 10^6 = 950.8 ตรงเป๊ะเหมือนกัน) — มีจริง
+# ใน IL (คงที่ 6 ทุกแถว), MFS_FC (0/6 ปน), ITG (0/3/6/9 ปน), QGDP_WCA
+# (0/9 ปน) ต้องเรียกฟังก์ชันนี้ทันทีหลัง raw fetch ก่อนไปทำอะไรต่อ
+# (splice/finest-freq/doc_id) — dataset ที่ไม่มี column "SCALE" เลยผ่าน
+# ไม่ถูกแตะ (คืน df เดิม)
+imf_apply_scale <- function(df) {
+  if (!"SCALE" %in% names(df)) return(df)
+  mult <- suppressWarnings(as.numeric(df$SCALE))
+  mult[is.na(mult)] <- 0
+  df$OBS_VALUE <- df$OBS_VALUE / (10 ^ mult)
+  df$SCALE <- NULL
+  df
+}
+
 # ── CPI splice (Audit 2) — ratio-anchor: native Index ที่ขาดหาย เติมจาก
 # Standard-Reference-Period Index โดยใช้ anchor (จุดที่มีทั้งคู่) ที่ใกล้
 # ที่สุดต่อ (COUNTRY, INDEX_TYPE, COICOP_1999, FREQUENCY) — key นี้ verify
@@ -446,6 +466,86 @@ imf_build_doc_id <- function(dataset_id, country_iso3, dims) {
   codes <- vapply(dims, function(d) d$code, character(1))
   suffix <- paste(codes, collapse = "_")
   sprintf("IMF_%s_%s_%s", country_iso3, dataset_id, suffix)
+}
+
+# ── dedupe code variant ซ้ำ: บาง IMF dataset ส่งแถวข้อมูล "concept เดียวกัน"
+# มา 2 ชุด code คนละระบบ (เช่น CPI's COICOP_1999 code "T" กับ "ALL_ITEMS"
+# label เดียวกันเป๊ะ "All Items") — verify ด้วยมือแล้ว 2026-08-26 ว่า data
+# point ตรงกันทุกจุดสำหรับ 7 dataset ที่เรียกฟังก์ชันนี้ (ดู allowlist ที่
+# fetch_imf_multi.R) แต่ "ตรงกันเพราะ label เหมือนกัน" ไม่ได้แปลว่าค่าตรงกัน
+# เสมอไป (IL/ITG/MFS_FC พบ scale mismatch ×1,000,000 ทั้งที่ label/unit
+# เขียนเหมือนกัน) — ห้ามเรียกฟังก์ชันนี้กับ dataset ที่ยังไม่ verify ค่าจริง
+#
+# กติกาเลือกผู้ชนะต่อกลุ่ม (COUNTRY + label ของทุก component/variant dim +
+# FREQUENCY): 1) TIME_PERIOD ล่าสุดกว่าใน df ที่เพิ่งดึงมาสดๆ รอบนี้ (ไม่ใช้
+# Firestore's `updated` เพราะนั่นสะท้อนแค่รอบที่เรา push ไม่ใช่ความสดจาก IMF
+# จริง) 2) ถ้าเท่ากัน — จำนวนจุดข้อมูลมากกว่า 3) ถ้ายังเท่ากัน — doc_id
+# (paste ของทุก code ในกลุ่ม) สั้นกว่า กัน error/สุ่มกรณีเท่ากันเป๊ะ
+imf_dedupe_code_variants <- function(df, roles, dsd_info) {
+  component_variant_dims <- names(roles)[roles %in% c("component", "variant")]
+  component_variant_dims <- intersect(component_variant_dims, names(df))
+  if (length(component_variant_dims) == 0) return(df)
+
+  label_cols <- paste0(".lbl_", component_variant_dims)
+  for (i in seq_along(component_variant_dims)) {
+    dcol <- component_variant_dims[i]
+    df[[label_cols[i]]] <- vapply(df[[dcol]], function(code) {
+      imf_label_lookup(dsd_info, dcol, as.character(code))
+    }, character(1))
+  }
+
+  key_cols <- c("COUNTRY", label_cols)
+  if ("FREQUENCY" %in% names(df)) key_cols <- c(key_cols, "FREQUENCY")
+  key_cols <- intersect(key_cols, names(df))
+
+  df$.variant_id <- do.call(paste, c(as.list(df[component_variant_dims]), sep = "|"))
+
+  variant_stats <- df %>%
+    group_by(across(all_of(c(key_cols, ".variant_id")))) %>%
+    summarise(.max_date = max(date), .n_rows = n(), .groups = "drop")
+
+  n_variants_per_group <- variant_stats %>%
+    group_by(across(all_of(key_cols))) %>%
+    summarise(.n_variants = n(), .groups = "drop")
+  if (all(n_variants_per_group$.n_variants <= 1)) {
+    return(df[setdiff(names(df), c(label_cols, ".variant_id"))])
+  }
+
+  winners <- variant_stats %>%
+    group_by(across(all_of(key_cols))) %>%
+    arrange(desc(.max_date), desc(.n_rows), nchar(.variant_id), .by_group = TRUE) %>%
+    slice(1) %>%
+    ungroup() %>%
+    select(all_of(key_cols), .variant_id)
+
+  before_n <- nrow(df)
+  df <- df %>% semi_join(winners, by = c(key_cols, ".variant_id"))
+  after_n <- nrow(df)
+  if (before_n != after_n) {
+    message(sprintf("  imf_dedupe_code_variants: ตัด %d rows (code variant ซ้ำ label เดียวกัน)", before_n - after_n))
+  }
+
+  df[setdiff(names(df), c(label_cols, ".variant_id"))]
+}
+
+# ── splice ตัวแพ้ (code variant เก่า/ค้าง) เข้ากับตัวชนะ (ยังอัปเดตต่อเนื่อง)
+# ก่อนลบตัวแพ้ทิ้ง — ทำไมต้อง splice แทนลบตรงๆ: ตัวชนะที่มาจาก live fetch
+# (fetch_imf_multi.R) มีแค่ ~2 ปีล่าสุด (rolling window ตั้งใจออกแบบไว้)
+# ส่วนตัวแพ้ (มาจาก backfill_imf_multi.R ครั้งเดียวตอนต้น) มีประวัติยาว
+# เป็นสิบๆ ปี — ลบตัวแพ้ตรงๆ จะเสียประวัติเก่าถาวร ต้องเอาจุดที่ตัวชนะ
+# "ยังไม่มี" จากตัวแพ้มาเติมก่อน (ไม่แตะจุดที่ overlap กัน — ตัวชนะชนะเสมอ
+# ในจุดที่ทับกัน เพราะเป็นแหล่งที่ IMF ยังอัปเดตต่อเนื่องอยู่)
+#
+# @param winner_pts,loser_pts data.frame(date, value) — date เป็น character
+#   (YYYY-MM-DD) หรือ Date ก็ได้ ขอแค่เทียบ %in% ได้ตรงกัน
+# @return data.frame(date, value) เฉพาะจุดจากตัวแพ้ที่ต้อง "เติม" ให้ตัวชนะ
+#   (date ที่ตัวชนะยังไม่มี) เรียงตามวันที่ — ถ้าไม่มีอะไรต้องเติมคืน
+#   data.frame 0 แถว (ไม่ error)
+imf_splice_fill_gaps <- function(winner_pts, loser_pts) {
+  if (nrow(loser_pts) == 0) return(loser_pts[0, , drop = FALSE])
+  winner_dates <- as.character(winner_pts$date)
+  fill <- loser_pts[!as.character(loser_pts$date) %in% winner_dates, , drop = FALSE]
+  fill[order(fill$date), , drop = FALSE]
 }
 
 # ── generic SDMX 2.1 wildcard fetch: key เป็น dot ว่างทุก dimension

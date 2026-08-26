@@ -39,11 +39,8 @@
 <title>Macro</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js" defer></script>
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 html { overflow-x: hidden; }
@@ -756,6 +753,7 @@ function setTheme(t) {
   localStorage.setItem('macro:theme', t);
   // redraw charts for new grid color
   Object.values(charts).forEach(c => c.update());
+  Object.values(energyCharts).forEach(c => c.update());
 }
 window.setTheme = setTheme;
 
@@ -773,6 +771,7 @@ function setFont(pct) {
   });
   // redraw charts
   Object.values(charts).forEach(c => c.resize());
+  Object.values(energyCharts).forEach(c => c.resize());
 }
 window.setFont = setFont;
 
@@ -848,6 +847,7 @@ function storeDoc(doc) {
     meta: d.meta || null,
     data: (d.data||[]).map(p=>({x:p.d, y:p.v})).sort((a,b)=>a.x<b.x?-1:1)
   };
+  _thDashEntriesCache = null;
 }
 
 // Phase 1: EPPO docs เท่านั้น (ใช้ prefix range query กับ documentId)
@@ -971,6 +971,7 @@ async function fetchMetaFast() {
       if (docCount < 1000 || !lastId) break;
       cursorId = lastId;
     }
+    _thDashEntriesCache = null;
     return true;
   } catch (e) {
     console.warn('fetchMetaFast: falling back to full eager fetch —', e);
@@ -3689,8 +3690,16 @@ window.confirmCatalogSelection = function() {
 //  series ข้ามหมวดไม่ได้ต้องกดสลับหมวดตลอด — ตัดสินใจร่วมกับ user, ที่มา:
 //  scratch_th_dashboard/PROPOSAL_tree_ui.md)
 // ════════════════════════════════════════════════════
+// cache ผล filter ไว้ข้าม render — เดิมเรียก catalogEntries() (วนทั้ง
+// SERIES ทุกประเทศ ไม่ใช่แค่ ~300 ตัวของไทย) ใหม่ทุกครั้งที่ node ไหนก็ตาม
+// เรียก thDashEntriesFor() ทำให้ 1 ครั้ง render ของ tree วนทั้ง global
+// SERIES ซ้ำนับสิบรอบ (perf bug อีกจุดที่เจอหลัง custom picking menu ช้า
+// 2026-08-26) — invalidate ที่ storeDoc()/fetchMetaFast() ตอน SERIES
+// เปลี่ยนแทน
+let _thDashEntriesCache = null;
 function thDashEntries() {
-  return catalogEntries().filter(e =>
+  if (_thDashEntriesCache) return _thDashEntriesCache;
+  _thDashEntriesCache = catalogEntries().filter(e =>
     e.country === 'Thailand' && !e.id.startsWith('BIS_') && !CATALOG_SUPERCATEGORY_MAP[e.categoryCode] &&
     // ซ่อน BOT_SET_BOT (SET index จาก BOT, รายเดือน) กับ BOT_USDTHB ออกจาก
     // TH Dashboard — มี SET/SET_* (รายวันจาก SET ตรงๆ) กับ USDTHB (legacy
@@ -3698,6 +3707,7 @@ function thDashEntries() {
     // เหลือแหล่งเดียวต่อ series (BOT_YIELD_* ไม่ต้องกรองเพิ่มเพราะถูกลบออก
     // จากระบบไปแล้วตั้งแต่ 2026-08-23 ไม่มี series แบบนี้เหลืออยู่)
     !['BOT_SET_BOT', 'BOT_USDTHB'].includes(e.id));
+  return _thDashEntriesCache;
 }
 const TH_DASH_EPPO_PRODUCT_LABELS = {
   DIESEL: 'DIESEL', FO_1500: 'FO 1500', FO_600: 'FO 600',
@@ -3869,8 +3879,8 @@ let thDashExpandedBeforeSearch = null;
 // จะได้ "10Y" ขึ้นก่อน "1M" เพราะ sort string ธรรมดา (bug ที่ user เจอจริง
 // 2026-08-26)
 const THDASH_TENOR_ORDER = ['1M', '3M', '6M', '1Y', '2Y', '5Y', '10Y', '20Y'];
-// entries ของ leaf-group หนึ่งตัว (memoize ต่อการ render 1 ครั้งพอ ไม่ต้อง
-// cache ข้าม render เพราะ thDashEntries()/filter ไม่ได้หนักมาก ~300 entries)
+// entries ของ leaf-group หนึ่งตัว (thDashEntries() cache ไว้แล้ว — ตัว
+// filter ตรงนี้เอง ~300 entries ไม่หนัก เลย memoize เฉพาะชั้นบนพอ)
 function thDashEntriesFor(label) {
   const entries = thDashEntries().filter(e => thDashLeafKey(e) === label);
   if (label === 'Government Bond Yield') {
@@ -3893,27 +3903,32 @@ function thDashNodeInfo(node, term) {
   const matches = selfMatch || ownLeafMatch || childInfos.some(i => i.matches);
   return { hasData, matches, ownEntries, childInfos };
 }
-function thDashRenderNodes(nodes, depth, term) {
-  let html = '';
-  for (const node of nodes) {
-    const info = thDashNodeInfo(node, term);
-    if (!info.hasData || (term && !info.matches)) continue;
-    const key = node.label;
-    const expanded = term ? true : thDashExpanded.has(key);
-    const indent = depth * 16;
-    html += `<div class="cat-item tree-node" style="padding-left:${indent}px" onclick="toggleThDashNode('${thDashEsc(key)}')">
-      <span class="arrow">${expanded ? '▾' : '▸'}</span><span class="tree-label">${key}</span>
-    </div>`;
-    if (expanded) {
-      html += info.ownEntries.map(e => `
-        <label class="cat-item leaf" style="padding-left:${indent + 16}px">
-          <input type="checkbox" value="${e.id}" ${thDashSelected.has(e.id) ? 'checked' : ''} onchange="toggleThDashSeries('${e.id}',this.checked)">
-          <span title="${thDashSeriesLabel(e).replace(/"/g, '&quot;')}">${thDashSeriesLabel(e)}</span>
-        </label>`).join('');
-      if (node.children) html += thDashRenderNodes(node.children, depth + 1, term);
+// รับ info ที่คำนวณไว้แล้วจาก parent (รวม childInfos) แทนเรียก
+// thDashNodeInfo(node) ซ้ำตอน recurse ลงลูก — เดิมเรียกซ้ำทุกชั้น ทำให้
+// คำนวณ subtree เดิมซ้ำเป็นเลขชี้กำลังตามความลึก (perf bug ที่ user เจอ
+// หลัง custom picking menu ช้า 2026-08-26)
+function thDashRenderNode(node, info, depth, term) {
+  if (!info.hasData || (term && !info.matches)) return '';
+  const key = node.label;
+  const expanded = term ? true : thDashExpanded.has(key);
+  const indent = depth * 16;
+  let html = `<div class="cat-item tree-node" style="padding-left:${indent}px" onclick="toggleThDashNode('${thDashEsc(key)}')">
+    <span class="arrow">${expanded ? '▾' : '▸'}</span><span class="tree-label">${key}</span>
+  </div>`;
+  if (expanded) {
+    html += info.ownEntries.map(e => `
+      <label class="cat-item leaf" style="padding-left:${indent + 16}px">
+        <input type="checkbox" value="${e.id}" ${thDashSelected.has(e.id) ? 'checked' : ''} onchange="toggleThDashSeries('${e.id}',this.checked)">
+        <span title="${thDashSeriesLabel(e).replace(/"/g, '&quot;')}">${thDashSeriesLabel(e)}</span>
+      </label>`).join('');
+    if (node.children) {
+      html += node.children.map((child, i) => thDashRenderNode(child, info.childInfos[i], depth + 1, term)).join('');
     }
   }
   return html;
+}
+function thDashRenderNodes(nodes, depth, term) {
+  return nodes.map(node => thDashRenderNode(node, thDashNodeInfo(node, term), depth, term)).join('');
 }
 function thDashEsc(s) { return s.replace(/'/g, "\\'"); }
 function thDashRender() {
@@ -4218,16 +4233,42 @@ window.addEventListener('resize', () => {
 // เฉพาะการ์ดเหล่านี้ที่ export ลง PDF (base ต้องตรงกับ EPPO_ORDER หรือ 'OIL_FUND_STATUS' สำหรับการ์ด Oil Fund Status)
 const PDF_EXPORT_BASES = ['DIESEL', 'GASOHOL 95', 'OIL_FUND_STATUS'];
 
+function loadScriptOnce(src) {
+  if (document.querySelector(`script[src="${src}"]`)) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = src;
+    s.onload = resolve;
+    s.onerror = () => reject(new Error('load failed: ' + src));
+    document.head.appendChild(s);
+  });
+}
+
 window.exportEnergyPDF = async function() {
   const btn = document.getElementById('energy-export-btn');
   const boxes = document.getElementById('energy-boxes');
   const hero = document.getElementById('energy-hero');
   const target = document.getElementById('page-th-energy');
   if (!boxes || !hero || !target || !Object.keys(SERIES).length) { alert('ข้อมูลยังโหลดไม่เสร็จ ลองใหม่อีกครั้ง'); return; }
-  if (typeof html2canvas === 'undefined' || !window.jspdf) { alert('โหลด PDF library ไม่สำเร็จ ลอง refresh หน้า'); return; }
 
   const originalLabel = btn.textContent;
   btn.disabled = true;
+  btn.textContent = 'กำลังโหลด PDF library…';
+  try {
+    if (typeof html2canvas === 'undefined') {
+      await loadScriptOnce('https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js');
+    }
+    if (!window.jspdf) {
+      await loadScriptOnce('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js');
+    }
+  } catch (e) {
+    alert('โหลด PDF library ไม่สำเร็จ ลอง refresh หน้า');
+    btn.disabled = false;
+    btn.textContent = originalLabel;
+    return;
+  }
+  if (typeof html2canvas === 'undefined' || !window.jspdf) { alert('โหลด PDF library ไม่สำเร็จ ลอง refresh หน้า'); btn.disabled = false; btn.textContent = originalLabel; return; }
+
   btn.textContent = 'กำลังสร้าง PDF…';
 
   const hiddenCards = [];
@@ -4299,9 +4340,9 @@ window.exportEnergyPDF = async function() {
 
 // รอให้ Firebase SDK โหลดเสร็จก่อน init
 if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', () => setTimeout(loadData, 500));
+  document.addEventListener('DOMContentLoaded', loadData);
 } else {
-  setTimeout(loadData, 500);
+  loadData();
 }
 </script>
 </body>
