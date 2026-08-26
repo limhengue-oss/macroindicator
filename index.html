@@ -3865,10 +3865,18 @@ let thDashExpanded = new Set();
 let thDashSearchTerm = '';
 let thDashExpandedBeforeSearch = null;
 
+// ลำดับ tenor ตามเวลาจริง (สั้น→ยาว) — ปล่อยตาม default (id/name order)
+// จะได้ "10Y" ขึ้นก่อน "1M" เพราะ sort string ธรรมดา (bug ที่ user เจอจริง
+// 2026-08-26)
+const THDASH_TENOR_ORDER = ['1M', '3M', '6M', '1Y', '2Y', '5Y', '10Y', '20Y'];
 // entries ของ leaf-group หนึ่งตัว (memoize ต่อการ render 1 ครั้งพอ ไม่ต้อง
 // cache ข้าม render เพราะ thDashEntries()/filter ไม่ได้หนักมาก ~300 entries)
 function thDashEntriesFor(label) {
-  return thDashEntries().filter(e => thDashLeafKey(e) === label);
+  const entries = thDashEntries().filter(e => thDashLeafKey(e) === label);
+  if (label === 'Government Bond Yield') {
+    entries.sort((a, b) => THDASH_TENOR_ORDER.indexOf(thDashSeriesLabel(a)) - THDASH_TENOR_ORDER.indexOf(thDashSeriesLabel(b)));
+  }
+  return entries;
 }
 // เช็คว่า node (entries ของตัวเอง + ลูกหลาน) มีข้อมูลจริงไหม + match คำค้น
 // ไหม — node หนึ่งตัวมีได้ทั้ง entries ตรงๆ (ถ้ามี id ที่ thDashLeafKey()
