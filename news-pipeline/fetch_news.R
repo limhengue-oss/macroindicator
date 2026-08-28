@@ -238,14 +238,25 @@ call_gemini <- function(prompt, max_retries = 3) {
       }
     }
 
-    if (result$ok) { resp <- result$resp; break }
+    if (result$ok) {
+      # parse JSON ทันทีในนี้ — ถ้า Gemini ตอบ text เพี้ยน (เจอจริง 2026-08-28:
+      # เจอ pattern ซ้ำๆ "Hh4dHh3eHh4d..." กลางสตริง ทำให้ jsonlite parse ไม่ผ่าน)
+      # ให้นับเป็น attempt fail แล้ว retry ใหม่ทั้งก้อน (regenerate) แทนที่จะพังทั้ง
+      # สคริปต์ทันที — glitch แบบนี้เป็นปัญหาคุณภาพ output ของโมเดล ไม่ใช่ network
+      raw <- resp_body_json(result$resp)$candidates[[1]]$content$parts[[1]]$text
+      raw <- gsub("```json|```", "", raw)
+      parsed <- tryCatch(fromJSON(trimws(raw)), error = function(e) {
+        message("Gemini attempt ", attempt, " invalid JSON: ", conditionMessage(e))
+        message("  raw text (first 300 chars): ", substr(raw, 1, 300))
+        NULL
+      })
+      if (!is.null(parsed)) return(parsed)
+      result$ok <- FALSE
+    }
+
     if (attempt < max_retries) Sys.sleep(15)
   }
-  if (!result$ok) stop("Gemini failed after ", max_retries, " attempts")
-
-  raw <- resp_body_json(resp)$candidates[[1]]$content$parts[[1]]$text
-  raw <- gsub("```json|```", "", raw)
-  fromJSON(trimws(raw))
+  stop("Gemini failed after ", max_retries, " attempts (network/HTTP/invalid JSON)")
 }
 
 prompt    <- build_prompt(all_items)
