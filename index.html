@@ -523,6 +523,7 @@ input[type=range] { width:80px; accent-color:var(--blue); }
       <div id="cm-series"></div>
       <button class="add-series-btn" id="cm-add-btn" onclick="addSeriesRow()">+ add series</button>
       <div class="hint">Function apply ได้แยกกันต่อ series · L/R = แกนซ้าย/ขวา</div>
+      <div class="hint" id="cm-catalog-hint" style="display:none">กำลังโหลดรายชื่อ series ทั้งหมด…</div>
     </div>
     <div class="field">
       <label>Default period</label>
@@ -739,8 +740,17 @@ const SERIES = {};
 // ensureSeriesDataMany() เอง ตัวแปรนี้ใช้แค่กันเปิดหน้าที่ต้องรู้จัก series
 // ทั้งหมดก่อน (เช่น picker/catalog) ก่อน meta มาครบ
 let seriesMetaReady = false;
+// true หลัง meta ของ "known series" (built-in SERIES_GROUPS + series ที่ถูก
+// ใช้อยู่ในกราฟ custom page ที่ user บันทึกไว้แล้ว) พร้อม — เร็วกว่า
+// seriesMetaReady มาก เพราะไม่ต้อง scan ทั้ง collection (~16,000 doc) แค่
+// query เฉพาะ id ที่รู้จักอยู่แล้ว (~100-200 id) หน้า Dashboard/Inflation/
+// custom page ที่มีอยู่แล้ว poll ตัวนี้แทน seriesMetaReady — ส่วน
+// seriesMetaReady (full catalog) เลื่อนไปโหลดตอนเปิด Edit/Add chart modal
+// ครั้งแรกเท่านั้น (ดู ensureFullCatalogMeta())
+let knownMetaReady = false;
 let NEWS = [];
 const charts = {};
+let energyCharts = {};
 let config = loadConfig();
 let activePageId = '__energy__';
 let editingChart = null;
@@ -976,6 +986,100 @@ async function fetchMetaFast() {
   } catch (e) {
     console.warn('fetchMetaFast: falling back to full eager fetch —', e);
     return false;
+  }
+}
+
+// รวม id ทุกตัวที่ "รู้อยู่แล้วว่าต้องใช้" ตอน initial load: built-in
+// SERIES_GROUPS + id ทุกตัวที่ถูกอ้างอยู่ในกราฟของ custom page ที่ user
+// เคย save ไว้ (config.pages) — ใช้เป็น scope ของ fetchKnownSeriesMeta()
+// แทนการ scan ทั้ง collection
+function computeKnownSeriesIds() {
+  const ids = new Set();
+  Object.values(SERIES_GROUPS).forEach(list => list.forEach(id => ids.add(id)));
+  config.pages?.forEach(p => p.charts?.forEach(c => c.series?.forEach(s => ids.add(s.id))));
+  return [...ids];
+}
+
+// Phase 2a: meta (name/updated/meta เท่านั้น เหมือน fetchMetaFast) ของ
+// known ids เท่านั้น ผ่าน REST runQuery + IN filter บน __name__ (จำกัด 30
+// id/query ตาม Firestore) ยิงพร้อมกันแบบจำกัด concurrency — เร็วกว่า
+// fetchMetaFast มาก เพราะ known ids มีแค่หลักร้อย เทียบกับทั้ง collection
+// ~16,000 doc คืน true/false ให้ loadData() ตัดสินใจ fallback เหมือน
+// fetchMetaFast (fail แบบไหนก็ตาม swallow เงียบๆ คืน false)
+async function fetchKnownSeriesMeta(ids, concurrency = 6) {
+  if (!ids.length) return true;
+  try {
+    const tokenResult = await getAppCheckToken(appCheck, false);
+    const restBase = `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/(default)/documents:runQuery`;
+    const chunks = [];
+    for (let i = 0; i < ids.length; i += 30) chunks.push(ids.slice(i, i + 30));
+
+    async function runChunk(chunk) {
+      const structuredQuery = {
+        from: [{ collectionId: 'series' }],
+        select: { fields: [{ fieldPath: 'name' }, { fieldPath: 'updated' }, { fieldPath: 'meta' }] },
+        where: {
+          fieldFilter: {
+            field: { fieldPath: '__name__' },
+            op: 'IN',
+            value: { arrayValue: { values: chunk.map(id => ({
+              referenceValue: `projects/${firebaseConfig.projectId}/databases/(default)/documents/series/${id}`
+            })) } }
+          }
+        }
+      };
+      const resp = await fetch(restBase, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Firebase-AppCheck': tokenResult.token },
+        body: JSON.stringify({ structuredQuery })
+      });
+      if (!resp.ok) throw new Error('runQuery failed: ' + resp.status);
+      const rows = await resp.json();
+      for (const row of rows) {
+        if (!row.document) continue;
+        const parts = row.document.name.split('/');
+        const id = parts[parts.length - 1];
+        if (SERIES[id]?.data != null) continue;  // Phase 1 (EPPO/OFFO) โหลดเต็มไปแล้ว ไม่ทับ
+        const f = row.document.fields || {};
+        SERIES[id] = {
+          name: cleanSeriesName(f.name ? decodeFirestoreRestValue(f.name) : id),
+          updated: f.updated ? decodeFirestoreRestValue(f.updated) : '',
+          meta: f.meta ? decodeFirestoreRestValue(f.meta) : null,
+          data: null
+        };
+      }
+    }
+
+    for (let i = 0; i < chunks.length; i += concurrency) {
+      await Promise.all(chunks.slice(i, i + concurrency).map(runChunk));
+    }
+    return true;
+  } catch (e) {
+    console.warn('fetchKnownSeriesMeta: falling back to full eager fetch —', e);
+    return false;
+  }
+}
+
+// เปิด "full catalog" (ทุก series ~16,000 doc) แบบ on-demand — เดิม
+// loadData() เรียก fetchMetaFast() ตรงๆ ตอน initial load ทุกครั้ง ตอนนี้
+// ย้ายมาเรียกที่นี่แทน ให้ trigger แค่ตอนเปิด Edit/Add chart modal ครั้งแรก
+// (ที่ต้องใช้ list ครบทุก series สำหรับ dropdown "Other") — dedupe ด้วย
+// in-flight promise กันเปิด modal รัวๆ ยิง query ซ้ำ, cache ผลไว้ถาวรด้วย
+// seriesMetaReady (เปิดครั้งต่อไปไม่ต้องรอ)
+let _fullCatalogInflight = null;
+async function ensureFullCatalogMeta() {
+  if (seriesMetaReady) return true;
+  if (_fullCatalogInflight) return _fullCatalogInflight;
+  _fullCatalogInflight = (async () => {
+    const ok = await fetchMetaFast();
+    if (!ok) await fetchRest();
+    seriesMetaReady = true;
+    return true;
+  })();
+  try {
+    return await _fullCatalogInflight;
+  } finally {
+    _fullCatalogInflight = null;
   }
 }
 
@@ -1238,8 +1342,6 @@ function mapToYearAxis(data, year, yearLabels) {
   data.forEach(p => { if (p.x.startsWith(String(year))) map[p.x.slice(5)] = p.y; });
   return yearLabels.map(l => map[l] ?? null);
 }
-
-let energyCharts = {};
 
 // ── Render ────────────────────────────────────────────
 // ── Structure Modal ──────────────────────────────────
@@ -2035,15 +2137,19 @@ window.loadData = async function() {
     if (activePageId === '__energy__')    renderEnergyPage();
     if (activePageId === '__news__')      renderNews();
     if (activePageId === '__dashboard__') renderDashboard();  // โชว์ loading ของตัวเองถ้า Phase 2 ยังไม่เสร็จ
-    // Phase 2: metadata ของทุก series (ไม่รวม .data — lazy-load step 2) —
-    // ถ้าสำเร็จ ระบบเข้าโหมด on-demand จริง (ดึง .data ต่อ series ตอน
-    // render เท่านั้น ผ่าน ensureSeriesData()/ensureSeriesDataMany(), ดู
-    // drawChart/renderDashboard/renderInflationCards) — ถ้า fail (เช่น
+    // Phase 2a: metadata (ไม่รวม .data) เฉพาะ "known series" (built-in
+    // SERIES_GROUPS + series ที่ถูกใช้อยู่ในกราฟ custom page ที่ user save
+    // ไว้แล้ว) — เร็วกว่า scan ทั้ง collection มาก (~100-200 id เทียบกับ
+    // ~16,000 doc) พอสำหรับ Dashboard/Inflation/custom page ที่มีอยู่แล้ว —
+    // ถ้าสำเร็จ ระบบเข้าโหมด on-demand (ดึง .data ต่อ series ตอน render
+    // เท่านั้น ผ่าน ensureSeriesData()/ensureSeriesDataMany()) ถ้า fail (เช่น
     // App Check ใช้ไม่ได้จริงในบางสถานการณ์) fallback ไปโหลดทุกอย่างเต็ม
-    // ล่วงหน้าเหมือนเดิมเป๊ะ (fetchRest เดิม) กัน regression 100%
-    const metaOk = await fetchMetaFast();
-    if (!metaOk) await fetchRest();
-    seriesMetaReady = true;
+    // ล่วงหน้าเหมือนเดิมเป๊ะ (fetchRest เดิม) กัน regression 100% — ส่วน full
+    // catalog (ทุก series ในระบบ สำหรับ dropdown "Other" ตอน Edit/Add chart)
+    // เลื่อนไปโหลดตอนเปิด modal ครั้งแรกแทน (ดู ensureFullCatalogMeta())
+    const knownOk = await fetchKnownSeriesMeta(computeKnownSeriesIds());
+    if (!knownOk) { await fetchRest(); seriesMetaReady = true; }
+    knownMetaReady = true;
 
     const upd = Object.values(SERIES)[0]?.updated || '';
     setStatus('ok', upd ? 'data: '+upd.slice(0,16).replace('T',' ')+' UTC' : 'loaded');
@@ -2347,7 +2453,7 @@ async function renderDashboard() {
   // Dashboard ต้องรู้จัก series ทั้งหมดก่อน (meta) ถึงจะ seed การ์ดเริ่มต้น/
   // แสดงชื่อ indicator ได้ — ถ้า meta ยังไม่พร้อม โชว์ loading ของหน้านี้เอง
   // แยกจากหน้าอื่น แล้ว poll เช็คจนกว่าจะพร้อมค่อย render จริง
-  if (!seriesMetaReady) {
+  if (!knownMetaReady) {
     container.innerHTML = `
       <div style="display:flex;flex-direction:column;align-items:center;gap:10px;padding:70px 20px">
         <div style="font-size:0.82em;color:var(--text2)">Now loading… <span id="dash-pct">0%</span></div>
@@ -2356,7 +2462,7 @@ async function renderDashboard() {
     startTrickle('dash', 'dash-bar-fill', 'dash-pct', 10, 92);
     clearInterval(_dashPoll);
     _dashPoll = setInterval(() => {
-      if (seriesMetaReady) { clearInterval(_dashPoll); stopTrickle('dash'); renderDashboard(); }
+      if (knownMetaReady) { clearInterval(_dashPoll); stopTrickle('dash'); renderDashboard(); }
     }, 300);
     return;
   }
@@ -2470,9 +2576,9 @@ function renderNav() {
     document.querySelectorAll('.nb').forEach(b=>b.classList.remove('active'));
     document.getElementById('page-inflation').classList.add('active');
     inflBtn.classList.add('active');
-    if (!seriesMetaReady) {
+    if (!knownMetaReady) {
       const wait = setInterval(() => {
-        if (seriesMetaReady) { clearInterval(wait); renderInflationPage(); }
+        if (knownMetaReady) { clearInterval(wait); renderInflationPage(); }
       }, 300);
     } else {
       renderInflationPage();
@@ -3991,13 +4097,32 @@ window.openChartModal = function(pageId, chartId, presetSeries, presetTitle) {
   }
   document.getElementById('cm-title').value=chart?.title||presetTitle||'';
   document.getElementById('cm-period').value=chart?.period||'1y';
+  const sList=chart?.series||presetSeries||[{id:Object.keys(SERIES)[0]||'SPX',axis:'L',fn:'raw',color:COLORS[0]}];
+  renderChartModalSeriesRows(sList);
+  document.getElementById('chart-modal').classList.add('show');
+
+  // dropdown "Other" ต้องรู้จักทุก series ในระบบ ไม่ใช่แค่ known ids — โหลด
+  // full catalog (on-demand, cache ไว้ครั้งต่อไป) แล้วสร้าง dropdown ใหม่
+  // ให้ list ครบ ถ้ายังเปิด modal เดียวกันอยู่ (กันกรณี user ปิด modal ไป
+  // ก่อนโหลดเสร็จ)
+  if (!seriesMetaReady) {
+    const hint = document.getElementById('cm-catalog-hint');
+    if (hint) hint.style.display = '';
+    ensureFullCatalogMeta().then(() => {
+      if (hint) hint.style.display = 'none';
+      if (!document.getElementById('chart-modal').classList.contains('show')) return;
+      if (editingChart.pageId !== pageId || editingChart.chartId !== (chartId || null)) return;
+      renderChartModalSeriesRows(sList);
+    });
+  }
+};
+
+function renderChartModalSeriesRows(sList) {
   const wrap=document.getElementById('cm-series');
   wrap.innerHTML='';
-  const sList=chart?.series||presetSeries||[{id:Object.keys(SERIES)[0]||'SPX',axis:'L',fn:'raw',color:COLORS[0]}];
   sList.forEach((s,i)=>wrap.appendChild(makeSeriesRow(s,i)));
   updateAddBtn();
-  document.getElementById('chart-modal').classList.add('show');
-};
+}
 
 function makeSeriesRow(s,idx) {
   const row=document.createElement('div');
