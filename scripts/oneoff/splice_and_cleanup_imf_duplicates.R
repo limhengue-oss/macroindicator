@@ -42,7 +42,14 @@ sa <- if (DRY_RUN) NULL else fromJSON(sa_json)
 source("R/firestore.R")
 source("R/imf_core.R")
 
-TARGET_DATASETS <- c("CPI", "CTOT", "EER", "ER", "PI", "PPI", "QGDP_WCA", "IL", "ITG")
+TARGET_DATASETS <- c("CPI", "CTOT", "EER", "ER", "PI", "PPI", "QGDP_WCA", "IL", "ITG", "CPI_WCA")
+# รองรับจำกัดเฉพาะ dataset (เช่นตอนเพิ่ม dataset ใหม่เข้า allowlist ไม่ต้อง
+# รันซ้ำทั้งก้อน — pattern เดียวกับ IMF_FETCH_DATASETS ใน fetch_imf_multi.R)
+subset_env <- Sys.getenv("SPLICE_DATASETS")
+if (nzchar(subset_env)) {
+  TARGET_DATASETS <- intersect(TARGET_DATASETS, trimws(strsplit(subset_env, ",")[[1]]))
+  message(sprintf("── SPLICE_DATASETS set — จำกัดเหลือ: %s", paste(TARGET_DATASETS, collapse = ", ")))
+}
 REST_BASE <- sprintf("https://firestore.googleapis.com/v1/projects/%s/databases/(default)/documents", PROJECT_ID)
 
 # ── ดึง series ทั้งหมดของ dataset หนึ่ง (name+updated+meta+data ครบ ผ่าน
@@ -159,7 +166,17 @@ for (dataset_id in TARGET_DATASETS) {
     f
   }
   key_of <- function(p) {
-    lbls <- p$labels[order(names(p$labels))]
+    lbls <- p$labels
+    # CPI_WCA: บาง doc (backfill เก่า) มีแค่ TYPE_OF_TRANSFORMATION dim
+    # ตัวเดียว ไม่มี COICOP_1999/INDEX_TYPE เลย (headline-only aggregate
+    # ไม่มี breakdown ให้ตั้งแต่ต้น) ส่วน doc ใหม่ (live fetch) กลับมี
+    # ครบ 3 dim — ถ้าใช้ label ทุก dim เป็น key ตรงๆ 2 doc นี้จะได้ key
+    # ไม่ตรงกันเลย ทั้งที่เป็น series เดียวกัน (verify แล้ว 2026-09-04:
+    # ค่าตรงกันทุกจุด) — ตัด COICOP_1999/INDEX_TYPE ออกจาก key เฉพาะ
+    # dataset นี้ เหลือแค่ TYPE_OF_TRANSFORMATION พอ (เหมือนที่
+    # getInflationIndex() ฝั่งเว็บ hardcode 'All Items' ให้ CPI_WCA อยู่แล้ว)
+    if (dataset_id == "CPI_WCA") lbls <- lbls[names(lbls) == "TYPE_OF_TRANSFORMATION"]
+    lbls <- lbls[order(names(lbls))]
     paste(p$country, paste(names(lbls), lbls, sep = ":", collapse = "|"), sep = "||")
   }
   groups <- split(parsed, map_chr(parsed, key_of))
@@ -180,18 +197,27 @@ for (dataset_id in TARGET_DATASETS) {
   message(sprintf("  duplicate-label groups: %d", length(dup_groups)))
 
   for (g in dup_groups) {
-    # winner: max(date ล่าสุด) ก่อน, ถ้าเท่ากันเลือก doc_id สั้นกว่า
+    # winner: max(date ล่าสุด) ก่อน, ถ้าเท่ากันเลือกตัวที่ updated (Firestore
+    # push timestamp) ใหม่กว่า — สะท้อนว่า pipeline ไหนยังแตะ doc นี้อยู่
+    # จริง (เจอจริง 2026-09-04: CPI_WCA doc_id สั้น "INDEX" กลับเป็นตัว
+    # backfill เก่าที่หยุดอัปเดตแล้ว ส่วน "CPI_T_IX" ยาวกว่าคือตัว live ที่
+    # ยังได้รับข้อมูลต่อเนื่อง — สลับกับ pattern ของ CPI/CTOT/ฯลฯ เป๊ะ ใช้
+    # ความยาว doc_id เทียบไม่ได้ทุก dataset) ถ้า updated เท่ากันอีก (ทั้งคู่
+    # ไม่เคยถูกแตะหลัง push ครั้งแรกเลย) ค่อย fallback ไป doc_id สั้นกว่า
+    # กัน error/สุ่ม
     stats <- map(g, function(p) list(
       id = p$id, name = p$name, max_date = if (nrow(p$points)) max(p$points$date) else "",
-      len = nchar(p$id), points = p$points
+      updated = p$updated %||% "", len = nchar(p$id), points = p$points
     ))
     ord <- order(vapply(stats, \(s) s$max_date, character(1)), decreasing = TRUE)
     stats <- stats[ord]
-    # ถ้า max_date เท่ากัน ให้ doc_id สั้นกว่ามาก่อนในกลุ่ม top ties
     top_date <- stats[[1]]$max_date
     tied <- Filter(\(s) s$max_date == top_date, stats)
     if (length(tied) > 1) {
-      tied <- tied[order(vapply(tied, \(s) s$len, integer(1)))]
+      tied <- tied[order(vapply(tied, \(s) s$updated, character(1)), decreasing = TRUE)]
+      top_updated <- tied[[1]]$updated
+      tied2 <- Filter(\(s) s$updated == top_updated, tied)
+      if (length(tied2) > 1) tied <- tied2[order(vapply(tied2, \(s) s$len, integer(1)))]
       rest <- Filter(\(s) s$max_date != top_date, stats)
       stats <- c(tied, rest)
     }

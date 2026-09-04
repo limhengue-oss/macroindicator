@@ -11,6 +11,10 @@ on:
         description: 'ลบตัวแพ้จริง (หลัง splice แล้วเท่านั้น — ทำงานเฉพาะตอน dry_run=false)'
         type: boolean
         default: false
+      datasets:
+        description: 'จำกัดเฉพาะ dataset (comma-separated เช่น "CPI_WCA") — เว้นว่าง = รันครบทุกตัวใน allowlist'
+        type: string
+        default: ''
 
 jobs:
   splice-cleanup:
@@ -26,8 +30,9 @@ jobs:
 
       - name: Install packages and run
         env:
-          GCP_SA_KEY:     ${{ inputs.dry_run && '' || secrets.GCP_SA_KEY }}
-          DELETE_LOSERS:  ${{ inputs.delete_losers && 'true' || 'false' }}
+          GCP_SA_KEY:      ${{ inputs.dry_run && '' || secrets.GCP_SA_KEY }}
+          DELETE_LOSERS:   ${{ inputs.delete_losers && 'true' || 'false' }}
+          SPLICE_DATASETS: ${{ inputs.datasets }}
         run: |
           Rscript -e '
           lib <- "/home/runner/R-pkgs"
