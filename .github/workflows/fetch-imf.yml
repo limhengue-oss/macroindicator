@@ -1,7 +1,16 @@
 name: Fetch IMF (21 dataset, raw index/level, all countries)
 
 on:
-  workflow_dispatch:   # รันมือไปก่อน ยังไม่ตั้ง cron จนกว่าจะยืนยันว่าข้อมูลอัปเดตสม่ำเสมอ
+  schedule:
+    # 01:00 ICT ทุกวันพุธ = 18:00 UTC วันอังคาร (ICT = UTC+7) — IMF ไม่มี
+    # release schedule ตายตัวให้ยึด (เช็คแล้ว 2026-09-04: dataflow metadata
+    # ไม่มี field บอกความถี่ update เลย) ตั้งตามความถี่ของข้อมูลเอง (CPI/
+    # ส่วนใหญ่รายเดือน) รายสัปดาห์พอ ไม่ต้องถี่กว่านี้ — schedule trigger ไม่มี
+    # ตัว "inputs" context เลย (มีแค่ workflow_dispatch/workflow_call) ทำให้
+    # inputs.dry_run/inputs.datasets ด้านล่างเป็นค่าว่างเสมอตอน schedule รัน
+    # → รันจริง (ไม่ dry run) ครบทุก 21 dataset โดยอัตโนมัติ
+    - cron: '0 18 * * 2'
+  workflow_dispatch:   # รันมือได้ตลอด (ทดสอบ/จำกัด dataset/dry run) นอกเหนือจาก schedule รายสัปดาห์
     inputs:
       dry_run:
         description: 'Dry run (ดึงข้อมูลมาดูเฉย ๆ ไม่ push Firestore)'
