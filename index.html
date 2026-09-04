@@ -2609,13 +2609,16 @@ function renderNav() {
     document.querySelectorAll('.nb').forEach(b=>b.classList.remove('active'));
     document.getElementById('page-inflation').classList.add('active');
     inflBtn.classList.add('active');
-    if (!knownMetaReady) {
-      const wait = setInterval(() => {
-        if (knownMetaReady) { clearInterval(wait); renderInflationPage(); }
-      }, 300);
-    } else {
-      renderInflationPage();
-    }
+    // บั๊กเดิม (มาจาก commit 83850e7 lazy-load full catalog, ไม่เกี่ยวกับ
+    // งานวันนี้): เช็คแค่ knownMetaReady (มีแค่ id ที่ SERIES_GROUPS/custom
+    // page อ้างถึง ~100-200 ตัว) — series ของ GlobalCPI (IMF CPI ทุกประเทศ
+    // หลายพันตัว) ไม่เคยอยู่ใน known-id set เลย เพราะฉะนั้น
+    // getInflationIndex() วน SERIES เจอศูนย์ตัวเสมอ หน้า GlobalCPI เลย
+    // โชว์ "no data" ทุกกลุ่มตลอดมา — ต้องรอ full catalog
+    // (ensureFullCatalogMeta) ที่โหลด series ทั้งหมดจริงๆ แทน
+    ensureFullCatalogMeta().then(() => {
+      if (activePageId === '__inflation__') renderInflationPage();
+    });
   };
   nav.appendChild(inflBtn);
 
