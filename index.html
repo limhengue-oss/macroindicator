@@ -655,25 +655,33 @@ const INFLATION_GROUPS = [
 // code ตรงกับ dims.COICOP_1999.code จริงในเว็บ (imf_dim_slug() ของ label
 // จาก IMF SDMX ตรงๆ, ตรวจสอบแล้วจากข้อมูลจริงทั้ง collection 2026-08-23 —
 // เสถียร ไม่ใช่ text ที่แปลเองแบบ 2-digit COICOP code เดิม)
+// ชั่วคราว 2026-09-04: เปลี่ยนจาก dims.COICOP_1999.code เป็น .label แทน —
+// code ผูกกับ IMF codelist คนละชุดต่อประเทศ (เช่น "T"/"CP01" กับ "ALL_ITEMS"/
+// "FOOD_AND_NON_ALCOHOLIC_BEVERAGES" หมายถึงหมวดเดียวกัน แต่ code ต่างกัน —
+// ดู CHANGES/บทสนทนา 2026-09-04) หลัง dedupe/cleanup ซ้ำ CPI แล้วบาง
+// ประเทศ (G7 ส่วนใหญ่) เหลือแค่ doc ที่ใช้โค้ดสั้น (T/CP01-12) ทำให้
+// dropdown ที่ hardcode ค่าตาม code แบบยาวเดิม (ALL_ITEMS, ...) หา match
+// ไม่เจอเลย — label ("All Items", "Food and non-alcoholic beverages", ...)
+// เขียนเหมือนกันเป๊ะทั้ง 2 ชุด code เลยใช้เป็น key ที่เสถียรกว่า
 const INFLATION_CATEGORIES = [
-  ['ALL_ITEMS','All Items (headline)'],
-  ['FOOD_AND_NON_ALCOHOLIC_BEVERAGES','Food and non-alcoholic beverages'],
-  ['ALCOHOLIC_BEVERAGES_TOBACCO_AND_NARCOTICS','Alcoholic beverages, tobacco and narcotics'],
-  ['CLOTHING_AND_FOOTWEAR','Clothing and footwear'],
-  ['HOUSING_WATER_ELECTRICITY_GAS_AND_OTHER_FUELS','Housing, water, electricity, gas and other fuels'],
-  ['FURNISHINGS_HOUSEHOLD_EQUIPMENT_AND_ROUTINE_HOUSEHOLD_MAINTENANCE','Furnishings, household equipment and routine household maintenance'],
-  ['HEALTH','Health'],
-  ['TRANSPORT','Transport'],
-  ['COMMUNICATION','Communication'],
-  ['RECREATION_AND_CULTURE','Recreation and culture'],
-  ['EDUCATION','Education'],
-  ['RESTAURANTS_AND_HOTELS','Restaurants and hotels'],
-  ['MISCELLANEOUS_GOODS_AND_SERVICES','Miscellaneous goods and services'],
+  ['All Items','All Items (headline)'],
+  ['Food and non-alcoholic beverages','Food and non-alcoholic beverages'],
+  ['Alcoholic beverages, tobacco and narcotics','Alcoholic beverages, tobacco and narcotics'],
+  ['Clothing and footwear','Clothing and footwear'],
+  ['Housing, water, electricity, gas and other fuels','Housing, water, electricity, gas and other fuels'],
+  ['Furnishings, household equipment and routine household maintenance','Furnishings, household equipment and routine household maintenance'],
+  ['Health','Health'],
+  ['Transport','Transport'],
+  ['Communication','Communication'],
+  ['Recreation and culture','Recreation and culture'],
+  ['Education','Education'],
+  ['Restaurants and hotels','Restaurants and hotels'],
+  ['Miscellaneous goods and services','Miscellaneous goods and services'],
 ];
 const INFLATION_GRAY = 'rgba(136,136,136,0.32)';
 const INFLATION_HL_COLORS = COLORS.filter(c => c !== '#888888');
 const inflationState = {
-  category: 'ALL_ITEMS',  // ALL_ITEMS=headline, อื่นๆ=COICOP division code
+  category: 'All Items',  // 'All Items'=headline, อื่นๆ=COICOP division label
   window: '10y',
   // 'OTHER' เพิ่มเองที่นี่ (นอกเหนือ INFLATION_GROUPS) เพราะกลุ่ม Other
   // Countries คำนวณ dynamic จากข้อมูลจริงที่โหลดมา ไม่ใช่รายชื่อ hardcode
@@ -3016,9 +3024,12 @@ function getInflationIndex() {
     const dims = meta.dims || {};
     const tt = dims.TYPE_OF_TRANSFORMATION && dims.TYPE_OF_TRANSFORMATION.label;
     // CPI_WCA ไม่มี dims.COICOP_1999 เลย (headline-only aggregate ไม่มี
-    // COICOP breakdown ให้ตั้งแต่ต้น) — ถือเป็น ALL_ITEMS (headline) โดย
+    // COICOP breakdown ให้ตั้งแต่ต้น) — ถือเป็น 'All Items' (headline) โดย
     // implicit แทนที่จะ require ว่าต้องมี dim นี้เสมอแบบ dataset "CPI" ปกติ
-    const coicopCode = isCpiWca ? 'ALL_ITEMS' : dims.COICOP_1999 && dims.COICOP_1999.code;
+    // ใช้ .label ไม่ใช่ .code (ชั่วคราว 2026-09-04 — ดูคอมเมนต์ที่
+    // INFLATION_CATEGORIES): code ผูกกับ codelist คนละชุดต่อประเทศ (T vs
+    // ALL_ITEMS ฯลฯ) แต่ label เขียนเหมือนกันเสมอไม่ว่าจะโค้ดชุดไหน
+    const coicopCode = isCpiWca ? 'All Items' : dims.COICOP_1999 && dims.COICOP_1999.label;
     if (!tt || !tt.startsWith('Index') || !coicopCode || !meta.country) return;
     if (!idx[meta.country.code]) idx[meta.country.code] = {};
     // บาง country มีมากกว่า 1 series ที่ isRecommended:true พร้อมกันสำหรับ
