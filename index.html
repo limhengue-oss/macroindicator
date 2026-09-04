@@ -936,51 +936,84 @@ function decodeFirestoreRestValue(v) {
 // จะ fallback ไปใช้ fetchRest() แบบเดิม (โหลดทุกอย่างล่วงหน้าเหมือนเก่าเป๊ะ
 // ไม่มี regression) หรือไม่ — fail แบบไหนก็ตาม (network/App Check/parse)
 // swallow เงียบๆ คืน false ให้ loadData() ตัดสินใจแทน ไม่ throw ออกไป
+// ชั่วคราว 2026-09-04: collection "series" พองไปถึง 40,731 doc (ของเก่า+ใหม่
+// ของหลาย IMF dataset ยังไม่ถูกลบซ้ำเสร็จ อยู่ระหว่าง cleanup แยกต่างหาก
+// อยู่) ทำให้ metadata phase (เดิม query เดียว paginate ทั้ง collection)
+// ต้องไล่ ~41 หน้าถึงจะครบ ช้าจนหน้าเว็บดูเหมือนค้าง — ตัดสินใจ (user
+// 2026-09-04): จำกัด IMF dataset ที่โหลดเหลือแค่ 7 ตัวที่ยังใช้งานอยู่จริง
+// (QNEA/QGDP_WCA/PI/PI_WCA/CPI/CPI_WCA/PPI) ก่อน ระหว่างรอ cleanup เสร็จ —
+// ต้องเอา allowlist นี้ออกทีหลัง (ค้นหาคำว่า "ชั่วคราว 2026-09-04" ทั้งไฟล์)
+const TEMP_IMF_DATASET_ALLOWLIST = ['QNEA', 'QGDP_WCA', 'PI', 'PI_WCA', 'CPI', 'CPI_WCA', 'PPI'];
+// Firestore prefix-range trick: ทุก key ที่ไม่ขึ้นต้นด้วย "IMF_" จะอยู่นอก
+// ช่วง [ "IMF_", "IMF_"+U+FFFF ) เสมอ (U+FFFF สูงกว่าอักขระจริงทุกตัว)
+const TEMP_IMF_PREFIX_UPPER = 'IMF_￿';
+
 async function fetchMetaFast() {
   try {
     const tokenResult = await getAppCheckToken(appCheck, false);
     const restBase = `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/(default)/documents:runQuery`;
-    let cursorId = null;
-    for (;;) {
-      const structuredQuery = {
-        from: [{ collectionId: 'series' }],
-        select: { fields: [{ fieldPath: 'name' }, { fieldPath: 'updated' }, { fieldPath: 'meta' }] },
-        orderBy: [{ field: { fieldPath: '__name__' }, direction: 'ASCENDING' }],
-        limit: 1000
-      };
-      if (cursorId) {
-        structuredQuery.startAt = {
-          values: [{ referenceValue: `projects/${firebaseConfig.projectId}/databases/(default)/documents/series/${cursorId}` }],
-          before: false
+
+    // 3 stream แยกกัน (ดูคอมเมนต์ "ชั่วคราว 2026-09-04" ด้านบน): (1) doc
+    // ที่ไม่ใช่ IMF เลย (ชื่อ < "IMF_") (2) doc ที่ไม่ใช่ IMF (ชื่อ > ช่วง
+    // IMF_ ทั้งหมด) (3) เฉพาะ IMF dataset ที่อยู่ใน allowlist — รวมกันแล้ว
+    // ครอบคลุมทุกอย่างยกเว้น IMF dataset ที่ไม่ได้อยู่ใน allowlist
+    const streamFilters = [
+      { fieldFilter: { field: { fieldPath: '__name__' }, op: 'LESS_THAN',
+        value: { referenceValue: `projects/${firebaseConfig.projectId}/databases/(default)/documents/series/IMF_` } } },
+      { fieldFilter: { field: { fieldPath: '__name__' }, op: 'GREATER_THAN',
+        value: { referenceValue: `projects/${firebaseConfig.projectId}/databases/(default)/documents/series/${TEMP_IMF_PREFIX_UPPER}` } } },
+      { fieldFilter: { field: { fieldPath: 'meta.category.code' }, op: 'IN',
+        value: { arrayValue: { values: TEMP_IMF_DATASET_ALLOWLIST.map(v => ({ stringValue: v })) } } } },
+    ];
+
+    async function runStream(baseFilter) {
+      let cursorId = null;
+      for (;;) {
+        const structuredQuery = {
+          from: [{ collectionId: 'series' }],
+          select: { fields: [{ fieldPath: 'name' }, { fieldPath: 'updated' }, { fieldPath: 'meta' }] },
+          where: baseFilter,
+          orderBy: [{ field: { fieldPath: '__name__' }, direction: 'ASCENDING' }],
+          limit: 1000
         };
+        if (cursorId) {
+          structuredQuery.startAt = {
+            values: [{ referenceValue: `projects/${firebaseConfig.projectId}/databases/(default)/documents/series/${cursorId}` }],
+            before: false
+          };
+        }
+        const resp = await fetch(restBase, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Firebase-AppCheck': tokenResult.token },
+          body: JSON.stringify({ structuredQuery })
+        });
+        if (!resp.ok) return false;
+        const rows = await resp.json();
+        let lastId = null;
+        let docCount = 0;
+        for (const row of rows) {
+          if (!row.document) continue;
+          docCount++;
+          const parts = row.document.name.split('/');
+          const id = parts[parts.length - 1];
+          lastId = id;
+          if (SERIES[id]?.data != null) continue;  // Phase 1 (EPPO/OFFO) โหลดเต็มไปแล้ว ไม่ทับ
+          const f = row.document.fields || {};
+          SERIES[id] = {
+            name: cleanSeriesName(f.name ? decodeFirestoreRestValue(f.name) : id),
+            updated: f.updated ? decodeFirestoreRestValue(f.updated) : '',
+            meta: f.meta ? decodeFirestoreRestValue(f.meta) : null,
+            data: null
+          };
+        }
+        if (docCount < 1000 || !lastId) break;
+        cursorId = lastId;
       }
-      const resp = await fetch(restBase, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Firebase-AppCheck': tokenResult.token },
-        body: JSON.stringify({ structuredQuery })
-      });
-      if (!resp.ok) return false;
-      const rows = await resp.json();
-      let lastId = null;
-      let docCount = 0;
-      for (const row of rows) {
-        if (!row.document) continue;
-        docCount++;
-        const parts = row.document.name.split('/');
-        const id = parts[parts.length - 1];
-        lastId = id;
-        if (SERIES[id]?.data != null) continue;  // Phase 1 (EPPO/OFFO) โหลดเต็มไปแล้ว ไม่ทับ
-        const f = row.document.fields || {};
-        SERIES[id] = {
-          name: cleanSeriesName(f.name ? decodeFirestoreRestValue(f.name) : id),
-          updated: f.updated ? decodeFirestoreRestValue(f.updated) : '',
-          meta: f.meta ? decodeFirestoreRestValue(f.meta) : null,
-          data: null
-        };
-      }
-      if (docCount < 1000 || !lastId) break;
-      cursorId = lastId;
+      return true;
     }
+
+    const results = await Promise.all(streamFilters.map(runStream));
+    if (results.some(ok => !ok)) return false;
     _thDashEntriesCache = null;
     return true;
   } catch (e) {
