@@ -23,6 +23,12 @@ suppressPackageStartupMessages({
   library(jsonlite); library(httr2); library(jose)
 })
 
+# print warning() ทันทีที่เกิด (default ของ Rscript buffer ไว้โชว์แค่ "There
+# were 50+ warnings" ตอนจบสคริปต์ ไม่มีรายละเอียด) — เจอจริง 2026-08-28:
+# push_series() ล้มเหลวเงียบๆ ~4000 ครั้ง (rate limit) ไม่รู้สาเหตุเพราะ
+# warning() ของ push_series()/delete_doc() โดน buffer ไปหมด
+options(warn = 1)
+
 PROJECT_ID <- "macroindicator-6b265"
 COLLECTION <- "series"
 
@@ -86,6 +92,7 @@ parse_doc <- function(doc) {
   })
   list(
     id = str_extract(doc$name, "[^/]+$"),
+    name = f$name$stringValue %||% str_extract(doc$name, "[^/]+$"),
     country = meta$country$mapValue$fields$code$stringValue,
     labels = unlist(labels),
     freq = meta$freq$stringValue %||% "",
@@ -104,6 +111,19 @@ delete_doc <- function(token, doc_id) {
     return(FALSE)
   }
   TRUE
+}
+
+# ── retry wrapper: รอบก่อนหน้า (2026-08-28) push_series()/delete_doc() ล้มเหลว
+# เงียบๆ จำนวนมาก (2038/6204 สำเร็จเท่านั้น) น่าจะเป็น rate limit ชั่วคราว
+# จาก sequential GET+PATCH หลายพันครั้งรัว ๆ — ห่อ retry แบบ exponential
+# backoff สั้นๆ (3 ครั้ง, 1s/2s/4s) ก่อนยอมแพ้จริง
+with_retry <- function(fn, ..., max_tries = 3) {
+  for (i in seq_len(max_tries)) {
+    ok <- suppressWarnings(fn(...))
+    if (isTRUE(ok)) return(TRUE)
+    if (i < max_tries) Sys.sleep(2^(i - 1))
+  }
+  FALSE
 }
 
 token <- NULL
@@ -162,7 +182,7 @@ for (dataset_id in TARGET_DATASETS) {
   for (g in dup_groups) {
     # winner: max(date ล่าสุด) ก่อน, ถ้าเท่ากันเลือก doc_id สั้นกว่า
     stats <- map(g, function(p) list(
-      id = p$id, max_date = if (nrow(p$points)) max(p$points$date) else "",
+      id = p$id, name = p$name, max_date = if (nrow(p$points)) max(p$points$date) else "",
       len = nchar(p$id), points = p$points
     ))
     ord <- order(vapply(stats, \(s) s$max_date, character(1)), decreasing = TRUE)
@@ -191,14 +211,25 @@ for (dataset_id in TARGET_DATASETS) {
         }
       }
 
+      # splice_ok = "ปลอดภัยที่จะลบตัวแพ้" — true โดย default (ไม่มีอะไรต้อง
+      # เติมเลยก็ปลอดภัย) เป็น false ก็ต่อเมื่อพยายาม push จุดเติมแล้ว
+      # "ไม่สำเร็จจริง" เท่านั้น (กัน data loss ถาวร — เจอจริง 2026-08-28:
+      # รอบก่อนหน้า push ไม่สำเร็จเงียบๆ ~4000 คู่ (rate limit) ถ้าลบตัวแพ้
+      # ไปโดยไม่เช็คตรงนี้ก่อน จะเสียประวัติเก่าที่ยังไม่ทันถูกเติมเข้า
+      # ตัวชนะเลยถาวร)
+      splice_ok <- TRUE
       fill <- imf_splice_fill_gaps(winner$points, loser$points)
       if (nrow(fill) > 0) {
         message(sprintf("  splice: %s <- %s (+%d จุดเก่า, %s ถึง %s)",
                          winner$id, loser$id, nrow(fill), min(fill$date), max(fill$date)))
         if (!DRY_RUN) {
-          ok <- push_series(token, winner$id, name = winner$id, df = fill,
-                             is_incremental = TRUE, meta = NULL, quiet = TRUE)
+          # ใช้ name เดิมของตัวชนะ (ไม่ใช่ doc_id) กัน field "name"
+          # (ชื่ออ่านง่ายสำหรับแสดงผล) โดนทับด้วย doc_id เงียบๆ
+          ok <- with_retry(push_series, token, winner$id, name = winner$name %||% winner$id, df = fill,
+                            is_incremental = TRUE, meta = NULL, quiet = TRUE)
+          splice_ok <- ok
           if (ok) total_spliced <- total_spliced + 1
+          else message(sprintf("  ✗ splice push ไม่สำเร็จ — จะไม่ลบตัวแพ้ตัวนี้: %s", loser$id))
         } else {
           total_spliced <- total_spliced + 1
         }
@@ -206,9 +237,9 @@ for (dataset_id in TARGET_DATASETS) {
         message(sprintf("  (ไม่มีจุดต้องเติม): %s <- %s", winner$id, loser$id))
       }
 
-      if (DELETE_LOSERS) {
+      if (DELETE_LOSERS && splice_ok) {
         if (!DRY_RUN) {
-          if (delete_doc(token, loser$id)) {
+          if (with_retry(delete_doc, token, loser$id)) {
             message(sprintf("  ✗ ลบแล้ว: %s", loser$id))
             total_deleted <- total_deleted + 1
           }
