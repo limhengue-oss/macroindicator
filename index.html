@@ -3212,6 +3212,11 @@ function drawInflationCard(key) {
     axisMax = Math.min(CLAMP_MAX, dataMax + pad);
     if (axisMin >= axisMax) { axisMin = CLAMP_MIN; axisMax = CLAMP_MAX; }
   }
+  // ปัด axis ให้เป็นทวีคูณของ 5 เสมอ (เช่น -5/0/5/10/15) กัน gridline/label
+  // ห่างไม่เท่ากันหรือโชว์ทศนิยมยาวๆ (เช่น 4.0888%) ตาม data ดิบ
+  axisMin = Math.floor(axisMin / 5) * 5;
+  axisMax = Math.ceil(axisMax / 5) * 5;
+  if (axisMin === axisMax) axisMax = axisMin + 5;
 
   // gray ก่อน highlight ทีหลัง (order:0 วาดทับบนสุด)
   const ordered = [...rawSeries.filter(s=>!s.isHl), ...rawSeries.filter(s=>s.isHl)];
@@ -3260,7 +3265,7 @@ function drawInflationCard(key) {
       },
       scales: {
         x: buildTimeAxisScale(win, labels, tickColor),
-        y: { position:'left', min:axisMin, max:axisMax, ticks:{ color:tickColor, font:{family:'monospace',size:10}, maxTicksLimit:6, callback:v=>v+'%' }, grid:{color:gridColor}, border:{color:gridColor} },
+        y: { position:'left', min:axisMin, max:axisMax, ticks:{ color:tickColor, font:{family:'monospace',size:10}, stepSize:5, callback:v=>Math.round(v)+'%' }, grid:{color:gridColor}, border:{color:gridColor} },
       }
     }
   });
