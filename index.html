@@ -51,18 +51,18 @@ canvas { max-width: 100%; }
   --bg:#000000; --bg2:#0e0e10; --bg3:#1c1c1e; --bg4:#2c2c2e;
   --chart-h: 180px;
   --border:#2c2c2e; --border2:#3a3a3c;
-  --text:#f5f5f7; --text2:#98989d; --text3:#636366;
+  --text:#f5f5f7; --text2:#98989d; --text3:#8e8e93;
   --up:#30d158; --dn:#ff453a;
-  --blue:#0a84ff; --red:#ff453a; --amber:#ffd60a; --green:#30d158; --purple:#bf5af2;
+  --blue:#0a84ff; --blue-fg:#0864c4; --red:#ff453a; --amber:#ffd60a; --green:#30d158; --purple:#bf5af2;
   --fs: 1rem;
-  --card-shadow: 0 6px 20px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.06);
+  --card-shadow: 0 2px 6px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.06);
 }
 [data-theme="light"] {
   --bg:#ffffff; --bg2:#ffffff; --bg3:#f2f2f7; --bg4:#e5e5ea;
   --border:#e5e5ea; --border2:#d1d1d6;
   --text:#1d1d1f; --text2:#6e6e73; --text3:#aeaeb2;
   --up:#34c759; --dn:#ff3b30;
-  --blue:#007aff; --red:#ff3b30; --amber:#ff9500; --green:#34c759; --purple:#af52de;
+  --blue:#007aff; --blue-fg:#0060c7; --red:#ff3b30; --amber:#ff9500; --green:#34c759; --purple:#af52de;
   --card-shadow: 0 4px 16px rgba(0,0,0,0.08);
 }
 
@@ -133,21 +133,21 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkM
 /* ── Topbar ── */
 #topbar { display:flex; align-items:center; justify-content:space-between; padding:8px 16px; border-bottom:1px solid var(--border); position:sticky; top:0; background:var(--bg); z-index:20; gap:8px; flex-wrap:wrap; min-height:fit-content; }
 .brand { font-size:0.9em; font-weight:600; letter-spacing:0.12em; text-transform:uppercase; white-space:nowrap; }
-.patch { font-size:0.65em; font-weight:400; color:var(--text3); margin-left:6px; }
+.patch { font-size:11px; font-weight:400; color:var(--text3); margin-left:6px; }
 .topbar-right { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
 .sdot { width:7px; height:7px; border-radius:50%; background:var(--text3); display:inline-block; }
 .sdot.ok{background:var(--up)} .sdot.err{background:var(--dn)} .sdot.load{background:var(--amber)}
 #stxt { font-size:0.75em; color:var(--text3); white-space:nowrap; }
 .btn { background:none; border:1px solid var(--border2); color:var(--text2); padding:3px 9px; border-radius:3px; cursor:pointer; font-size:0.8em; font-family:inherit; white-space:nowrap; }
 .btn:hover { border-color:var(--text2); color:var(--text); }
-.btn-primary { background:var(--blue); color:#fff; border-color:var(--blue); font-weight:600; }
+.btn-primary { background:var(--blue-fg); color:#fff; border-color:var(--blue-fg); font-weight:600; }
 .btn-primary:hover { opacity:0.85; color:#fff; }
 
 /* theme + font controls */
 .ctrl-group { display:flex; align-items:center; gap:4px; }
 .ctrl-label { font-size:0.7em; color:var(--text3); }
 .seg { display:flex; border:1px solid var(--border2); border-radius:3px; overflow:hidden; }
-.seg button { background:none; border:none; border-right:1px solid var(--border2); color:var(--text2); padding:3px 8px; cursor:pointer; font-size:0.75em; font-family:inherit; }
+.seg button { background:none; border:none; border-right:1px solid var(--border2); color:var(--text2); padding:6px 8px; cursor:pointer; font-size:0.75em; font-family:inherit; }
 .seg button:last-child { border-right:none; }
 .seg button.on { background:var(--bg3); color:var(--text); }
 .seg button:hover { background:var(--bg3); }
@@ -197,7 +197,7 @@ input[type=range] { width:80px; accent-color:var(--blue); }
 .picker-option { width:100%; text-align:left; padding:14px 16px; margin-bottom:8px; border-radius:5px; cursor:pointer; font-family:inherit; }
 .picker-option b { display:block; font-size:0.92em; margin-bottom:3px; }
 .picker-option span { font-size:0.78em; color:var(--text3); }
-.picker-option.primary { background:var(--blue); border:1px solid var(--blue); color:#fff; }
+.picker-option.primary { background:var(--blue-fg); border:1px solid var(--blue-fg); color:#fff; }
 .picker-option.primary span { color:rgba(255,255,255,0.75); }
 .picker-option.secondary { background:none; border:1px solid var(--border2); color:var(--text); }
 .grp-country-row { display:flex; align-items:center; gap:7px; padding:5px 0; font-size:0.85em; }
@@ -207,7 +207,7 @@ input[type=range] { width:80px; accent-color:var(--blue); }
 .cat-col:last-child { border-right:none; }
 .cat-item { padding:8px 10px; font-size:0.82em; cursor:pointer; display:flex; justify-content:space-between; align-items:center; gap:6px; }
 .cat-item:hover { background:var(--bg3); }
-.cat-item.selected { background:var(--blue); color:#fff; }
+.cat-item.selected { background:var(--blue-fg); color:#fff; }
 .cat-item .arrow { opacity:0.5; flex-shrink:0; }
 .cat-item.leaf { cursor:pointer; }
 .cat-item.leaf input[type=checkbox] { margin:0; flex-shrink:0; }
@@ -232,7 +232,7 @@ input[type=range] { width:80px; accent-color:var(--blue); }
 .gl-box { display:flex; flex-direction:column; align-items:center; gap:12px; width:220px; }
 .gl-text { font-size:0.8em; color:var(--text2); letter-spacing:0.02em; }
 .gl-bar-track { width:100%; height:5px; border-radius:3px; background:var(--bg3); overflow:hidden; }
-.gl-bar-fill { height:100%; width:0%; background:var(--blue); border-radius:3px; transition:width 0.2s ease; }
+.gl-bar-fill { height:100%; width:100%; transform:scaleX(0); transform-origin:left; background:var(--blue); border-radius:3px; transition:transform 0.2s ease; }
 .gl-pct { font-variant-numeric:tabular-nums; color:var(--text3); }
 
 /* ── Modal ── */
@@ -247,14 +247,14 @@ input[type=range] { width:80px; accent-color:var(--blue); }
 
 /* series rows */
 .series-header { display:grid; grid-template-columns:1fr 100px 90px 90px 26px; gap:5px; margin-bottom:4px; }
-.series-header span { font-size:0.68em; color:var(--text3); text-transform:uppercase; letter-spacing:0.04em; }
+.series-header span { font-size:0.75em; color:var(--text3); text-transform:uppercase; letter-spacing:0.04em; }
 .series-row { display:grid; grid-template-columns:1fr 100px 90px 90px 26px; gap:5px; margin-bottom:5px; align-items:center; }
 .series-row select { background:var(--bg3); border:1px solid var(--border2); color:var(--text); padding:4px 6px; border-radius:3px; font-family:inherit; font-size:0.78em; width:100%; }
 .rm-btn { background:none; border:none; color:var(--text3); cursor:pointer; font-size:0.9em; padding:0 4px; }
 .rm-btn:hover{color:var(--dn)}
 .add-series-btn { font-size:0.78em; color:var(--blue); background:none; border:1px dashed var(--border2); border-radius:3px; padding:4px; width:100%; cursor:pointer; font-family:inherit; margin-top:3px; }
 .add-series-btn:hover{border-color:var(--blue)}
-.hint { font-size:0.68em; color:var(--text3); margin-top:3px; }
+.hint { font-size:0.75em; color:var(--text3); margin-top:3px; }
 .modal-actions { display:flex; gap:7px; justify-content:flex-end; margin-top:16px; }
 </style>
 </head>
@@ -290,7 +290,7 @@ input[type=range] { width:80px; accent-color:var(--blue); }
         <div class="field" style="margin-bottom:0">
           <label style="display:block;font-size:0.7em;color:var(--text3);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:4px">Reference Date</label>
           <div id="ref-date-status" style="font-size:0.78em"></div>
-          <div style="font-size:0.65em;color:var(--text3);margin-top:3px">จาก data/ref_dates.txt</div>
+          <div style="font-size:0.8em;color:var(--text3);margin-top:3px">จาก data/ref_dates.txt</div>
         </div>
         <div style="display:flex;gap:6px;padding-top:4px;border-top:1px solid var(--border)">
           <button class="btn" onclick="exportConfig()" style="flex:1">Export</button>
@@ -374,7 +374,7 @@ input[type=range] { width:80px; accent-color:var(--blue); }
 <!-- INFLATION PAGE -->
 <div id="page-inflation" class="page">
   <div class="page-head" style="margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
-    <span style="font-size:0.78em;color:var(--text2);text-transform:uppercase;letter-spacing:0.06em">GlobalCPI — Inflation by Country (IMF CPI, Monthly %YoY)</span>
+    <span style="font-size:0.78em;color:var(--text2);letter-spacing:0.02em">GlobalCPI — Inflation by Country (IMF CPI, Monthly %YoY)</span>
     <div class="page-actions" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
       <select id="infl-category" class="btn" style="cursor:pointer"></select>
       <div class="seg" id="infl-window-seg"></div>
@@ -395,7 +395,7 @@ input[type=range] { width:80px; accent-color:var(--blue); }
   <div style="background:var(--bg2);border:1px solid var(--border);border-radius:6px;max-width:400px;width:100%">
     <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:1px solid var(--border)">
       <span id="meta-title" style="font-size:0.85em;font-weight:600"></span>
-      <button class="icon-btn" onclick="closeMeta()">✕</button>
+      <button class="icon-btn" aria-label="Close" onclick="closeMeta()">✕</button>
     </div>
     <div id="meta-body" style="padding:14px 16px;font-size:0.82em;line-height:1.8"></div>
   </div>
@@ -404,7 +404,7 @@ input[type=range] { width:80px; accent-color:var(--blue); }
   <div style="background:var(--bg2);border:1px solid var(--border);border-radius:6px;max-width:720px;width:100%;max-height:85vh;display:flex;flex-direction:column">
     <div style="display:flex;justify-content:space-between;align-items:center;padding:14px 18px;border-bottom:1px solid var(--border)">
       <span style="font-size:0.85em;font-weight:600;text-transform:uppercase;letter-spacing:0.05em">โครงสร้างราคาน้ำมัน</span>
-      <button class="icon-btn" onclick="closeStructureModal()" style="font-size:1.1em">✕</button>
+      <button class="icon-btn" aria-label="Close" onclick="closeStructureModal()" style="font-size:1.1em">✕</button>
     </div>
     <div id="structure-content" style="padding:18px;overflow-y:auto;font-size:0.85em;line-height:1.7"></div>
   </div>
@@ -1869,14 +1869,14 @@ async function renderEnergyPage() {
         <div style="padding:8px 10px;border-right:1px solid var(--border);height:72px">
           <div style="font-size:0.68em;color:var(--text3);margin-bottom:2px;display:flex;align-items:center;gap:4px">
             <span>คาดสิ้นปี ${ofThisYear}</span>
-            <span onclick="openOilFundProjInfo()" title="วิธีคำนวณ projection" style="cursor:pointer;color:var(--text3);font-size:1.05em;line-height:1">ⓘ</span>
+            <span onclick="openOilFundProjInfo()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openOilFundProjInfo()}" role="button" tabindex="0" title="วิธีคำนวณ projection" aria-label="วิธีคำนวณ projection" style="cursor:pointer;color:var(--text3);font-size:1.05em;line-height:1">ⓘ</span>
           </div>
           <div style="font-size:1.05em;font-weight:600;color:${colorOf(projThisYearEnd)}">${fmtPlain(projThisYearEnd)}</div>
         </div>
         <div style="padding:8px 10px;height:72px">
           <div style="font-size:0.68em;color:var(--text3);margin-bottom:2px;display:flex;align-items:center;gap:4px">
             <span>คาดสิ้นปี ${ofNextYear}</span>
-            <span onclick="openOilFundProjInfo()" title="วิธีคำนวณ projection" style="cursor:pointer;color:var(--text3);font-size:1.05em;line-height:1">ⓘ</span>
+            <span onclick="openOilFundProjInfo()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openOilFundProjInfo()}" role="button" tabindex="0" title="วิธีคำนวณ projection" aria-label="วิธีคำนวณ projection" style="cursor:pointer;color:var(--text3);font-size:1.05em;line-height:1">ⓘ</span>
           </div>
           <div style="font-size:1.05em;font-weight:600;color:${colorOf(projNextYearEnd)}">${fmtPlain(projNextYearEnd)}</div>
         </div>
@@ -2139,7 +2139,7 @@ const _trickles = {};
 function setProgress(fillId, pctId, pct) {
   const fill = document.getElementById(fillId);
   const txt  = document.getElementById(pctId);
-  if (fill) fill.style.width = pct + '%';
+  if (fill) fill.style.transform = `scaleX(${pct / 100})`;
   if (txt)  txt.textContent  = Math.round(pct) + '%';
 }
 function startTrickle(key, fillId, pctId, from, to) {
@@ -2198,7 +2198,7 @@ window.loadData = async function() {
     if (activePageId === '__dashboard__') renderDashboard();
     else if (activePageId !== '__energy__' && activePageId !== '__news__' && activePageId !== '__inflation__') renderActivePage();
   } catch(e) {
-    setStatus('err','Firestore error'); console.error(e);
+    setStatus('err','โหลดข้อมูลล่าสุดไม่สำเร็จ'); console.error(e);
     hideGlobalLoading();  // อย่าค้าง overlay ทับหน้าไว้ตลอดไปถ้า error
   }
 };
@@ -2388,7 +2388,7 @@ function renderDashCard(docId, opts = {}) {
   }
 
   const removeBtn = opts.removable
-    ? `<button class="ekpi-remove" title="เอาออกจากการ์ด" onclick="removeDashboardIndicator('${opts.cardId}','${docId}')">✕</button>`
+    ? `<button class="ekpi-remove" title="เอาออกจากการ์ด" aria-label="เอาออกจากการ์ด" onclick="removeDashboardIndicator('${opts.cardId}','${docId}')">✕</button>`
     : '';
 
   // การ์ด Dashboard: 1 indicator = 1 row, ฝั่งซ้าย 2 บรรทัด (ชื่อ/หน่วย)
@@ -2460,6 +2460,7 @@ window.deleteDashboardCard = function(cardId) {
   renderDashboard();
 };
 window.removeDashboardIndicator = function(cardId, seriesId) {
+  if (!confirm('เอา indicator นี้ออกจากการ์ด?')) return;
   const card = config.dashboardCards.find(c => c.id === cardId);
   if (!card) return;
   card.seriesIds = card.seriesIds.filter(id => id !== seriesId);
@@ -2475,8 +2476,8 @@ function renderDashboardCardHtml(card) {
     <div class="ch">
       <div><div class="ct">${card.title}</div><div class="cs">${(card.seriesIds || []).length} indicator</div></div>
       <div class="ch-actions">
-        <button class="icon-btn" title="Rename card" onclick="renameDashboardCard('${card.id}')">✎</button>
-        <button class="icon-btn" title="Delete card" onclick="deleteDashboardCard('${card.id}')">✕</button>
+        <button class="icon-btn" title="Rename card" aria-label="Rename card" onclick="renameDashboardCard('${card.id}')">✎</button>
+        <button class="icon-btn" title="Delete card" aria-label="Delete card" onclick="deleteDashboardCard('${card.id}')">✕</button>
       </div>
     </div>
     <div class="cb">
@@ -2704,9 +2705,9 @@ function makeCard(page,chart) {
     <div class="ch">
       <div><div class="ct">${chart.title}</div><div class="cs">${seriesDesc}</div></div>
       <div class="ch-actions">
-        <button class="icon-btn" title="Info" onclick="openMetaChart('${chart.id}')">ℹ</button>
-        <button class="icon-btn" title="Edit" onclick="openChartModal('${page.id}','${chart.id}')">✎</button>
-        <button class="icon-btn" title="Delete" onclick="deleteChart('${page.id}','${chart.id}')">✕</button>
+        <button class="icon-btn" title="Info" aria-label="Chart info" onclick="openMetaChart('${chart.id}')">ℹ</button>
+        <button class="icon-btn" title="Edit" aria-label="Edit chart" onclick="openChartModal('${page.id}','${chart.id}')">✎</button>
+        <button class="icon-btn" title="Delete" aria-label="Delete chart" onclick="deleteChart('${page.id}','${chart.id}')">✕</button>
       </div>
     </div>
     <div class="tfs" id="tfs-${chart.id}"></div>
@@ -3328,7 +3329,7 @@ function buildInflationTable(key, tblEl, rawSeries) {
     const st = inflationRowStats(s.yoy);
     if (!st) return '';
     return `<tr style="border-bottom:1px solid var(--border)">
-      <td style="padding:4px 8px 4px 0;cursor:pointer;user-select:none;${s.isHl ? `color:${s.color};font-weight:600` : 'color:var(--text2)'}" onclick="toggleInflationCountry('${key}','${s.code}')" title="คลิกเพื่อ highlight/unhighlight">${s.name}</td>
+      <td style="padding:4px 8px 4px 0;cursor:pointer;user-select:none;${s.isHl ? `color:${s.color};font-weight:600` : 'color:var(--text2)'}" onclick="toggleInflationCountry('${key}','${s.code}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleInflationCountry('${key}','${s.code}')}" role="button" tabindex="0" title="คลิกเพื่อ highlight/unhighlight" aria-label="Toggle highlight for ${s.name}">${s.name}</td>
       <td style="padding:4px 8px;text-align:right;color:var(--text3);white-space:nowrap">${fmtDate(st.latestDate)}</td>
       <td style="padding:4px 8px;text-align:right;font-weight:600">${fmtPct(st.latestVal)}</td>
       <td style="padding:4px 8px;text-align:right;color:var(--text2)">${fmtPct(st.avg3y)}</td>
@@ -4335,7 +4336,7 @@ window.importConfig=function(){
         config=JSON.parse(reader.result);
         activePageId=config.pages[0]?.id||null;
         saveConfig(); render();
-      } catch(err){ alert('Import failed: '+err.message); }
+      } catch(err){ alert('นำเข้าไฟล์ไม่สำเร็จ — ตรวจสอบว่าเป็นไฟล์ config ที่ export จากแอปนี้'); console.error(err); }
     };
     reader.readAsText(e.target.files[0]);
   };
