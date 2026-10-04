@@ -1,4 +1,4 @@
-name: Fetch IMF (21 dataset, raw index/level, all countries)
+name: Fetch IMF (12 dataset, raw index/level, all countries)
 
 on:
   schedule:
@@ -8,7 +8,7 @@ on:
     # ส่วนใหญ่รายเดือน) รายสัปดาห์พอ ไม่ต้องถี่กว่านี้ — schedule trigger ไม่มี
     # ตัว "inputs" context เลย (มีแค่ workflow_dispatch/workflow_call) ทำให้
     # inputs.dry_run/inputs.datasets ด้านล่างเป็นค่าว่างเสมอตอน schedule รัน
-    # → รันจริง (ไม่ dry run) ครบทุก 21 dataset โดยอัตโนมัติ
+    # → รันจริง (ไม่ dry run) ครบทุก dataset ใน config โดยอัตโนมัติ
     - cron: '0 18 * * 2'
   workflow_dispatch:   # รันมือได้ตลอด (ทดสอบ/จำกัด dataset/dry run) นอกเหนือจาก schedule รายสัปดาห์
     inputs:

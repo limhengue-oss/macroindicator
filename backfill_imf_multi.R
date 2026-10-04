@@ -38,8 +38,7 @@ country_map <- read_csv("data/imf_country_codes.csv", show_col_types = FALSE)
 config <- read_csv("data/imf_dataset_config.csv", show_col_types = FALSE)
 
 DATASET_IDS <- c(
-  "CPI", "CPI_WCA", "CTOT", "EER", "ER", "IL", "ITG",
-  "MFS_CBS", "MFS_FC", "MFS_FMP", "MFS_IR", "MFS_MA", "MFS_ODC", "MFS_OFC",
+  "CPI", "CPI_WCA", "CTOT", "EER", "ER", "ITG",
   "PCPS", "PI", "PI_WCA", "PPI", "QGDP_WCA", "QNEA"
 )
 # หมายเหตุ 2026-08-16: ตัด FSIC ออกจาก scope แล้ว (user ตัดสินใจ) — ซับซ้อน
